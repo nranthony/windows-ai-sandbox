@@ -1,71 +1,62 @@
-# Secure Docker Setup in WSL2 Ubuntu 24
+#!/bin/bash
+set -euo pipefail
 
-## 1. Install Docker Engine (Not Docker Desktop)
-
-```bash
-# Update package index
+# 1. Install Docker Engine
 sudo apt update
-
-# Install prerequisites
-# ca-certificates package contains a set of common certificate authorities (CAs) used to verify the authenticity of SSL/TLS connections. These certificates are essential for securely accessing websites and other network services that use HTTPS.
-# gnupg package provides the GNU Privacy Guard (GnuPG), a free implementation of the OpenPGP standard. It is used for encryption, digital signatures, and key management. 
-# lsb-release package provides a utility to display information about the Linux Standard Base (LSB) and distribution-specific details. It's used to identify the Linux distribution and its version. 
 sudo apt install -y ca-certificates curl gnupg lsb-release
 
 # Add Docker's official GPG key
 sudo mkdir -p /etc/apt/keyrings
-curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg | \
+  sudo gpg --dearmor --yes -o /etc/apt/keyrings/docker.gpg
 
 # Add Docker repository
-echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+echo \
+  "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" \
+  | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
 
-# Install Docker Engine
 sudo apt update
 sudo apt install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
-```
 
-## 2. Configure Rootless Docker (Enhanced Security)
-
-```bash
-# Install rootless extras
+# 2. Configure Rootless Docker
 sudo apt install -y uidmap dbus-user-session
 
-# Disable system Docker daemon (we'll run rootless)
+# Ensure system Docker is stopped and disabled
 sudo systemctl disable --now docker.service docker.socket
 
 # Install rootless Docker for current user
 dockerd-rootless-setuptool.sh install
 
-# Add to shell profile for automatic startup
-echo 'export PATH=/usr/bin:$PATH' >> ~/.bashrc
-echo 'export DOCKER_HOST=unix:///run/user/1000/docker.sock' >> ~/.bashrc
-source ~/.bashrc
-```
+# Enable and start rootless Docker as a systemd user service
+systemctl --user enable docker
+systemctl --user start docker
 
-## 3. Configure User Namespace Remapping (Additional Security Layer)
+# Set DOCKER_HOST for current user (idempotent)
+grep -qxF 'export DOCKER_HOST=unix:///run/user/1000/docker.sock' ~/.bashrc || \
+  echo 'export DOCKER_HOST=unix:///run/user/1000/docker.sock' >> ~/.bashrc
 
-```bash
-# Create subuid and subgid mappings
-echo "$(whoami):100000:65536" | sudo tee -a /etc/subuid
-echo "$(whoami):100000:65536" | sudo tee -a /etc/subgid
+# Apply environment immediately for this session
+export DOCKER_HOST=unix:///run/user/1000/docker.sock
 
-# Restart rootless Docker to apply changes
+# 3. User Namespace Remapping
+# Idempotent setup for subuid/subgid
+if ! grep -q "^$(whoami):100000:65536" /etc/subuid; then
+  echo "$(whoami):100000:65536" | sudo tee -a /etc/subuid
+fi
+if ! grep -q "^$(whoami):100000:65536" /etc/subgid; then
+  echo "$(whoami):100000:65536" | sudo tee -a /etc/subgid
+fi
+
+# Restart rootless Docker to apply userns changes
 systemctl --user restart docker
-```
 
-## 4. Create Secure Docker Configuration
-
-```bash
-# Create Docker config directory
+# 4. Secure Docker Configuration
 mkdir -p ~/.docker
 
-# Create daemon configuration for rootless mode
 cat > ~/.docker/daemon.json << 'EOF'
 {
   "userns-remap": "default",
   "no-new-privileges": true,
-  "seccomp-profile": "/etc/docker/seccomp.json",
-  "apparmor-profile": "docker-default",
   "log-driver": "json-file",
   "log-opts": {
     "max-size": "10m",
@@ -84,184 +75,71 @@ cat > ~/.docker/daemon.json << 'EOF'
   "storage-driver": "overlay2"
 }
 EOF
-```
 
-## 5. Set Up Resource Limits and Security Policies
+# Note: AppArmor and seccomp custom profiles are not supported by default in WSL2.
 
-```bash
-# Create a dedicated user for running AI containers (optional but recommended)
-sudo useradd -m -s /bin/bash airunner
-sudo usermod -aG docker airunner
+# 5. Resource Limits (systemd user services are available with systemd enabled)
+# To set further resource controls, use systemctl --user edit docker and add [Service] limits.
 
-# Create resource limit configuration
-sudo mkdir -p /etc/systemd/system/user@.service.d/
-sudo tee /etc/systemd/system/user@.service.d/delegate.conf << 'EOF'
-[Service]
-Delegate=cpu cpuset io memory pids
-EOF
-
-# Reload systemd
-sudo systemctl daemon-reload
-```
-
-## 6. Configure Network Security
-
-```bash
-# Create custom Docker network with restricted access
+# 6. Docker Network Security
 docker network create \
   --driver bridge \
   --subnet=172.20.0.0/16 \
   --ip-range=172.20.240.0/20 \
   --gateway=172.20.0.1 \
   --opt com.docker.network.bridge.name=docker-secure \
-  ai-sandbox
+  ai-sandbox || true
 
-# Create network policies (requires iptables)
+# Install iptables-persistent (effectiveness limited in WSL2)
 sudo apt install -y iptables-persistent
 
-# Block container-to-host communication (except necessary ports)
+# Block container-to-host except port 22 (adjust as needed)
+sudo iptables -C DOCKER-USER -i docker-secure -j DROP 2>/dev/null || \
 sudo iptables -I DOCKER-USER -i docker-secure -j DROP
-sudo iptables -I DOCKER-USER -i docker-secure -p tcp --dport 22 -j ACCEPT  # SSH if needed
-```
+sudo iptables -C DOCKER-USER -i docker-secure -p tcp --dport 22 -j ACCEPT 2>/dev/null || \
+sudo iptables -I DOCKER-USER -i docker-secure -p tcp --dport 22 -j ACCEPT
 
-## 7. Create Secure Container Templates
-
-### Basic Secure Container Script
-```bash
+# 7. Secure Container Template
 cat > ~/run-ai-container.sh << 'EOF'
 #!/bin/bash
-
-# Default security options
 SECURITY_OPTS="--security-opt=no-new-privileges:true"
-SECURITY_OPTS="$SECURITY_OPTS --security-opt=apparmor:docker-default"
-SECURITY_OPTS="$SECURITY_OPTS --cap-drop=ALL"
-SECURITY_OPTS="$SECURITY_OPTS --cap-add=CHOWN --cap-add=SETUID --cap-add=SETGID"
-
-# Resource limits
+SECURITY_OPTS="$SECURITY_OPTS --cap-drop=ALL --cap-add=CHOWN --cap-add=SETUID --cap-add=SETGID"
 RESOURCE_LIMITS="--memory=4g --cpus=2.0 --pids-limit=512"
-
-# Network and filesystem restrictions
 RESTRICTIONS="--network=ai-sandbox --read-only --tmpfs=/tmp:rw,noexec,nosuid,size=1g"
-
-# User remapping
 USER_MAP="--user=1000:1000"
-
-# Run container with all security measures
-docker run -it --rm \
-  $SECURITY_OPTS \
-  $RESOURCE_LIMITS \
-  $RESTRICTIONS \
-  $USER_MAP \
-  --name ai-sandbox-$(date +%s) \
-  "$@"
+docker run -it --rm $SECURITY_OPTS $RESOURCE_LIMITS $RESTRICTIONS $USER_MAP --name ai-sandbox-$(date +%s) "$@"
 EOF
-
 chmod +x ~/run-ai-container.sh
-```
 
-### Example Usage
-```bash
-# Run a secure AI container
-./run-ai-container.sh -v /path/to/models:/models:ro ubuntu:24.04 bash
-
-# Run with specific AI framework
-./run-ai-container.sh -v /path/to/models:/models:ro pytorch/pytorch:latest python
-```
-
-## 8. Additional Security Hardening
-
-### Install and Configure AppArmor Profile
-```bash
-# Install AppArmor utilities
-sudo apt install -y apparmor-utils
-
-# Create custom Docker profile (optional - for advanced users)
-sudo aa-genprof docker
-```
-
-### Set Up Logging and Monitoring
-```bash
-# Install audit daemon for container monitoring
-sudo apt install -y auditd
-
-# Add audit rules for Docker
-echo "-w /usr/bin/docker -p x -k docker" | sudo tee -a /etc/audit/rules.d/docker.rules
-sudo systemctl restart auditd
-```
-
-### Create Container Health Checks
-```bash
+# 8. Container Health Check Script
 cat > ~/check-container-security.sh << 'EOF'
 #!/bin/bash
 echo "=== Container Security Status ==="
-echo "Active containers:"
 docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
-
 echo -e "\n=== Resource Usage ==="
 docker stats --no-stream --format "table {{.Container}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.PIDs}}"
-
 echo -e "\n=== Network Connections ==="
 sudo netstat -tulpn | grep docker
 EOF
-
 chmod +x ~/check-container-security.sh
-```
 
-## 9. Startup Configuration
+# 9. Bash Aliases (idempotent)
+grep -qxF 'alias docker-secure="~/run-ai-container.sh"' ~/.bashrc || \
+  echo 'alias docker-secure="~/run-ai-container.sh"' >> ~/.bashrc
+grep -qxF 'alias docker-check="~/check-container-security.sh"' ~/.bashrc || \
+  echo 'alias docker-check="~/check-container-security.sh"' >> ~/.bashrc
 
-```bash
-# Enable rootless Docker to start on boot
-systemctl --user enable docker
-
-# Add to .bashrc for convenience
-echo 'alias docker-secure="~/run-ai-container.sh"' >> ~/.bashrc
-echo 'alias docker-check="~/check-container-security.sh"' >> ~/.bashrc
-source ~/.bashrc
-```
-
-## 10. Testing Your Setup
-
-```bash
-# Test rootless Docker
+# 10. Testing (manual; you can comment/uncomment as needed)
 docker run --rm hello-world
+~/run-ai-container.sh ubuntu:24.04 whoami
+~/run-ai-container.sh ubuntu:24.04 bash -c "cat /proc/meminfo | grep MemTotal"
+~/check-container-security.sh
 
-# Test security restrictions
-./run-ai-container.sh ubuntu:24.04 whoami  # Should show mapped user
+# 11. Security Maintenance
+# Regularly run: sudo apt update && sudo apt upgrade -y
+# Only use trusted images.
+# Always use read-only volume mounts when possible.
+# Never store secrets in images or containers; use --env-file or Docker secrets.
+# Monitor with sudo ausearch -k docker | tail -20
 
-# Test resource limits
-./run-ai-container.sh ubuntu:24.04 bash -c "cat /proc/meminfo | grep MemTotal"
-
-# Verify network isolation
-docker-check
-```
-
-## Important Security Notes
-
-1. **Regular Updates**: Keep Docker and Ubuntu updated
-   ```bash
-   sudo apt update && sudo apt upgrade -y
-   ```
-
-2. **Image Security**: Only use trusted base images
-   ```bash
-   docker pull --platform linux/amd64 ubuntu:24.04
-   ```
-
-3. **Volume Mounts**: Always use read-only mounts when possible
-   ```bash
-   -v /host/path:/container/path:ro
-   ```
-
-4. **Secrets Management**: Never put secrets in images or containers
-   ```bash
-   # Use Docker secrets or environment files
-   docker run --env-file .env.secure your-image
-   ```
-
-5. **Regular Auditing**: Monitor container activity
-   ```bash
-   # Check for suspicious activity
-   sudo ausearch -k docker | tail -20
-   ```
-
-This setup provides multiple layers of security isolation while maintaining usability for AI model experimentation.
+# END OF SCRIPT
