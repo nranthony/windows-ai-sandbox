@@ -1,6 +1,27 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# -----------------------------------------------------------------------------
+# 1. Install Docker Engine
+# -----------------------------------------------------------------------------
+echo "# ----- Installing Docker Engine -----"
+sudo apt update
+sudo apt install -y ca-certificates curl gnupg lsb-release
+
+sudo mkdir -p /etc/apt/keyrings
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
+  | sudo gpg --dearmor --yes -o /etc/apt/keyrings/docker.gpg
+
+echo \
+  "deb [arch=$(dpkg --print-architecture) \
+  signed-by=/etc/apt/keyrings/docker.gpg] \
+  https://download.docker.com/linux/ubuntu \
+  $(lsb_release -cs) stable" \
+  | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+sudo apt update
+sudo apt install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
+
 # -----------------------------------------------------------------------------  
 # 2. Configure Rootless Docker prerequisites  
 # -----------------------------------------------------------------------------
@@ -137,149 +158,25 @@ else
 fi
 
 echo "# ----- Applying DOCKER-USER iptables rules -----"
-# Drop all ingress on docker-secure
-sudo iptables -C DOCKER-USER -i docker-secure -j DROP 2>/dev/null \
-  || sudo iptables -I DOCKER-USER -i docker-secure -j DROP
-# Allow SSH into containers if needed
-sudo iptables -C DOCKER-USER -i docker-secure -p tcp --dport 22 -j ACCEPT 2>/dev/null \
-  || sudo iptables -I DOCKER-USER -i docker-secure -p tcp --dport 22 -j ACCEPT
+# 1) Ensure DOCKER-USER exists in filter table
+if ! sudo iptables -w -t filter -L DOCKER-USER >/dev/null 2>&1; then
+  echo "→ Creating DOCKER-USER chain"
+  sudo iptables -w -t filter -N DOCKER-USER
+  # Hook it so all forwarded packets hit DOCKER-USER first
+  sudo iptables -w -t filter -I FORWARD 1 -j DOCKER-USER
+fi
 
+# 2) Drop all ingress on docker-secure bridge
+sudo iptables -w -t filter -C DOCKER-USER -i docker-secure -j DROP 2>/dev/null \
+  || sudo iptables -w -t filter -I DOCKER-USER -i docker-secure -j DROP
+
+# 3) Allow SSH (tcp/22) on that bridge
+sudo iptables -w -t filter -C DOCKER-USER -i docker-secure -p tcp --dport 22 -j ACCEPT 2>/dev/null \
+  || sudo iptables -w -t filter -I DOCKER-USER -i docker-secure -p tcp --dport 22 -j ACCEPT
+
+# 4) Persist rules
 echo "# ----- Saving firewall rules -----"
 sudo netfilter-persistent save
 
+
 echo "# ----- Setup complete! -----"
-
-
-
-
-# #!/usr/bin/env bash
-# set -euo pipefail
-
-# # -----------------------------------------------------------------------------  
-# # 2. Configure Rootless Docker  
-# # -----------------------------------------------------------------------------
-# echo "# ----- Configuring Rootless Docker -----"
-# sudo apt install -y uidmap dbus-user-session dbus-broker
-
-# # Pre-seed answers so iptables-persistent install is non-interactive
-# echo 'iptables-persistent iptables-persistent/autosave_v4 boolean false' \
-#   | sudo debconf-set-selections
-# echo 'iptables-persistent iptables-persistent/autosave_v6 boolean false' \
-#   | sudo debconf-set-selections
-
-# # Install without prompts
-# DEBIAN_FRONTEND=noninteractive sudo apt install -y iptables-persistent
-
-# # ...then add your DOCKER-USER rules...
-
-
-
-
-# # Pre-configure to answer "No" to saving current rules
-# echo 'iptables-persistent iptables-persistent/autosave_v4 boolean false' | sudo debconf-set-selections
-# echo 'iptables-persistent iptables-persistent/autosave_v6 boolean false' | sudo debconf-set-selections
-
-# # Then install without prompts
-# sudo apt install -y iptables iptables-persistent
-# sudo netfilter-persistent save
-
-
-# # Disable any rootful Docker services
-# sudo systemctl disable --now docker.service docker.socket
-
-# # Remove the rootful Docker socket if it exists
-# if [ -e "/var/run/docker.sock" ]; then
-#     echo "removing docker.sock file"
-#     sudo rm "/var/run/docker.sock"
-# fi
-
-# # Install the rootless toolchain
-# dockerd-rootless-setuptool.sh install
-
-# # Allow lingering for the docker user service
-# sudo loginctl enable-linger "$(id -u)"
-
-# # Write recommended DOCKER_HOST to .bashrc (idempotent)
-# RCFILE="${HOME}/.bashrc"
-# SOCK="/run/user/$(id -u)/docker.sock"
-# grep -qxF "export DOCKER_HOST=unix://${SOCK}" "$RCFILE" \
-#   || echo "export DOCKER_HOST=unix://${SOCK}" >> "$RCFILE"
-
-# export DOCKER_HOST="unix://${SOCK}"
-
-# # -----------------------------------------------------------------------------  
-# # 3. Secure Docker Daemon Configuration  
-# # -----------------------------------------------------------------------------
-# echo "# ----- Securing Docker Daemon -----"
-# # Put your user‐level daemon.json under ~/.config/docker/
-# DOCKER_DAEMON_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/docker"
-# mkdir -p "$DOCKER_DAEMON_DIR"
-
-# cat > "$DOCKER_DAEMON_DIR/daemon.json" << 'EOF'
-# {
-#   "exec-opts": ["native.cgroupdriver=cgroupfs"],
-#   "no-new-privileges": true,
-#   "log-driver": "json-file",
-#   "log-opts": { "max-size":"10m", "max-file":"3" },
-#   "default-ulimits": {
-#     "nofile": {
-#       "Name": "nofile",
-#       "Hard": 1024,
-#       "Soft": 1024
-#     },
-#     "nproc": {
-#       "Name": "nproc",
-#       "Hard": 512,
-#       "Soft": 512
-#     }
-#   },
-#   "storage-driver": "overlay2"
-# }
-# EOF
-
-# # -----------------------------------------------------------------------------  
-# # 4. Modify and Start Rootless Docker Service  
-# # -----------------------------------------------------------------------------
-# SERVICE_UNIT="$HOME/.config/systemd/user/docker.service"
-
-# if [ ! -f "$SERVICE_UNIT" ]; then
-#     echo "Error: Docker service file not found at $SERVICE_UNIT"
-#     exit 1
-# fi
-
-# # Fix any stray Windows paths in the unit
-# if grep -q "/mnt/c/" "$SERVICE_UNIT"; then
-#     echo "Found Windows paths in service file - fixing..."
-#     sed -i -E \
-#       's#^Environment=PATH=.*#Environment=PATH='"$HOME"'/.local/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin#' \
-#       "$SERVICE_UNIT"
-#     systemctl --user daemon-reload
-# fi
-
-# restart_docker_and_wait() {
-#     echo "Restarting rootless Docker …"
-#     timeout 10 systemctl --user restart docker.service || {
-#         echo "systemctl restart failed"; return 1; }
-
-#     # Probe readiness (max 30 s)
-#     for i in $(seq 1 30); do
-#         [[ -S "$XDG_RUNTIME_DIR/docker.sock" ]] && docker info &>/dev/null && {
-#             echo "→ Rootless Docker is ready."; return 0; }
-#         echo "  (Attempt $i/30) Waiting …"
-#         sleep 1
-#     done
-
-#     echo "Error: Docker daemon not ready after 30 s."
-#     journalctl --user -u docker.service -n 50 --no-pager
-#     return 1
-# }
-
-# if restart_docker_and_wait; then
-#     echo "Docker is up."
-# else
-#     echo "Docker failed to start."
-#     exit 1
-# fi
-
-# # echo "# ----- Docker Version -----"
-# # docker version
