@@ -28,30 +28,16 @@ To reset your environment, execute:
 /usr/bin/rootlesskit rm -rf /home/"$(id -un)"/.local/share/docker
 ```
 
-## Launch and Check Docker with Tivvy
+## Docker security and testing
 
-*(Placeholder: Detailed instructions coming soon.)*
-
-
-
-<!-- # windows-ai-sandbox
-Setup notes and scripts for my WSL2 Ubuntu 'sandbox'.  Work in progress.
-
-
-# misc items
-Modified /home/[username]/.config/systemd/user/docker.service
-
-Ensure environment paths are wrapped in quotes:
-
-[Service]
-Environment=PATH=<span style="color:red">"</span>/usr ... <span style="color:red">"</span>
-
-*NOTE* - now modified in script; if issue come up, refer to uninstall lines below
-
-### uninstall - dockerd-rootless-setuptool.sh
+### Docker Bench
 ```bash
-/usr/bin/dockerd-rootless-setuptool.sh uninstall -f ; /usr/bin/rootlesskit rm -rf /home/"$(id -un)"/.local/share/docker
-/usr/bin/rootlesskit rm -rf /home/"$(id -un)"/.local/share/docker
+git clone https://github.com/docker/docker-bench-security.git
+cd docker-bench-security
+# run docker bench in user to access user specific docker socket - sudo testing is not the idea here
+docker-bench-security.sh
 ```
- -->
+see `docker-bench-security-report.md`
+
+
 
