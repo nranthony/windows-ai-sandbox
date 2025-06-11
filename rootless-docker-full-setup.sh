@@ -27,7 +27,7 @@ sudo apt install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
 # -----------------------------------------------------------------------------
 echo "# ----- Installing prerequisites for Rootless Docker -----"
 sudo apt update
-sudo apt install -y uidmap dbus-user-session dbus-broker iptables
+sudo apt install -y uidmap dbus-user-session iptables
 
 # Pre-seed answers so iptables-persistent install is non-interactive
 echo 'iptables-persistent iptables-persistent/autosave_v4 boolean false' \
