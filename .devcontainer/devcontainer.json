@@ -1,0 +1,31 @@
+{
+    "name": "Ubuntu + Miniforge Dev Container",
+    "build": {
+        "dockerfile": "Dockerfile",
+        "context": "."
+    },
+    "workspaceFolder": "/workspace",
+    "containerEnv": {
+        "DOCKER_HOST": "unix:///run/user/1000/docker.sock"
+    },
+    "mounts": [
+        "source=${localWorkspaceFolder},target=/workspace,type=bind",
+        "source=/home/nelly/data,target=/data,type=bind"
+    ],
+    "runArgs": [
+        "--network=ai-sandbox",
+        "--cap-drop=ALL",
+        "--security-opt=no-new-privileges"
+    ],
+    "settings": {
+        "terminal.integrated.shell.linux": "/usr/bin/zsh"
+    },
+    "extensions": [
+        "ms-python.python",
+        "ms-vscode.cpptools"
+    ],
+    "forwardPorts": [
+        8080
+    ],
+    "remoteUser": "vscode"
+}
