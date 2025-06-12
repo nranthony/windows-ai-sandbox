@@ -8,6 +8,10 @@ This repository contains scripts and notes for configuring a secure, rootless Do
 
 ## Miscellaneous Notes
 
+### Issue - dbus persistence
+* currently debugging why bus is not available after restarts...
+`systemctl restart usr@1000.service` resolves the issue - not sure if .bashrc should have this call or not
+
 ### Modified Service File
 
 Ensure the Docker service environment paths in `/home/[username]/.config/systemd/user/docker.service` are wrapped in quotes:
@@ -38,6 +42,3 @@ cd docker-bench-security
 docker-bench-security.sh
 ```
 see `docker-bench-security-report.md`
-
-
-

@@ -1,31 +1,44 @@
 {
-    "name": "Ubuntu + Miniforge Dev Container",
-    "build": {
-        "dockerfile": "Dockerfile",
-        "context": "."
-    },
-    "workspaceFolder": "/workspace",
-    "containerEnv": {
-        "DOCKER_HOST": "unix:///run/user/1000/docker.sock"
-    },
-    "mounts": [
-        "source=${localWorkspaceFolder},target=/workspace,type=bind",
-        "source=/home/nelly/data,target=/data,type=bind"
-    ],
-    "runArgs": [
-        "--network=ai-sandbox",
-        "--cap-drop=ALL",
-        "--security-opt=no-new-privileges"
-    ],
-    "settings": {
-        "terminal.integrated.shell.linux": "/usr/bin/zsh"
-    },
-    "extensions": [
-        "ms-python.python",
-        "ms-vscode.cpptools"
-    ],
-    "forwardPorts": [
-        8080
-    ],
-    "remoteUser": "vscode"
+  "name": "UbuntuDev",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "context": "."
+  },
+  "workspaceFolder": "/workspace",
+  "containerEnv": {
+    "DOCKER_HOST": "unix:///run/user/1000/docker.sock"
+  },
+  "mounts": [
+    "source=${localWorkspaceFolder},target=/workspace,type=bind"
+    // Uncomment to mount a data folder:
+    // ,"source=${localWorkspaceFolder}/data,target=/data,type=bind,readonly"
+  ],
+  "runArgs": [
+    //  "--userns=host",
+    "--network=ai-sandbox",
+    // "--cap-drop=ALL",
+    "--security-opt=no-new-privileges"
+  ],
+  "customizations": {
+    "vscode": {
+      // "settings": {
+      //   "terminal.integrated.defaultProfile.linux": "zsh"
+      // },
+      "extensions": [
+        // --- Python essentials ---
+        "ms-python.python", // Python language support
+        "ms-python.vscode-pylance", // fast IntelliSense engine
+        "ms-toolsai.jupyter", // notebooks
+        // --- Extras you requested ---
+        "ms-python.autopep8", // PEP 8 formatter :contentReference[oaicite:0]{index=0}
+        "mhutchie.git-graph" // visual Git history viewer :contentReference[oaicite:1]{index=1}
+      ]
+    }
+  },
+  // "remoteUser": "ubuntu"
+  "forwardPorts": [
+    8080,
+    8501
+  ],
+  "postCreateCommand": "/root/ohmyzsh-setup.sh"
 }
