@@ -6,17 +6,21 @@ RUN apt-get update && \
         git zsh vim curl ca-certificates && \
     rm -rf /var/lib/apt/lists/*
 
-
-
 RUN mkdir "/data"
+
 COPY .p10k.zsh /root/.p10k.zsh
 COPY .zshrc /root/.zshrc
-COPY entrypoint.sh /root/entrypoint.sh
-RUN chmod +x /root/entrypoint.sh
+
+# COPY entrypoint.sh /root/entrypoint.sh
+# RUN chmod +x /root/entrypoint.sh
+
 COPY ohmyzsh-setup.sh /root/ohmyzsh-setup.sh
 RUN chmod +x /root/ohmyzsh-setup.sh
 
-CMD ["/bin/bash", "-c", "/root/entrypoint.sh && exec /bin/zsh"]
+COPY set-git-global.sh /root/set-git-global.sh
+RUN chmod +x /root/set-git-global.sh
+
+# CMD ["/bin/bash", "-c", "/root/entrypoint.sh && exec /bin/zsh"]
 
 
 # # Make zsh the default shell for the existing ubuntu user

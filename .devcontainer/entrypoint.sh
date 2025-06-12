@@ -1,9 +1,14 @@
 #!/bin/bash
 
+# Change to the script's directory first
+SCRIPT_DIR=$(dirname "$0")
+cd "$SCRIPT_DIR"
+
 # Run setup only if not already done
 if [[ ! -f /.setup-complete ]]; then
-    /ohmyzsh-setup.sh
-    touch /.setup-complete
+    ./ohmyzsh-setup.sh
+    ./set-git-global.sh
+    touch /root/.setup-complete
 fi
 
 exec "$@"

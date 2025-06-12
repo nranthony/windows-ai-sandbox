@@ -18,38 +18,27 @@
     // "--cap-drop=ALL",
     "--security-opt=no-new-privileges",
     "--env-file",
-    ".env"
+    "${localWorkspaceFolder}/.env"
   ],
   "customizations": {
     "vscode": {
-      // "settings": {
-      //   "terminal.integrated.defaultProfile.linux": "zsh"
-      // },
       "extensions": [
-        // --- Python essentials ---
         "ms-python.python", // Python language support
         "ms-python.vscode-pylance", // fast IntelliSense engine
         "ms-toolsai.jupyter", // notebooks
-        // --- Extras you requested ---
-        "ms-python.autopep8", // PEP 8 formatter :contentReference[oaicite:0]{index=0}
-        "mhutchie.git-graph" // visual Git history viewer :contentReference[oaicite:1]{index=1}
+        "ms-python.autopep8", // PEP 8 formatter
+        "mhutchie.git-graph" // visual Git history viewer
       ]
     }
   },
-  // "remoteUser": "ubuntu"
   "forwardPorts": [
     8080,
     8501
   ],
-  // Post-create hook: 1) export all .env vars, 2) run git config
   "postCreateCommand": [
-    // load .env into the shell’s environment
-    // "bash -lc \"set -a && [ -f .env ] && . .env && set +a\"",
-    // pick up those vars and configure Git
-    "bash -lc \"if [ -n \\\"$GIT_NAME\\\" ]; then git config --global user.name '$GIT_NAME'; fi\"",
-    "bash -lc \"if [ -n \\\"$GIT_EMAIL\\\" ]; then git config --global user.email '$GIT_EMAIL'; fi\"",
-    // install all ohmyzsh goodies and start
-    "/root/ohmyzsh-setup.sh",
-    "zsh"
+    "/workspace/.devcontainer/entrypoint.sh"
+    // "/root/set-git-global.sh",
+    // "/root/ohmyzsh-setup.sh",
+    // "zsh"
   ]
 }
