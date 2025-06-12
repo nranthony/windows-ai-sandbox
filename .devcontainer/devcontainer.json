@@ -14,10 +14,11 @@
     // ,"source=${localWorkspaceFolder}/data,target=/data,type=bind,readonly"
   ],
   "runArgs": [
-    //  "--userns=host",
     "--network=ai-sandbox",
     // "--cap-drop=ALL",
-    "--security-opt=no-new-privileges"
+    "--security-opt=no-new-privileges",
+    "--env-file",
+    ".env"
   ],
   "customizations": {
     "vscode": {
@@ -40,5 +41,15 @@
     8080,
     8501
   ],
-  "postCreateCommand": "/root/ohmyzsh-setup.sh"
+  // Post-create hook: 1) export all .env vars, 2) run git config
+  "postCreateCommand": [
+    // load .env into the shell’s environment
+    // "bash -lc \"set -a && [ -f .env ] && . .env && set +a\"",
+    // pick up those vars and configure Git
+    "bash -lc \"if [ -n \\\"$GIT_NAME\\\" ]; then git config --global user.name '$GIT_NAME'; fi\"",
+    "bash -lc \"if [ -n \\\"$GIT_EMAIL\\\" ]; then git config --global user.email '$GIT_EMAIL'; fi\"",
+    // install all ohmyzsh goodies and start
+    "/root/ohmyzsh-setup.sh",
+    "zsh"
+  ]
 }
