@@ -12,8 +12,19 @@ This repository contains scripts and notes for configuring a secure, rootless Do
 * Clone this repo and `cd` into it
 * Run `./rootless-docker-full-setup.sh`
 * Run `code .` and ensure Remote Development extension pack is installed
-* Ctrl/CMD + Shift + P and 
-## Miscellaneous Notes
+* Add a .env file in repo workspace root and add git name and email.
+``` bash
+GIT_NAME="dave"
+GIT_EMAIL="1234567+dave@users.noreply.github.com"
+```
+* Ctrl/CMD + Shift + P and select: `Dev Containers: Rebuild and Reopen in Container`
+* Rootless docker should start as a dev container; see `devcontainer.json` for parameters.
+    * `entrypoint.sh` will setup git global variables, and run a full ohmyzsh setup script.
+
+
+
+
+# Miscellaneous Notes
 
 ### Issue - dbus persistence
 * currently debugging why bus is not available after restarts...
