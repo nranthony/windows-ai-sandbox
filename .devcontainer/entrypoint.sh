@@ -6,7 +6,7 @@ cd "$SCRIPT_DIR"
 
 # Run setup only if not already done
 if [[ ! -f /.setup-complete ]]; then
-    ./ohmyzsh-setup.sh
+    ./ohmyzsh-container-setup.sh
     ./set-git-global.sh
     touch /root/.setup-complete
 fi
