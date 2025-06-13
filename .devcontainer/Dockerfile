@@ -14,11 +14,11 @@ COPY .zshrc /root/.zshrc
 # COPY entrypoint.sh /root/entrypoint.sh
 # RUN chmod +x /root/entrypoint.sh
 
-COPY ohmyzsh-setup.sh /root/ohmyzsh-setup.sh
-RUN chmod +x /root/ohmyzsh-setup.sh
+# COPY ohmyzsh-setup.sh /root/ohmyzsh-setup.sh
+# RUN chmod +x /root/ohmyzsh-setup.sh
 
-COPY set-git-global.sh /root/set-git-global.sh
-RUN chmod +x /root/set-git-global.sh
+# COPY set-git-global.sh /root/set-git-global.sh
+# RUN chmod +x /root/set-git-global.sh
 
 # CMD ["/bin/bash", "-c", "/root/entrypoint.sh && exec /bin/zsh"]
 

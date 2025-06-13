@@ -37,8 +37,5 @@
   ],
   "postCreateCommand": [
     "/workspace/.devcontainer/entrypoint.sh"
-    // "/root/set-git-global.sh",
-    // "/root/ohmyzsh-setup.sh",
-    // "zsh"
   ]
 }
