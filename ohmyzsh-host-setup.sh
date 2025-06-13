@@ -5,15 +5,15 @@ set -euo pipefail
 # 0. Basic packages
 # -----------------------------------------------------------------------------
 echo "# ----- Installing base packages -----"
-apt update
-apt install -y \
-     git curl wget fontconfig locales lsd # lsd = pretty ls with icons
+sudo apt update
+sudo apt install -y \
+     git curl wget fontconfig locales lsd   # lsd = pretty ls with icons
 
 # -----------------------------------------------------------------------------
 # 1. Zsh & Oh-My-Zsh
 # -----------------------------------------------------------------------------
 echo "# ----- Installing Zsh and Oh-My-Zsh -----"
-apt install -y zsh
+sudo apt install -y zsh
 export RUNZSH=no   # don't launch Zsh during unattended install
 if [[ ! -d "$HOME/.oh-my-zsh" ]]; then
   sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --unattended
@@ -29,7 +29,9 @@ if [[ ! -d "$ZSH_CUSTOM/themes/powerlevel10k" ]]; then
   git clone --depth=1 https://github.com/romkatv/powerlevel10k.git \
         "$ZSH_CUSTOM/themes/powerlevel10k"
 fi
-grep -qxF '[[ ! -f ~/.p10k.zsh ]] || source ~/.p10k.zsh' ~/.zshrc || echo '[[ ! -f ~/.p10k.zsh ]] || source ~/.p10k.zsh' >> ~/.zshrc
+grep -qxF '[[ ! -f ~/.p10k.zsh ]] || source ~/.p10k.zsh' ~/.zshrc \
+  || echo '[[ ! -f ~/.p10k.zsh ]] || source ~/.p10k.zsh' >> ~/.zshrc
+
 # -----------------------------------------------------------------------------
 # 3. Nerd Fonts (MesloLGS) for icons in prompt & lsd
 # -----------------------------------------------------------------------------
@@ -41,7 +43,7 @@ for ttf in "Regular" "Bold" "Italic" "Bold%20Italic"; do
   curl -fsSL "${MESLO_URL}/MesloLGS%20NF%20${ttf}.ttf" \
       -o "${FONT_DIR}/MesloLGS NF ${ttf//%20/ }.ttf"
 done
-fc-cache -fv  # refresh font cache :contentReference[oaicite:0]{index=0}
+sudo fc-cache -fv                 # refresh global font cache
 
 # -----------------------------------------------------------------------------
 # 4. Oh-My-Zsh plugins (autosuggest, autocomplete, history-substring-search)
@@ -76,8 +78,8 @@ else
 fi
 
 # Pretty, icon-rich directory listings via lsd
-grep -qxF 'alias ls="lsd -lah --group-dirs first"' "$HOME/.zshrc" \
-  || echo 'alias ls="lsd -lah --group-dirs first"' >> "$HOME/.zshrc"
+grep -qxF 'alias ls="lsd -lah --group-dirs-first"' "$HOME/.zshrc" \
+  || echo 'alias ls="lsd -lah --group-dirs-first"' >> "$HOME/.zshrc"
 
 # -----------------------------------------------------------------------------
 # 6. Miniforge (conda / mamba, Python 3.12)
@@ -99,4 +101,3 @@ rm "/tmp/${MINIFORGE_INSTALLER}"
 echo ""
 echo "✅  All finished!  Restart your terminal and let Powerlevel10k guide you"
 echo "   through its one-time configuration wizard."
-

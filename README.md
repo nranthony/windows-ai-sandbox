@@ -2,10 +2,17 @@
 
 Setup notes and scripts for my WSL2 Ubuntu 'sandbox'. Work in progress. See [Rootless Docker Guide](./rootless_docker_guide.md) for a comprehensive setup.
 
-## General Information
+# General Information
 
 This repository contains scripts and notes for configuring a secure, rootless Docker environment specifically on WSL2 running Ubuntu on Windows.
 
+# Usage
+
+* Inside WSL Ubuntu
+* Clone this repo and `cd` into it
+* Run `./rootless-docker-full-setup.sh`
+* Run `code .` and ensure Remote Development extension pack is installed
+* Ctrl/CMD + Shift + P and 
 ## Miscellaneous Notes
 
 ### Issue - dbus persistence
@@ -14,14 +21,14 @@ This repository contains scripts and notes for configuring a secure, rootless Do
 
 ### Modified Service File
 
-Ensure the Docker service environment paths in `/home/[username]/.config/systemd/user/docker.service` are wrapped in quotes:
+~~Ensure the Docker service environment paths in `/home/[username]/.config/systemd/user/docker.service` are wrapped in quotes:~~
 
 ```ini
 [Service]
 Environment=PATH="/usr ... "
 ```
 
-**Note:** The path issue is now handled by the setup script. If any problems persist, refer to the uninstall section below.
+**UPDATED** The path issue is now handled by the setup script. If any problems persist, refer to the uninstall section below.
 
 ## Uninstalling Rootless Docker
 
@@ -35,6 +42,8 @@ To reset your environment, execute:
 ## Docker security and testing
 
 ### Docker Bench
+
+Given that the docker bench is run rootless, there are a number of moot points - anybody feedback from those with time/interest in finding ways to harden this is truly appreciated.
 ```bash
 git clone https://github.com/docker/docker-bench-security.git
 cd docker-bench-security
