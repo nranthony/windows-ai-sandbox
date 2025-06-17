@@ -7,8 +7,13 @@ set -euo pipefail
 
 # CUDA_VER="12.9"
 # CUDA_HOME="/usr/local/cuda-${CUDA_VER}"
-BASHRC="${HOME}/.bashrc"
-ZSHRC="${HOME}/.zshrc"
+# BASHRC="${HOME}/.bashrc"
+# ZSHRC="${HOME}/.zshrc"
+
+# TODO
+# - check if zsh in place and ask if they'd like to run ohmyzsh-host-setup.sh
+# Warn that script should be run again if zsh setup later
+# See wsl-dbus-hack.sh -- insert into start of zshrc
 
 # #  Ensure PATH line is present in .bashrc
 # if ! grep -Fxq "export PATH=\${PATH}:${CUDA_HOME}/bin" "${BASHRC}"; then
@@ -20,12 +25,12 @@ ZSHRC="${HOME}/.zshrc"
 #   echo "export LD_LIBRARY_PATH=\${LD_LIBRARY_PATH}:/usr/lib/wsl/lib" >> "${BASHRC}"
 # fi
 
-#  If zsh is present, make it inherit bash settings
-if [[ -f "${ZSHRC}" ]]; then
-  if ! grep -Fxq "source ~/.bashrc" "${ZSHRC}"; then
-    echo "source ~/.bashrc" >> "${ZSHRC}"
-  fi
-fi
+# #  If zsh is present, make it inherit bash settings
+# if [[ -f "${ZSHRC}" ]]; then
+#   if ! grep -Fxq "source ~/.bashrc" "${ZSHRC}"; then
+#     echo "source ~/.bashrc" >> "${ZSHRC}"
+#   fi
+# fi
 
 # echo "✅  CUDA env lines ensured in ${BASHRC} (and ${ZSHRC} if it exists)."
 # echo "   Open a new terminal or run:  source ~/.bashrc"

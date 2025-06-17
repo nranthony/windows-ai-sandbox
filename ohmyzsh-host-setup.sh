@@ -84,13 +84,66 @@ grep -qxF 'alias ls="lsd -lah --group-dirs first"' "$HOME/.zshrc" \
 # -----------------------------------------------------------------------------
 # 6. Miniforge (conda / mamba, Python 3.12)
 # -----------------------------------------------------------------------------
-echo "# ----- Installing Miniforge -----"
-ARCH="$(uname -m)"
-MINIFORGE_INSTALLER="Miniforge3-Linux-${ARCH}.sh"
-curl -L "https://github.com/conda-forge/miniforge/releases/latest/download/${MINIFORGE_INSTALLER}" \
-     -o "/tmp/${MINIFORGE_INSTALLER}"
-bash "/tmp/${MINIFORGE_INSTALLER}" -b -p "$HOME/miniforge3"
-rm "/tmp/${MINIFORGE_INSTALLER}"
+# echo "# ----- Installing Miniforge -----"
+# ARCH="$(uname -m)"
+# MINIFORGE_INSTALLER="Miniforge3-Linux-${ARCH}.sh"
+# curl -L "https://github.com/conda-forge/miniforge/releases/latest/download/${MINIFORGE_INSTALLER}" \
+#      -o "/tmp/${MINIFORGE_INSTALLER}"
+# bash "/tmp/${MINIFORGE_INSTALLER}" -b -p "$HOME/miniforge3"
+# rm "/tmp/${MINIFORGE_INSTALLER}"
+
+# -----------------------------------------------------------------------------
+# 6. Miniforge (conda / mamba, Python 3.12)
+#
+# This script checks for an existing Miniforge installation. If found, it
+# offers to update it. Otherwise, it installs it fresh.
+# -----------------------------------------------------------------------------
+
+MINIFORGE_DIR="$HOME/miniforge3"
+
+# Check if the Miniforge directory already exists
+if [ -d "$MINIFORGE_DIR" ]; then
+    echo "✅ Miniforge is already installed at: $MINIFORGE_DIR"
+    
+    # Prompt the user to update or skip
+    read -p "Do you want to check for updates with 'conda update --all'? (y/N) " -n 1 -r REPLY
+    echo # Move to a new line
+    
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        echo "🔄 Updating Conda base environment and packages..."
+        # Use conda's own update mechanism for safety and efficiency
+        "$MINIFORGE_DIR/bin/conda" update --all -y
+    else
+        echo "⏩ Skipping update."
+    fi
+
+else
+    echo "# ----- Installing Miniforge -----"
+    
+    # Perform a fresh installation
+    ARCH="$(uname -m)"
+    MINIFORGE_INSTALLER="Miniforge3-Linux-${ARCH}.sh"
+    INSTALLER_PATH="/tmp/${MINIFORGE_INSTALLER}"
+    
+    echo "🔽 Downloading ${MINIFORGE_INSTALLER}..."
+    curl -L "https://github.com/conda-forge/miniforge/releases/latest/download/${MINIFORGE_INSTALLER}" \
+         -o "${INSTALLER_PATH}"
+    
+    echo "📦 Installing Miniforge to ${MINIFORGE_DIR}..."
+    bash "${INSTALLER_PATH}" -b -p "${MINIFORGE_DIR}"
+    
+    echo "🧹 Cleaning up installer..."
+    rm "${INSTALLER_PATH}"
+    
+    # Initialise conda for Zsh (or bash, fish, etc.)
+    # This only needs to run once after the initial installation.
+    echo "⚙️ Initialising Conda for Zsh..."
+    "$MINIFORGE_DIR/bin/conda" init zsh
+    
+    echo "✅ Miniforge installation complete."
+    echo "⚠️ Please restart your shell or run 'source ~/.zshrc' for the changes to take effect."
+fi
+
 
 # initialise conda for Zsh
 "$HOME/miniforge3/bin/conda" init zsh
@@ -101,3 +154,5 @@ rm "/tmp/${MINIFORGE_INSTALLER}"
 echo ""
 echo "✅  All finished!  Restart your terminal and let Powerlevel10k guide you"
 echo "   through its one-time configuration wizard."
+
+chsh -s $(which zsh)
