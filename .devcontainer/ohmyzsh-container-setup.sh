@@ -4,16 +4,16 @@ set -euo pipefail
 # -----------------------------------------------------------------------------
 # 0. Basic packages
 # -----------------------------------------------------------------------------
-echo "# ----- Installing base packages -----"
-apt update
-apt install -y \
-     git curl wget fontconfig locales lsd # lsd = pretty ls with icons
+# echo "# ----- Installing base packages -----"
+# apt update
+# apt install -y \
+#      git curl wget fontconfig locales lsd # lsd = pretty ls with icons
 
 # -----------------------------------------------------------------------------
 # 1. Zsh & Oh-My-Zsh
 # -----------------------------------------------------------------------------
 echo "# ----- Installing Zsh and Oh-My-Zsh -----"
-apt install -y zsh
+# apt install -y zsh
 export RUNZSH=no   # don't launch Zsh during unattended install
 if [[ ! -d "$HOME/.oh-my-zsh" ]]; then
   sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --unattended

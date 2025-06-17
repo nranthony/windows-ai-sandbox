@@ -78,8 +78,8 @@ else
 fi
 
 # Pretty, icon-rich directory listings via lsd
-grep -qxF 'alias ls="lsd -lah --group-dirs-first"' "$HOME/.zshrc" \
-  || echo 'alias ls="lsd -lah --group-dirs-first"' >> "$HOME/.zshrc"
+grep -qxF 'alias ls="lsd -lah --group-dirs first"' "$HOME/.zshrc" \
+  || echo 'alias ls="lsd -lah --group-dirs first"' >> "$HOME/.zshrc"
 
 # -----------------------------------------------------------------------------
 # 6. Miniforge (conda / mamba, Python 3.12)

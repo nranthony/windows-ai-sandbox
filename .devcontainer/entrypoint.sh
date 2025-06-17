@@ -5,10 +5,10 @@ SCRIPT_DIR=$(dirname "$0")
 cd "$SCRIPT_DIR"
 
 # Run setup only if not already done
-if [[ ! -f /.setup-complete ]]; then
+if [[ ! -f ~/.setup-complete ]]; then
     ./ohmyzsh-container-setup.sh
     ./set-git-global.sh
-    touch /root/.setup-complete
+    touch ~/.setup-complete
 fi
 
 exec "$@"

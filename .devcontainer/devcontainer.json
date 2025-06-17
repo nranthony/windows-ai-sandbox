@@ -1,41 +1,75 @@
 {
   "name": "UbuntuDev",
+
+  // ------------------------------------------------------------------
+  // Build settings
+  // ------------------------------------------------------------------
   "build": {
     "dockerfile": "Dockerfile",
     "context": "."
   },
-  "workspaceFolder": "/workspace",
+
+  // ------------------------------------------------------------------
+  // Workspace location *inside* the container
+  // ------------------------------------------------------------------
+  "workspaceFolder": "/home/ubuntu/repo/workspace",
+
+  // ------------------------------------------------------------------
+  // Mount the workspace **as a named volume** (rootless-safe)
+  //    • Docker will create a volume called "ubuntu-workspace"
+  //    • It becomes /home/ubuntu/repo/workspace inside the container
+  // ------------------------------------------------------------------
+  // "workspaceMount": "source=ubuntu-workspace,target=/home/ubuntu/repo/workspace,type=volume",
+  "mounts": [
+    "source=${localWorkspaceFolder},target=/home/ubuntu/repo/workspace,type=bind"
+  ],
+
+  // ------------------------------------------------------------------
+  // Other environment & runtime tweaks
+  // ------------------------------------------------------------------
   "containerEnv": {
     "DOCKER_HOST": "unix:///run/user/1000/docker.sock"
   },
-  "mounts": [
-    "source=${localWorkspaceFolder},target=/workspace,type=bind"
-    // Uncomment to mount a data folder:
-    // ,"source=${localWorkspaceFolder}/data,target=/data,type=bind,readonly"
-  ],
   "runArgs": [
     "--network=ai-sandbox",
-    // "--cap-drop=ALL",
     "--security-opt=no-new-privileges",
     "--env-file",
     "${localWorkspaceFolder}/.env"
   ],
+
+  // ------------------------------------------------------------------
+  // VS Code customisations
+  // ------------------------------------------------------------------
   "customizations": {
     "vscode": {
+      "settings": {
+        // "python.condaPath": "/home/ubuntu/miniforge3/bin/conda",
+        "python.condaPath": "/root/miniforge3/bin/conda",          // tells VS Code where conda lives
+        "python.defaultInterpreterPath": "/root/miniforge3/bin/python",
+        "python.venvPath": "/root/miniforge3/envs"                 // let the extension scan that tree
+      },
       "extensions": [
-        "ms-python.python", // Python language support
-        "ms-python.vscode-pylance", // fast IntelliSense engine
-        "ms-toolsai.jupyter", // notebooks
-        "ms-python.autopep8", // PEP 8 formatter
-        "mhutchie.git-graph" // visual Git history viewer
+        "ms-python.python",
+        "ms-python.vscode-pylance",
+        "ms-toolsai.jupyter",
+        "ms-python.autopep8",
+        "mhutchie.git-graph"
       ]
     }
   },
-  "forwardPorts": [
-    8080,
-    8501
-  ],
-  "postCreateCommand": [
-    "/workspace/.devcontainer/entrypoint.sh"
-  ]
+
+  // ------------------------------------------------------------------
+  // Forwarded ports
+  // ------------------------------------------------------------------
+  "forwardPorts": [8080, 8501],
+
+  // ------------------------------------------------------------------
+  // Default user in the running container
+  // ------------------------------------------------------------------
+  // "remoteUser": "ubuntu",
+
+  // ------------------------------------------------------------------
+  // One-shot post-create hook
+  // ------------------------------------------------------------------
+  "postCreateCommand": "/home/ubuntu/repo/workspace/.devcontainer/entrypoint.sh"
 }

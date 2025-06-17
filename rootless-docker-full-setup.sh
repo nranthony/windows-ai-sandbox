@@ -2,7 +2,61 @@
 set -euo pipefail
 
 # -----------------------------------------------------------------------------
-# 1. Install Docker Engine
+# CUDA env hook for both bash and zsh (WSL 2, CUDA 12.9)
+# -----------------------------------------------------------------------------
+
+# CUDA_VER="12.9"
+# CUDA_HOME="/usr/local/cuda-${CUDA_VER}"
+BASHRC="${HOME}/.bashrc"
+ZSHRC="${HOME}/.zshrc"
+
+# #  Ensure PATH line is present in .bashrc
+# if ! grep -Fxq "export PATH=\${PATH}:${CUDA_HOME}/bin" "${BASHRC}"; then
+#   echo "export PATH=\${PATH}:${CUDA_HOME}/bin" >> "${BASHRC}"
+# fi
+
+# #  Ensure WSL driver stubs are visible at run time
+# if ! grep -Fxq "export LD_LIBRARY_PATH=\${LD_LIBRARY_PATH}:/usr/lib/wsl/lib" "${BASHRC}"; then
+#   echo "export LD_LIBRARY_PATH=\${LD_LIBRARY_PATH}:/usr/lib/wsl/lib" >> "${BASHRC}"
+# fi
+
+#  If zsh is present, make it inherit bash settings
+if [[ -f "${ZSHRC}" ]]; then
+  if ! grep -Fxq "source ~/.bashrc" "${ZSHRC}"; then
+    echo "source ~/.bashrc" >> "${ZSHRC}"
+  fi
+fi
+
+# echo "✅  CUDA env lines ensured in ${BASHRC} (and ${ZSHRC} if it exists)."
+# echo "   Open a new terminal or run:  source ~/.bashrc"
+
+
+# -----------------------------------------------------------------------------
+# Install WSL CUDA toolkit
+# -----------------------------------------------------------------------------
+
+# TODO -determine which toolkit is needed, or both
+# wget https://developer.download.nvidia.com/compute/cuda/repos/wsl-ubuntu/x86_64/cuda-keyring_1.1-1_all.deb
+# sudo dpkg -i cuda-keyring_1.1-1_all.deb
+# sudo apt-get update
+# sudo apt-get -y install cuda-toolkit-12-9
+# sudo apt-mark hold cuda-toolkit-12-9 cuda-*
+# sudo apt-mark hold nvidia-*  
+
+# curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | sudo gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg \
+#   && curl -s -L https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list | \
+#     sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' | \
+#     sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list
+# sudo apt-get update
+# export NVIDIA_CONTAINER_TOOLKIT_VERSION=1.17.8-1
+#   sudo apt-get install -y \
+#       nvidia-container-toolkit=${NVIDIA_CONTAINER_TOOLKIT_VERSION} \
+#       nvidia-container-toolkit-base=${NVIDIA_CONTAINER_TOOLKIT_VERSION} \
+#       libnvidia-container-tools=${NVIDIA_CONTAINER_TOOLKIT_VERSION} \
+#       libnvidia-container1=${NVIDIA_CONTAINER_TOOLKIT_VERSION}
+
+# -----------------------------------------------------------------------------
+# Install Docker Engine
 # -----------------------------------------------------------------------------
 echo "# ----- Installing Docker Engine -----"
 sudo apt update
@@ -23,7 +77,7 @@ sudo apt update
 sudo apt install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
 
 # -----------------------------------------------------------------------------  
-# 2. Configure Rootless Docker prerequisites  
+# Configure Rootless Docker prerequisites  
 # -----------------------------------------------------------------------------
 echo "# ----- Installing prerequisites for Rootless Docker -----"
 sudo apt update
@@ -39,7 +93,7 @@ echo 'iptables-persistent iptables-persistent/autosave_v6 boolean false' \
 DEBIAN_FRONTEND=noninteractive sudo apt install -y iptables-persistent
 
 # -----------------------------------------------------------------------------  
-# 3. Disable any rootful Docker and remove socket  
+# Disable any rootful Docker and remove socket  
 # -----------------------------------------------------------------------------
 echo "# ----- Disabling rootful Docker services -----"
 sudo systemctl disable --now docker.service docker.socket || true
@@ -50,7 +104,7 @@ if [ -e "/var/run/docker.sock" ]; then
 fi
 
 # -----------------------------------------------------------------------------  
-# 4. Install and configure Rootless Docker  
+# Install and configure Rootless Docker  
 # -----------------------------------------------------------------------------
 echo "# ----- Installing Rootless Docker toolchain -----"
 dockerd-rootless-setuptool.sh install
@@ -66,7 +120,7 @@ grep -qxF "export DOCKER_HOST=unix://${SOCK}" "$RCFILE" \
 export DOCKER_HOST="unix://${SOCK}"
 
 # -----------------------------------------------------------------------------  
-# 5. Secure Docker Daemon Configuration  
+# Secure Docker Daemon Configuration  
 # -----------------------------------------------------------------------------
 echo "# ----- Securing Docker Daemon (user-level) -----"
 DOCKER_DAEMON_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/docker"
@@ -95,7 +149,7 @@ cat > "$DOCKER_DAEMON_DIR/daemon.json" << 'EOF'
 EOF
 
 # -----------------------------------------------------------------------------  
-# 6. Modify and Start Rootless Docker Service  
+# Modify and Start Rootless Docker Service  
 # -----------------------------------------------------------------------------
 echo "# ----- Starting Rootless Docker service -----"
 SERVICE_UNIT="$HOME/.config/systemd/user/docker.service"
@@ -142,7 +196,7 @@ else
 fi
 
 # -----------------------------------------------------------------------------  
-# 7. Configure Secure Docker Network & Firewall  
+# Configure Secure Docker Network & Firewall  
 # -----------------------------------------------------------------------------
 echo "# ----- Configuring Secure Docker Network -----"
 if ! docker network inspect ai-sandbox >/dev/null 2>&1; then
@@ -158,7 +212,7 @@ else
 fi
 
 echo "# ----- Applying DOCKER-USER iptables rules -----"
-# 1) Ensure DOCKER-USER exists in filter table
+# Ensure DOCKER-USER exists in filter table
 if ! sudo iptables -w -t filter -L DOCKER-USER >/dev/null 2>&1; then
   echo "→ Creating DOCKER-USER chain"
   sudo iptables -w -t filter -N DOCKER-USER
@@ -166,15 +220,15 @@ if ! sudo iptables -w -t filter -L DOCKER-USER >/dev/null 2>&1; then
   sudo iptables -w -t filter -I FORWARD 1 -j DOCKER-USER
 fi
 
-# 2) Drop all ingress on docker-secure bridge
+# Drop all ingress on docker-secure bridge
 sudo iptables -w -t filter -C DOCKER-USER -i docker-secure -j DROP 2>/dev/null \
   || sudo iptables -w -t filter -I DOCKER-USER -i docker-secure -j DROP
 
-# 3) Allow SSH (tcp/22) on that bridge
+# Allow SSH (tcp/22) on that bridge
 sudo iptables -w -t filter -C DOCKER-USER -i docker-secure -p tcp --dport 22 -j ACCEPT 2>/dev/null \
   || sudo iptables -w -t filter -I DOCKER-USER -i docker-secure -p tcp --dport 22 -j ACCEPT
 
-# 4) Persist rules
+# Persist rules
 echo "# ----- Saving firewall rules -----"
 sudo netfilter-persistent save
 

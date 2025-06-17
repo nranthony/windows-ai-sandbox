@@ -71,3 +71,10 @@ cd docker-bench-security
 docker-bench-security.sh
 ```
 see `docker-bench-security-report.md`
+
+# Resources
+
+## CUDA
+* See `Docker support`: https://docs.nvidia.com/cuda/wsl-user-guide/index.html#nvidia-compute-software-support-on-wsl-2
+<!-- * Pre installation steps:  https://docs.nvidia.com/cuda/cuda-installation-guide-linux/#windows-subsystem-for-linux -->
+
