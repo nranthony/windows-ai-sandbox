@@ -92,6 +92,9 @@ rm "/tmp/${MINIFORGE_INSTALLER}"
 
 # initialise conda for Zsh
 "$HOME/miniforge3/bin/conda" init zsh
+# set zsh as default - use .zshrc for all modifications subsequent shell scripts
+echo "Setting Zsh to be default shell."
+chsh -s /usr/bin/zsh
 
 # -----------------------------------------------------------------------------
 # 7. Done

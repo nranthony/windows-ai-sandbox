@@ -1,6 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+if [ -f ${HOME}/.zshrc ]; then
+  RCFILE="${HOME}/.zshrc"
+  echo "Zsh found; using .zshrc for shell modifications."
+else
+  RCFILE="${HOME}/.bashrc"
+  echo "Zsh not found; using .bashrc for shell modifications."
+fi
+
 # -----------------------------------------------------------------------------
 # CUDA env hook for both bash and zsh (WSL 2, CUDA 12.9)
 # -----------------------------------------------------------------------------
@@ -118,7 +126,7 @@ echo "# ----- Enabling linger for rootless Docker -----"
 sudo loginctl enable-linger "$(id -u)"
 
 echo "# ----- Configuring DOCKER_HOST environment -----"
-RCFILE="${HOME}/.bashrc"
+# RCFILE="${HOME}/.bashrc"
 SOCK="/run/user/$(id -u)/docker.sock"
 grep -qxF "export DOCKER_HOST=unix://${SOCK}" "$RCFILE" \
   || echo "export DOCKER_HOST=unix://${SOCK}" >> "$RCFILE"

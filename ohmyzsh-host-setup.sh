@@ -147,6 +147,9 @@ fi
 
 # initialise conda for Zsh
 "$HOME/miniforge3/bin/conda" init zsh
+# set zsh as default - use .zshrc for all modifications subsequent shell scripts
+echo "Setting Zsh to be default shell."
+sudo chsh -s /usr/bin/zsh
 
 # -----------------------------------------------------------------------------
 # 7. Done
@@ -154,5 +157,3 @@ fi
 echo ""
 echo "✅  All finished!  Restart your terminal and let Powerlevel10k guide you"
 echo "   through its one-time configuration wizard."
-
-chsh -s $(which zsh)
