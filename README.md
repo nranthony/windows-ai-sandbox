@@ -1,5 +1,5 @@
 # Custom Windows AI Sandbox
-![tech stack logo](images/ai-sandbox-v01_crop800px.png)
+![tech stack logo](images/ai-sandbox-v02crop800px.png)
 
 Setup notes and scripts for my WSL2 Ubuntu 'AI Sandbox'. Work in progress; comments and testing welcome. See [Rootless Docker Guide](./rootless_docker_guide.md) for a comprehensive description of script functionality.
 
