@@ -29,15 +29,16 @@ GIT_EMAIL="1234567+dave@users.noreply.github.com"
 * Once rootless docker setup inside WSL2 Ubuntu, copy and paste `.devcontainer` folder into any given repo, use `Dev Containers: Rebuild and Reopen in Container` and continue to develop in that sandbox.
 
 ## Next Steps
-* Scripts and controls for saving AI Sanbox images once setup - currently need to wait for ohmyzsh to setup, and manual conda env setup for any given project
-
+* **Creating Container Images** - Scripts and controls for saving AI Sanbox images once setup - currently need to wait for ohmyzsh to setup, and manual conda env setup for any given project
+* **Container Breakout Testing** - see, for example: https://unit42.paloaltonetworks.com/container-escape-techniques 
+* **Conda Env Visibility** - currently only conda base is easy to access with vscode on first run - steps to dertermine why conda PATH entries are not included in vscode python/notebook extensions.
 
 # Miscellaneous Notes
 
 ### Zsh & Oh-My-Zsh
 * I love ohmyzsh and like to have it everywhere possible.  The `entrypoint.sh` will run a container ohmyzsh setup script.  The host equivalent is also useful, and will require a sudo password for installs and font cache refresh. Don't take my word for it; read the script to make sure !
 
-### Issue - dbus persistence
+### Issue - D-Bus persistence
 * Issues with dbus and bus not being setup on reboots of WSL or Win OS appear to be a race condition between systemd and WSLg. D-Bus socket does not activate, and docker does not start properly.  A *kickstart* method has been implemented into .profile, together with a passwordless sudo for restarting the user service only.
   * docker.service file moved to permanent location in `/etc/systemd/user/`
 
@@ -51,6 +52,18 @@ Environment=PATH="/usr ... "
 ```
 
 **UPDATED** The path issue is now handled by the setup script. If any problems persist, refer to the uninstall section below.
+
+## VSCode Error Post Ubuntu Updates
+
+Running frequent updates are advised, e.g.:
+```sh 
+sudo apt update && sudo apt upgrade && sudo reboot
+```
+This can lead to:  
+`❯ code --version
+/mnt/c/Program Files/Microsoft VS Code/bin/code: 61: /mnt/c/Program Files/Microsoft VS Code/Code.exe: Exec format error`
+
+Exit Ubuntu and shutdown in Windows: `wsl --shutdown`  
 
 ## Uninstalling Rootless Docker
 

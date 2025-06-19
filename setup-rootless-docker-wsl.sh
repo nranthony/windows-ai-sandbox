@@ -7,27 +7,43 @@ sudo apt-get update
 # -----------------------------------------------------------------------------  
 # --- Install Prerequisites ---
 # -----------------------------------------------------------------------------  
-echo "--- Installing Docker Engine and prerequisites..."
-sudo apt-get install -y ca-certificates curl gnupg uidmap dbus-user-session
+echo "--- Installing Docker Engine, Nvidia Container Toolkit, and prerequisits... ---"
 
+## --- Docker ---
+curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | sudo gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg \
+  && curl -s -L https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list | \
+    sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' | \
+    sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list
 # Add Docker's official GPG key
 sudo install -m 0755 -d /etc/apt/keyrings
 curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
 sudo chmod a+r /etc/apt/keyrings/docker.gpg
-
 # Set up the repository
 echo \
   "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
   $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
   sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
 
-# Install Docker Engine
-sudo apt-get update
-sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
+# --- Nvidia ---
+curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | sudo gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg \
+  && curl -s -L https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list | \
+    sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' | \
+    sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list
 
+# --- Install packages ---
+sudo apt-get update
+# Install Docker Engine
+sudo apt-get install -y ca-certificates curl gnupg uidmap dbus-user-session
+sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
 # Disable the rootful Docker daemon
 sudo systemctl disable --now docker.service docker.socket || true
-
+# Install Nvidia Toolkit packages
+export NVIDIA_CONTAINER_TOOLKIT_VERSION=1.17.8-1
+  sudo apt-get install -y \
+      nvidia-container-toolkit=${NVIDIA_CONTAINER_TOOLKIT_VERSION} \
+      nvidia-container-toolkit-base=${NVIDIA_CONTAINER_TOOLKIT_VERSION} \
+      libnvidia-container-tools=${NVIDIA_CONTAINER_TOOLKIT_VERSION} \
+      libnvidia-container1=${NVIDIA_CONTAINER_TOOLKIT_VERSION}
 
 # -----------------------------------------------------------------------------  
 # --- Configure System for Persistence and Automation ---
@@ -46,68 +62,13 @@ sudo chmod 0440 "${SUDOERS_FILE}"
 # Enable lingering for the current user to allow services to start at boot
 sudo loginctl enable-linger "${USER}"
 
-
-# # -----------------------------------------------------------------------------  
-# # Secure Docker Daemon Configuration  
-# # -----------------------------------------------------------------------------
-# echo "# ----- Securing Docker Daemon (user-level) -----"
-# DOCKER_DAEMON_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/docker"
-# mkdir -p "$DOCKER_DAEMON_DIR"
-
-# cat > "$DOCKER_DAEMON_DIR/daemon.json" << 'EOF'
-# {
-#   "exec-opts": ["native.cgroupdriver=cgroupfs"],
-#   "no-new-privileges": true,
-#   "log-driver": "json-file",
-#   "log-opts": { "max-size":"10m", "max-file":"3" },
-#   "default-ulimits": {
-#     "nofile": {
-#       "Name": "nofile",
-#       "Hard": 1024,
-#       "Soft": 1024
-#     },
-#     "nproc": {
-#       "Name": "nproc",
-#       "Hard": 512,
-#       "Soft": 512
-#     }
-#   },
-#   "storage-driver": "overlay2"
-# }
-# EOF
-
 # -----------------------------------------------------------------------------  
 # --- Install Docker as Rootless and Move Service File to a Permanent Location ---
 # -----------------------------------------------------------------------------  
 
 echo "--- Installing rootless toolchain and creating permanent service file..."
-
 # Run the setup tool. It will create the service file in the temporary user location.
 dockerd-rootless-setuptool.sh install
-
-# # This is the temporary location of the generated service file
-# TEMP_SERVICE_FILE="${HOME}/.config/systemd/user/docker.service"
-# # This is the permanent, system-wide location
-# PERMANENT_SERVICE_FILE="/etc/systemd/user/docker.service"
-
-# if [ ! -f "$TEMP_SERVICE_FILE" ]; then
-#     echo "Error: Docker service file not found after setup. Aborting."
-#     exit 1
-# fi
-
-# # Fix potential Windows PATH issues in the generated service file
-# echo "--- Hardening the service file..."
-# sed -i -E \
-#   's#^Environment=PATH=.*#Environment=PATH='"$HOME"'/.local/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin#' \
-#   "$TEMP_SERVICE_FILE"
-
-# # Move the perfected service file to the permanent system location
-# echo "--- Moving service file to ${PERMANENT_SERVICE_FILE}..."
-# sudo mv "$TEMP_SERVICE_FILE" "$PERMANENT_SERVICE_FILE"
-# sudo chmod 644 "$PERMANENT_SERVICE_FILE" # Set standard permissions
-
-
-
 
 # -----------------------------------------------------------------------------  
 # Secure Docker Daemon Configuration (system-wide)  
@@ -214,6 +175,18 @@ else
   echo "Kickstart script already exists. Skipping."
 fi
 
+# -----------------------------------------------------------------------------  
+# Configure NVIDIA runtime for *rootless* Docker  
+# -----------------------------------------------------------------------------
+echo "# ----- Configuring NVIDIA runtime for rootless Docker -----"
+sudo nvidia-ctk runtime configure \
+      --runtime=docker \
+      --config=/etc/docker/daemon.json \
+      --nvidia-set-as-default \
+      --enable-cdi
+
+echo "# ----- Disabling cgroup ops that rootless Docker cannot perform -----"
+sudo nvidia-ctk config --set nvidia-container-cli.no-cgroups --in-place
 
 # -----------------------------------------------------------------------------  
 # --- Restart Docker in the now-healthy session ---
@@ -237,6 +210,17 @@ if docker ps &>/dev/null; then
 else
   echo "❌ Docker failed to start. Check 'systemctl --user status docker.service'."
   exit 1
+fi
+
+# -----------------------------------------------------------------------------  
+# --- Smoke test Nvidia Container Toolki in test conatainer ---
+# -----------------------------------------------------------------------------  
+
+echo "# ----- Smoke-testing with nvidia-smi in a container -----"
+if docker run --rm --gpus all nvidia/cuda:12.9.0-base-ubuntu24.04 nvidia-smi >/dev/null 2>&1; then
+    echo "✅  NVIDIA runtime is active inside rootless Docker."
+else
+    echo "❌  GPU test failed.  See 'journalctl --user -u docker -n 50'." >&2
 fi
 
 # -----------------------------------------------------------------------------  
