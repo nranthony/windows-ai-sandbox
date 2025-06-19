@@ -13,7 +13,8 @@ This repository contains scripts and notes for configuring a secure, rootless Do
 
 * Inside WSL Ubuntu
 * Clone this repo and `cd` into it
-* Run `./rootless-docker-full-setup.sh`
+* Run `./setup-rootless-docker-wsl.sh`
+  * This will setup rootless docker, and only needs to be run ONCE!
 * Run `code .` and ensure Remote Development extension pack is installed <span style="color:red; font-weight:bold">IMPORTANT!</span> &#8594; Code must be run from inside WSL2 Ubuntu, not from Windows. Running from Windows can switch to rootful Docker if Docker installed in Windows OS.
 * Add a .env file in repo workspace root and add git name and email.
 ``` bash
@@ -31,13 +32,14 @@ GIT_EMAIL="1234567+dave@users.noreply.github.com"
 * Scripts and controls for saving AI Sanbox images once setup - currently need to wait for ohmyzsh to setup, and manual conda env setup for any given project
 
 
-
-
 # Miscellaneous Notes
 
+### Zsh & Oh-My-Zsh
+* I love ohmyzsh and like to have it everywhere possible.  The `entrypoint.sh` will run a container ohmyzsh setup script.  The host equivalent is also useful, and will require a sudo password for installs and font cache refresh. Don't take my word for it; read the script to make sure !
+
 ### Issue - dbus persistence
-* currently debugging why bus is not available after restarts...
-`systemctl restart usr@1000.service` resolves the issue - not sure if .bashrc should have this call or not
+* Issues with dbus and bus not being setup on reboots of WSL or Win OS appear to be a race condition between systemd and WSLg. D-Bus socket does not activate, and docker does not start properly.  A *kickstart* method has been implemented into .profile, together with a passwordless sudo for restarting the user service only.
+  * docker.service file moved to permanent location in `/etc/systemd/user/`
 
 ### Modified Service File
 

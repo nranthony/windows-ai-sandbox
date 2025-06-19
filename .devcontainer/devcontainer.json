@@ -46,7 +46,8 @@
         // "python.condaPath": "/home/ubuntu/miniforge3/bin/conda",
         "python.condaPath": "/root/miniforge3/bin/conda",          // tells VS Code where conda lives
         "python.defaultInterpreterPath": "/root/miniforge3/bin/python",
-        "python.venvPath": "/root/miniforge3/envs"                 // let the extension scan that tree
+        "python.venvPath": "/root/miniforge3/envs",                 // let the extension scan that tree
+        "remote.autoForwardPorts": false
       },
       "extensions": [
         "ms-python.python",

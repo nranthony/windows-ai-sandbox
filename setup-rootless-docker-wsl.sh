@@ -22,6 +22,7 @@ echo \
   sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
 
 # Install Docker Engine
+sudo apt-get update
 sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
 
 # Disable the rootful Docker daemon
@@ -142,7 +143,8 @@ fi
 
 # harden its PATH line so it always includes your ~/.local/bin
 sed -i -E \
-  "s#^Environment=PATH=.*#Environment=PATH=${HOME}/.local/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin#"
+  "s#^Environment=PATH=.*#Environment=PATH=${HOME}/.local/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin#" \
+  "$TEMP_SERVICE_FILE"
 
 sudo mkdir -p /etc/systemd/user
 sudo mv "$TEMP_SERVICE_FILE" "$PERM_SERVICE_FILE"

@@ -83,17 +83,6 @@ grep -qxF 'alias ls="lsd -lah --group-dirs first"' "$HOME/.zshrc" \
 
 # -----------------------------------------------------------------------------
 # 6. Miniforge (conda / mamba, Python 3.12)
-# -----------------------------------------------------------------------------
-# echo "# ----- Installing Miniforge -----"
-# ARCH="$(uname -m)"
-# MINIFORGE_INSTALLER="Miniforge3-Linux-${ARCH}.sh"
-# curl -L "https://github.com/conda-forge/miniforge/releases/latest/download/${MINIFORGE_INSTALLER}" \
-#      -o "/tmp/${MINIFORGE_INSTALLER}"
-# bash "/tmp/${MINIFORGE_INSTALLER}" -b -p "$HOME/miniforge3"
-# rm "/tmp/${MINIFORGE_INSTALLER}"
-
-# -----------------------------------------------------------------------------
-# 6. Miniforge (conda / mamba, Python 3.12)
 #
 # This script checks for an existing Miniforge installation. If found, it
 # offers to update it. Otherwise, it installs it fresh.
@@ -144,16 +133,10 @@ else
     echo "⚠️ Please restart your shell or run 'source ~/.zshrc' for the changes to take effect."
 fi
 
-
-# initialise conda for Zsh
-"$HOME/miniforge3/bin/conda" init zsh
-# set zsh as default - use .zshrc for all modifications subsequent shell scripts
-echo "Setting Zsh to be default shell."
-sudo chsh -s /usr/bin/zsh
-
 # -----------------------------------------------------------------------------
 # 7. Done
 # -----------------------------------------------------------------------------
 echo ""
 echo "✅  All finished!  Restart your terminal and let Powerlevel10k guide you"
 echo "   through its one-time configuration wizard."
+echo " NOTE - run `zsh` on entering the terminal to start as needed. Run `exit` to drop back to bash."
