@@ -15,10 +15,15 @@ This repository contains scripts and notes for configuring a secure, rootless Do
   * Copy `./win_setup/.wslconfig` to `C:\Users\<UserName>\.wslconfig`; this enables Windows/3rd Party firewall usage.
 
 * **Inside WSL Ubuntu**
-  * Clone this repo and `cd` into it
-  * Run `.host_setup/setup-rootless-docker-wsl.sh`
+  * Clone this repo and `cd` into `host_setup`
+  * NOTE - **sudo** is required for these scripts for installs and modification of system files - PLEASE read scripts to convince yourself the scripts are not malicious.
+  * Run `./setup-rootless-docker-wsl.sh`
     * This will setup rootless docker, and only needs to be run ONCE!
-  * Run `code .` and ensure Remote Development extension pack is installed <span style="color:red; font-weight:bold">IMPORTANT!</span> &#8594; Code must be run from inside WSL2 Ubuntu, not from Windows. Running from Windows can switch to rootful Docker if Docker installed in Windows OS.
+    * NOTE - if docker doesn't restart, it may have gotten stuck or taken longer that the typical 5 sec delay provided. On exit, wsl shotdown, and reconnecting the kickstart script will start it up then.
+  * Run `sudo ./wsl_conf_update.sh`
+  * `exit` (twice if inside zsh), and in Powershell run `wsl --shutdown`
+    * WAIT at least 8 seconds and reopen the WSL Ubuntu terminal
+  * `cd` back in to repo, and run `code .` and ensure Remote Development extension pack is installed <span style="color:red; font-weight:bold">IMPORTANT!</span> &#8594; Code must be run from inside WSL2 Ubuntu, not from Windows. Running from Windows can switch to rootful Docker if Docker installed in Windows OS.
   * Add a .env file in repo workspace root and add git name and email.
   * ``` bash
     GIT_NAME="dave"
