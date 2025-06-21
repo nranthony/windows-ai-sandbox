@@ -1,0 +1,3 @@
+# force traffic to use Windows/3rd party Firewall (e.g. Norton)
+[wsl2]
+networkingMode=mirrored

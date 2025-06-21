@@ -1,1 +1,4 @@
+# environmental user information
 .env
+# local shells for personal setup
+.local*

@@ -1,0 +1,58 @@
+# Use the official NVIDIA CUDA base image for Ubuntu 24.04
+FROM nvidia/cuda:12.8.0-base-ubuntu24.04
+
+# --- Build-time arguments for user/group synchronization ---
+# Default to a standard UID/GID of 1000 if not provided during build
+ARG UID=1000
+ARG GID=1000
+
+# Set a non-root username. You can change 'devuser' to 'ubuntu' if you prefer.
+ARG USERNAME=devuser
+
+# -------------------------------------------------
+# Create a non-root user with the specified UID/GID
+# -------------------------------------------------
+# Create the group first, then the user.
+# -o allows creating a user with a non-unique (duplicate) UID.
+# This prevents errors if the UID already exists (e.g. system user)
+RUN groupadd --gid $GID $USERNAME && \
+    useradd --uid $UID --gid $GID -m --shell /bin/zsh $USERNAME && \
+    # Add user to the sudo group (optional, but common for dev)
+    usermod -aG sudo $USERNAME && \
+    # Set passwordless sudo for the user (optional, convenient for dev)
+    echo "$USERNAME ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
+
+# -------------------------------------------------
+# Install dependencies as root before switching user
+# -------------------------------------------------
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && \
+    apt-get install -y zsh sudo git curl wget && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# -------------------------------------------------
+# Copy dotfiles for the new user
+# -------------------------------------------------
+# Copy files to a temporary location first
+COPY .p10k.zsh /tmp/
+COPY .zshrc     /tmp/
+
+# Move them to the user's home and set correct ownership
+RUN mv /tmp/.p10k.zsh /home/$USERNAME/.p10k.zsh && \
+    mv /tmp/.zshrc     /home/$USERNAME/.zshrc && \
+    chown -R $USERNAME:$USERNAME /home/$USERNAME
+
+# --- Switch to the non-root user ---
+USER $USERNAME
+# Set the home directory, which is now the default working directory
+WORKDIR /home/$USERNAME
+
+# For your Miniforge setup, you'd install it here, as the user
+# Example:
+# RUN wget https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh && \
+#     bash Miniforge3-Linux-x86_64.sh -b -p $HOME/miniforge3 && \
+#     rm Miniforge3-Linux-x86_64.sh
+# ENV PATH="$HOME/miniforge3/bin:$HOME/miniforge3/condabin:${PATH}"
+
+# Default command
+CMD [ "zsh" ]

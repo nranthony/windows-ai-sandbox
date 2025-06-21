@@ -11,25 +11,28 @@ This repository contains scripts and notes for configuring a secure, rootless Do
 
 # Usage
 
-* Inside WSL Ubuntu
-* Clone this repo and `cd` into it
-* Run `.host_setup/setup-rootless-docker-wsl.sh`
-  * This will setup rootless docker, and only needs to be run ONCE!
-* Run `code .` and ensure Remote Development extension pack is installed <span style="color:red; font-weight:bold">IMPORTANT!</span> &#8594; Code must be run from inside WSL2 Ubuntu, not from Windows. Running from Windows can switch to rootful Docker if Docker installed in Windows OS.
-* Add a .env file in repo workspace root and add git name and email.
-``` bash
-GIT_NAME="dave"
-GIT_EMAIL="1234567+dave@users.noreply.github.com"
-```
-* Ctrl/CMD + Shift + P and select: `Dev Containers: Rebuild and Reopen in Container`
-* Rootless docker should start as a dev container; see `./.devcontainer/devcontainer.json` for parameters.
+* **In Windows:**
+  * Copy `./win_setup/.wslconfig` to `C:\Users\<UserName>\.wslconfig`; this enables Windows/3rd Party firewall usage.
+
+* **Inside WSL Ubuntu**
+  * Clone this repo and `cd` into it
+  * Run `.host_setup/setup-rootless-docker-wsl.sh`
+    * This will setup rootless docker, and only needs to be run ONCE!
+  * Run `code .` and ensure Remote Development extension pack is installed <span style="color:red; font-weight:bold">IMPORTANT!</span> &#8594; Code must be run from inside WSL2 Ubuntu, not from Windows. Running from Windows can switch to rootful Docker if Docker installed in Windows OS.
+  * Add a .env file in repo workspace root and add git name and email.
+  * ``` bash
+    GIT_NAME="dave"
+    GIT_EMAIL="1234567+dave@users.noreply.github.com"
+    ```
+  * Ctrl/CMD + Shift + P and select: `Dev Containers: Rebuild and Reopen in Container`
+  * Rootless docker should start as a dev container; see `./.devcontainer/devcontainer.json` for parameters.
     * `./.devcontainer/entrypoint.sh` will setup git global variables, and run a full ohmyzsh setup script.
 
 ## Insert Into Repo
 * Once rootless docker setup inside WSL2 Ubuntu, copy and paste `.devcontainer` folder into any given repo, use `Dev Containers: Rebuild and Reopen in Container` and continue to develop in that sandbox.
 
 ## Next Steps
-* **Creating Container Images** - Scripts and controls for saving AI Sanbox images once setup - currently need to wait for ohmyzsh to setup, and manual conda env setup for any given project
+* **Creating Container Images** - Scripts and controls for saving AI Sanbox images once setup complete - currently need to wait for ohmyzsh to setup, and manual conda env setup for any given project
 * **Container Breakout Testing** - see, for example: https://unit42.paloaltonetworks.com/container-escape-techniques 
 * **Conda Env Visibility** - currently only conda base is easy to access with vscode on first run - steps to dertermine why conda PATH entries are not included in vscode python/notebook extensions.
 
@@ -88,6 +91,9 @@ docker-bench-security.sh
 see `./reports/docker-bench-security-report.md`
 
 # Resources
+
+## WSL
+* Windows and WSL Ubuntu Host WSL docs: https://learn.microsoft.com/en-us/windows/wsl/wsl-config
 
 ## CUDA
 * See `Docker support`: https://docs.nvidia.com/cuda/wsl-user-guide/index.html#nvidia-compute-software-support-on-wsl-2
