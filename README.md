@@ -23,10 +23,11 @@ This repository contains scripts and notes for configuring a secure, rootless Do
     * This will setup rootless docker, and only needs to be run ONCE!
     * NOTE - if docker doesn't restart, it may have gotten stuck. Run `journalctl --user -u docker -n 50` and `systemctl --user status docker.service` to start the debug diagnostics.
   * Run `sudo ./wsl_conf_update.sh`
+  * (Optional) Run `./ohmyzsh-host-setup.sh`
   * `exit` (twice if inside zsh), and in Powershell run `wsl --shutdown`
     * WAIT at least 8 seconds and reopen the WSL Ubuntu terminal
   * `cd` back in to repo, and run `code .` and ensure Remote Development extension pack is installed <span style="color:red; font-weight:bold">IMPORTANT!</span> &#8594; Code must be run from inside WSL2 Ubuntu, not from Windows. Running from Windows can switch to rootful Docker if Docker installed in Windows OS.
-  * Add a .env file in repo workspace root and add git name and email.
+  * Add a .env file in repo workspace root and add git name and email. Don't forget this part; the dev container will fail if these environment variables are not available.
   * ``` bash
     GIT_NAME="dave"
     GIT_EMAIL="1234567+dave@users.noreply.github.com"

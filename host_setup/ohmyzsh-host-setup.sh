@@ -32,6 +32,13 @@ fi
 grep -qxF '[[ ! -f ~/.p10k.zsh ]] || source ~/.p10k.zsh' ~/.zshrc \
   || echo '[[ ! -f ~/.p10k.zsh ]] || source ~/.p10k.zsh' >> ~/.zshrc
 
+# -- determine script directory --------------------------------------
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+P10K_FILE="${SCRIPT_DIR}/.p10k.zsh"
+cp "$P10K_FILE" "$HOME/.p10k.zsh"
+# -----------------------------------------------------------------------------
+
+
 # -----------------------------------------------------------------------------
 # 3. Nerd Fonts (MesloLGS) for icons in prompt & lsd
 # -----------------------------------------------------------------------------
