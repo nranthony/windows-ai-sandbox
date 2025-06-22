@@ -204,7 +204,7 @@ echo "# ----- Waiting for Docker to respond -----"
 for i in {1..15}; do
   if docker info &>/dev/null; then
     DOCKER_STATUS=$(systemctl --user status docker.service)
-    if [[ "$DOCKER_STATUS" == *"rootlesskit"* ]] && if [[ "$DOCKER_STATUS" == *"active (running)"* ]]; then
+    if [[ "$DOCKER_STATUS" == *"rootlesskit"* ]] && [[ "$DOCKER_STATUS" == *"active (running)"* ]]; then
       echo "✅  Rootless Docker is now configured rootless and running:"
       echo "   • daemon.json → /etc/docker/daemon.json"
       echo "   • service unit → /etc/systemd/user/docker.service"
