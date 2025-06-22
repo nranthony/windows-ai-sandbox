@@ -11,4 +11,3 @@ fi
 if [ -n "$GIT_EMAIL" ]; then
     git config --global user.email "$GIT_EMAIL"
 fi
-echo "
