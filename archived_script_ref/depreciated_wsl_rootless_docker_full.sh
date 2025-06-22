@@ -68,12 +68,18 @@ fi
 echo "# ----- Waiting for Docker to respond -----"
 for i in {1..15}; do
   if docker info &>/dev/null; then
-    echo "→ Rootless Docker is ready."
+    DOCKER_STATUS=$(systemctl --user status docker.service)
+    if [[ "$DOCKER_STATUS" == *"rootlesskit"* ]] && if [[ "$DOCKER_STATUS" == *"active (running)"* ]]; then
+      echo "→ Docker is running in rootless mode successfully."
+    else
+      echo "→ Docker is NOT running as expected. Run 'journalctl --user -u docker -n 50' to begin debug."
+    fi
     break
   fi
   echo "    (Attempt $i/15) Waiting…"
   sleep 1
 done
+
 
 if ! docker info &>/dev/null; then
   echo "Error: Rootless Docker daemon did not start."

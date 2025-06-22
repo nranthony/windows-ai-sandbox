@@ -200,17 +200,32 @@ systemctl --user daemon-reload
 systemctl --user enable docker.service
 systemctl --user restart docker.service
 
-echo "Waiting for Docker to be ready..."
-sleep 5 # Give it a few seconds to start up
-if docker ps &>/dev/null; then
-  echo "✅  Rootless Docker is now configured and running:"
-  echo "   • daemon.json → /etc/docker/daemon.json"
-  echo "   • service unit → /etc/systemd/user/docker.service"
-  echo "   • override drop-in → ${DROPIN_DIR}/override.conf"
-else
+echo "# ----- Waiting for Docker to respond -----"
+for i in {1..15}; do
+  if docker info &>/dev/null; then
+    DOCKER_STATUS=$(systemctl --user status docker.service)
+    if [[ "$DOCKER_STATUS" == *"rootlesskit"* ]] && if [[ "$DOCKER_STATUS" == *"active (running)"* ]]; then
+      echo "✅  Rootless Docker is now configured rootless and running:"
+      echo "   • daemon.json → /etc/docker/daemon.json"
+      echo "   • service unit → /etc/systemd/user/docker.service"
+      echo "   • override drop-in → ${DROPIN_DIR}/override.conf"
+    else
+      echo "→ Docker is NOT running as expected. Run 'journalctl --user -u docker -n 50' and 'systemctl --user status docker.service' to begin debug."
+    fi
+    break
+  fi
+  echo "    (Attempt $i/15) Waiting…"
+  sleep 1
+done
+
+if ! docker info &>/dev/null; then
   echo "❌ Docker failed to start. Check 'systemctl --user status docker.service'."
   exit 1
 fi
+
+echo "# ----- Docker Version -----"
+docker version
+
 
 # -----------------------------------------------------------------------------  
 # --- Smoke test Nvidia Container Toolki in test conatainer ---

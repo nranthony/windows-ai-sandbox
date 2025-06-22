@@ -11,15 +11,17 @@ This repository contains scripts and notes for configuring a secure, rootless Do
 
 # Usage
 
+* **Clone Repo**
+
 * **In Windows:**
-  * Copy `./win_setup/.wslconfig` to `C:\Users\<UserName>\.wslconfig`; this enables Windows/3rd Party firewall usage.
+  * Copy `\win_setup\.wslconfig` to `C:\Users\<UserName>\.wslconfig`; this enables Windows/3rd Party firewall usage.
 
 * **Inside WSL Ubuntu**
-  * Clone this repo and `cd` into `host_setup`
+  * `cd` into `host_setup`
   * NOTE - **sudo** is required for these scripts for installs and modification of system files - PLEASE read scripts to convince yourself the scripts are not malicious.
   * Run `./setup-rootless-docker-wsl.sh`
     * This will setup rootless docker, and only needs to be run ONCE!
-    * NOTE - if docker doesn't restart, it may have gotten stuck or taken longer that the typical 5 sec delay provided. On exit, wsl shotdown, and reconnecting the kickstart script will start it up then.
+    * NOTE - if docker doesn't restart, it may have gotten stuck. Run `journalctl --user -u docker -n 50` and `systemctl --user status docker.service` to start the debug diagnostics.
   * Run `sudo ./wsl_conf_update.sh`
   * `exit` (twice if inside zsh), and in Powershell run `wsl --shutdown`
     * WAIT at least 8 seconds and reopen the WSL Ubuntu terminal
@@ -33,8 +35,8 @@ This repository contains scripts and notes for configuring a secure, rootless Do
   * Rootless docker should start as a dev container; see `./.devcontainer/devcontainer.json` for parameters.
     * `./.devcontainer/entrypoint.sh` will setup git global variables, and run a full ohmyzsh setup script.
 
-## Insert Into Repo
-* Once rootless docker setup inside WSL2 Ubuntu, copy and paste `.devcontainer` folder into any given repo, use `Dev Containers: Rebuild and Reopen in Container` and continue to develop in that sandbox.
+## Insert Into New Repo
+* Once rootless docker setup inside WSL2 Ubuntu, copy and paste `.devcontainer` folder into any given repo and modify as needed, use `Dev Containers: Rebuild and Reopen in Container` and continue to develop in that sandbox.
 
 ## Next Steps
 * **Creating Container Images** - Scripts and controls for saving AI Sanbox images once setup complete - currently need to wait for ohmyzsh to setup, and manual conda env setup for any given project
