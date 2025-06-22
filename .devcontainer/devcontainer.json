@@ -33,6 +33,8 @@
   "runArgs": [
     "--network=ai-sandbox",
     "--security-opt=no-new-privileges",
+    "--gpus",
+    "all",
     "--env-file",
     "${localWorkspaceFolder}/.env"
   ],

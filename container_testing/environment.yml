@@ -1,0 +1,11 @@
+name: myenv
+channels:
+  - pytorch
+  - conda-forge
+dependencies:
+  - python=3.12
+  - ipykernel
+  - pip
+  - pip:
+    - torch
+    - torchvision

@@ -2,3 +2,5 @@
 .env
 # local shells for personal setup
 .local*
+# fashion mnist testing data
+data/
