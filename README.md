@@ -15,6 +15,7 @@ This repository contains scripts and notes for configuring a secure, rootless Do
 
 * **In Windows:**
   * Copy `\win_setup\.wslconfig` to `C:\Users\<UserName>\.wslconfig`; this enables Windows/3rd Party firewall usage.
+  * NOTE - on creating Ubuntu pwsh/cmd will auto log into the terminal.  Issue with command/terminal outputs can happen if you jump straight in with that terminal.  Use `exit`, and specifically open a new teminal tab. 
 
 * **Inside WSL Ubuntu**
   * `cd` into `host_setup`
