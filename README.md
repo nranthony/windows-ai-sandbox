@@ -42,7 +42,7 @@ This repository contains scripts and notes for configuring a secure, rootless Do
     * Testing GPU
       * Run `mamba env create -f ./container_testing/environment.yml`; _Installing pip packages: torch, torchvision_ can be slow ish - ~ 2 GB of packages - also pip inside conda/mamba env files are known to be slower - go make a cuppa and think about the world for a minute.
       * Open `./container_testing/cuda_test.ipynb`, and ensure Kernel is set to `myenv`.  **Run All** and you should see `CUDA available:  True` printed from the first cell.
-      
+
 
       
 
@@ -52,7 +52,7 @@ This repository contains scripts and notes for configuring a secure, rootless Do
 ## Next Steps
 * **Creating Container Images** - Scripts and controls for saving AI Sanbox images once setup complete - currently need to wait for ohmyzsh to setup, and manual conda env setup for any given project
 * **Container Breakout Testing** - see, for example: https://unit42.paloaltonetworks.com/container-escape-techniques 
-* **Conda Env Visibility** - currently only conda base is easy to access with vscode on first run - steps to dertermine why conda PATH entries are not included in vscode python/notebook extensions.
+* **Conda Env Visibility** - sometimes only conda base is easy to access with vscode on first run - steps to dertermine why conda PATH entries are not included in vscode python/notebook extensions.
 
 # Miscellaneous Notes
 

@@ -9,6 +9,10 @@ RUN apt-get update && \
         git zsh vim curl wget fontconfig locales lsd ca-certificates && \
     rm -rf /var/lib/apt/lists/*
 
+
+HEALTHCHECK --interval=60s --timeout=3s \
+  CMD curl -f http://localhost/health || exit 1
+
 # -------------------------------------------------
 # Create an unprivileged user that matches host UID=1000
 #    (rootless Docker volumes will be owned by this UID already)

@@ -73,6 +73,7 @@ sudo mkdir -p /etc/docker
 sudo tee /etc/docker/daemon.json > /dev/null << 'EOF'
 {
   "no-new-privileges": true,
+  "live-restore": true,
   "log-driver": "json-file",
   "log-opts": { "max-size":"10m", "max-file":"3" },
   "default-ulimits": {
@@ -281,6 +282,18 @@ sudo iptables -w -t filter -C DOCKER-USER -i docker-secure -p tcp --dport 22 -j 
 # Persist rules
 echo "# ----- Saving firewall rules -----"
 sudo netfilter-persistent save
+
+# Configure Docker file audit
+echo "# ----- Setup audit of docker files -----"
+cat <<EOF | sudo tee /etc/audit/rules.d/docker.rules
+-w /usr/bin/containerd     -k docker
+-w /usr/bin/runc           -k docker
+-w /etc/docker             -k docker
+-w /var/lib/docker         -k docker
+-w /etc/containerd/config.toml -k containerd
+EOF
+sudo augenrules --load
+
 
 echo ""
 echo "--- Setup Complete! ---"
