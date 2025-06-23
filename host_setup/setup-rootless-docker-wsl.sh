@@ -126,6 +126,18 @@ Environment=DOCKER_CONFIG=/etc/docker
 Environment=DOCKER_CLI_CONFIG=/etc/docker/config.json
 EOF
 
+# -----------------------------------------------------------------------------  
+# Set trusted content only 
+# -----------------------------------------------------------------------------
+
+echo "# ----- Adding trusted docker containers only -----"
+cat > /etc/profile.d/docker-content-trust.sh << 'EOF'
+# Enable Docker Content Trust by default
+export DOCKER_CONTENT_TRUST=1
+EOF
+chmod 644 /etc/profile.d/docker-content-trust.sh
+echo "   • /etc/profile.d/docker-content-trust.sh created"
+
 
 # -----------------------------------------------------------------------------  
 # --- Install the Login Kickstart Script ---
@@ -287,11 +299,15 @@ sudo netfilter-persistent save
 echo "# ----- Setup audit of docker files -----"
 sudo mkdir -p /etc/audit/rules.d
 cat << EOF | sudo tee /etc/audit/rules.d/docker.rules >/dev/null
--w /usr/bin/containerd     -k docker
--w /usr/bin/runc           -k docker
--w /etc/docker             -k docker
--w /var/lib/docker         -k docker
--w /etc/containerd/config.toml -k containerd
+-w /usr/bin/containerd                    -p x  -k docker
+-w /usr/bin/containerd-shim               -p x  -k docker
+-w /usr/bin/containerd-shim-runc-v1       -p x  -k docker
+-w /usr/bin/containerd-shim-runc-v2       -p x  -k docker
+-w /usr/bin/runc                          -p x  -k docker
+-w /etc/docker                            -p wa -k docker
+-w /etc/docker/daemon.json                -p wa -k docker
+-w /var/lib/docker                        -p wa -k docker
+-w /etc/containerd/config.toml            -p wa -k containerd
 EOF
 if sudo augenrules --load; then
   echo "Audit rules loaded."
