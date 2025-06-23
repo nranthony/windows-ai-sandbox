@@ -27,7 +27,8 @@ This repository contains scripts and notes for configuring a secure, rootless Do
   * `exit` (twice if inside zsh), and in Powershell run `wsl --shutdown`
     * WAIT at least 8 seconds and reopen the WSL Ubuntu terminal
   * `cd` back in to repo, and run `code .` and ensure Remote Development extension pack is installed <span style="color:red; font-weight:bold">IMPORTANT!</span> &#8594; Code must be run from inside WSL2 Ubuntu, not from Windows. Running from Windows can switch to rootful Docker if Docker installed in Windows OS.
-  * Add a .env file in repo workspace root and add git name and email. Don't forget this part; the dev container will fail if these environment variables are not available.
+    * _Side Note_ - run `zsh` to use launch into oh-my-zsh with p10k settings.
+  * Add a .env file in repo workspace root and add git name and email. Don't forget this part; the dev container will fail if these environment variables are not available. I typically have a .env file for this stored in C:\dev\git and drag and drop for ease.
   * ``` bash
     GIT_NAME="dave"
     GIT_EMAIL="1234567+dave@users.noreply.github.com"
@@ -35,6 +36,15 @@ This repository contains scripts and notes for configuring a secure, rootless Do
   * Ctrl/CMD + Shift + P and select: `Dev Containers: Rebuild and Reopen in Container`
   * Rootless docker should start as a dev container; see `./.devcontainer/devcontainer.json` for parameters.
     * `./.devcontainer/entrypoint.sh` will setup git global variables, and run a full ohmyzsh setup script.
+    * Typically need to hit any key and then kill that terminal in VSCode and open a fresh one.
+    * Again, type `zsh` to use oh-my-zsh
+  * **Inside Dev Container**
+    * Testing GPU
+      * Run `mamba env create -f ./container_testing/environment.yml`; _Installing pip packages: torch, torchvision_ can be slow ish - ~ 2 GB of packages - also pip inside conda/mamba env files are known to be slower - go make a cuppa and think about the world for a minute.
+      * Open `./container_testing/cuda_test.ipynb`, and ensure Kernel is set to `myenv`.  **Run All** and you should see `CUDA available:  True` printed from the first cell.
+      
+
+      
 
 ## Insert Into New Repo
 * Once rootless docker setup inside WSL2 Ubuntu, copy and paste `.devcontainer` folder into any given repo and modify as needed, use `Dev Containers: Rebuild and Reopen in Container` and continue to develop in that sandbox.
