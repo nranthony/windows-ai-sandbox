@@ -32,6 +32,13 @@ RUN chown ubuntu:ubuntu /home/ubuntu/.p10k.zsh /home/ubuntu/.zshrc
 
 ENV PATH="/root/miniforge3/bin:/root/miniforge3/condabin:${PATH}"
 
+# Copy the simple health check server into the container
+COPY health_server.py /usr/local/bin/health_server.py
+
+# Tell Docker to run this Python script as the main process.
+# This command will be executed by the base image's ENTRYPOINT.
+CMD ["python3", "/usr/local/bin/health_server.py"]
+
 
 # -------------------------------------------------
 # Don’t pre-create /home/ubuntu/repo/workspace
