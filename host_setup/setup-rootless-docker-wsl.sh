@@ -28,7 +28,7 @@ echo \
 # --- Install packages ---
 sudo apt-get update
 # Install Docker Engine
-sudo apt-get install -y ca-certificates curl gnupg uidmap dbus-user-session auditd audispd-plugins
+sudo apt-get install -y ca-certificates jq curl gnupg uidmap dbus-user-session auditd audispd-plugins
 sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
 # Disable the rootful Docker daemon
 sudo systemctl disable --now docker.service docker.socket || true
