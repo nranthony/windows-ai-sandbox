@@ -36,24 +36,44 @@ This repository contains scripts and notes for configuring a secure, rootless Do
     ```
   * Ctrl/CMD + Shift + P and select: `Dev Containers: Rebuild and Reopen in Container`
   * Rootless docker should start as a dev container; see `./.devcontainer/devcontainer.json` for parameters.
+    * Container runs as **`root`** (container UID 0 = host UID 1000 with rootless Docker)
     * `./.devcontainer/entrypoint.sh` will setup git global variables, and run a full ohmyzsh setup script.
     * Typically need to hit any key and then kill that terminal in VSCode and open a fresh one.
-    * Again, type `zsh` to use oh-my-zsh
+    * Shell defaults to `zsh` with oh-my-zsh configuration
   * **Inside Dev Container**
-    * Testing GPU
+    * **Container Configuration**
+      * Base image: `nvidia/cuda:12.6.3-base-ubuntu24.04`
+      * User: `root` (container UID 0 = host UID 1000 with rootless Docker)
+      * Python/Conda: Miniforge3 installed at `/root/miniforge3`
+      * Rootless Docker provides isolation despite running as root in container
+    * **Testing GPU**
       * Run `mamba env create -f ./container_testing/environment.yml`; _Installing pip packages: torch, torchvision_ can be slow ish - ~ 2 GB of packages - also pip inside conda/mamba env files are known to be slower - go make a cuppa and think about the world for a minute.
       * Open `./container_testing/cuda_test.ipynb`, and ensure Kernel is set to `myenv`.  **Run All** and you should see `CUDA available:  True` printed from the first cell.
 
 
-      
+
 
 ## Insert Into New Repo
 * Once rootless docker setup inside WSL2 Ubuntu, copy and paste `.devcontainer` folder into any given repo and modify as needed, use `Dev Containers: Rebuild and Reopen in Container` and continue to develop in that sandbox.
 
+## Troubleshooting
+
+### Permission Issues
+If you encounter permission errors in the dev container, see **`.devcontainer/NON-ROOT-SETUP.md`** for:
+- Bind mount permission issues
+- Sudo not working (`no new privileges` flag)
+- File ownership problems
+- CUDA version compatibility
+
+### Common Issues
+* **sudo blocked**: Remove `--security-opt=no-new-privileges` from `devcontainer.json` (already done)
+* **CUDA version mismatch**: Container uses CUDA 12.6.3 (requires driver ≥530.30, tested with 566.36)
+* **Docker not starting**: Run `systemctl --user restart docker.service` on WSL host
+
 ## Next Steps
-* **Creating Container Images** - Scripts and controls for saving AI Sanbox images once setup complete - currently need to wait for ohmyzsh to setup, and manual conda env setup for any given project
-* **Container Breakout Testing** - see, for example: https://unit42.paloaltonetworks.com/container-escape-techniques 
-* **Conda Env Visibility** - sometimes only conda base is easy to access with vscode on first run - steps to dertermine why conda PATH entries are not included in vscode python/notebook extensions.
+* **Creating Container Images** - Scripts and controls for saving AI Sandbox images once setup complete - currently need to wait for ohmyzsh to setup, and manual conda env setup for any given project
+* **Container Breakout Testing** - see, for example: https://unit42.paloaltonetworks.com/container-escape-techniques
+* **Conda Env Visibility** - sometimes only conda base is easy to access with vscode on first run - steps to determine why conda PATH entries are not included in vscode python/notebook extensions.
 
 # Miscellaneous Notes
 

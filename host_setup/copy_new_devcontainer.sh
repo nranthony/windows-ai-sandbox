@@ -1,24 +1,27 @@
 #!/bin/bash
 
 # ==============================================================================
-# Dev Container Copy Script (v2.2 - Final)
+# Dev Container Copy Script (v3.0 - Simplified)
 #
 # Description:
 #   This script automates setting up a project with a standardized Dev Container
 #   configuration from a template. It copies the necessary files, sets
 #   permissions, and safely modifies the `devcontainer.json` file to
-#   configure the container name and environment file.
+#   configure the display name and environment file.
 #
-#   This final version uses a robust, sequential series of `jq` operations
-#   to avoid logical errors and ensure predictable results.
+#   Version 3.0 changes:
+#   - Removed --name flag (VS Code auto-generates unique container names)
+#   - Added file validation before copy
+#   - Added comprehensive post-setup instructions
+#   - Improved error handling
 #
 # Dependencies:
 #   - jq: This script requires the 'jq' command-line JSON processor.
 #     On Debian/Ubuntu, install with: sudo apt-get install jq
 #     On macOS, install with: brew install jq
 #
-# Author: Gemini
-# Date: 2025-06-28
+# Author: Gemini (original), Claude Code (v3.0 updates)
+# Date: 2025-10-13
 # ==============================================================================
 
 # Exit immediately if a command fails, and treat pipeline failures as a script failure.
@@ -38,20 +41,21 @@ readonly SCRIPTS_TO_MAKE_EXECUTABLE=(
 # Displays the script's usage instructions and exits.
 usage() {
     cat <<EOF
-Usage: $0 -s <source_repo_path> -t <target_repo_path> -n <container_name> -d <display_name> [-e]
+Usage: $0 -s <source_repo_path> -t <target_repo_path> -d <display_name> [-e]
 
 Automates the setup of a .devcontainer configuration from a template.
 
 Options:
   -s    Path to the template repository containing the .devcontainer directory.
   -t    Path to the target repository where the .devcontainer will be copied.
-  -n    The Docker container's technical name (e.g., 'dev-my-project').
   -d    The Dev Container's display name in VS Code (e.g., 'My Project').
-  -e    (Optional) Flag to enable the '--env-file' argument.
+  -e    (Optional) Flag to enable the '--env-file' argument (recommended).
   -h    Display this help message.
 
 Example:
-  $0 -s ~/templates/dev-main -t ~/projects/new-app -n dev-new-app -d "New App" -e
+  $0 -s ~/templates/dev-main -t ~/projects/new-app -d "New App" -e
+
+Note: VS Code auto-generates unique container names, so --name flag is not needed.
 EOF
 }
 
@@ -69,16 +73,14 @@ main() {
     # Initialize variables to their default state.
     local source_repo=""
     local target_repo=""
-    local container_name=""
     local display_name=""
     local use_env_file=false
 
     # Parse command-line options.
-    while getopts "s:t:n:d:eh" opt; do
+    while getopts "s:t:d:eh" opt; do
         case ${opt} in
             s) source_repo=${OPTARG} ;;
             t) target_repo=${OPTARG} ;;
-            n) container_name=${OPTARG} ;;
             d) display_name=${OPTARG} ;;
             e) use_env_file=true ;;
             h)
@@ -94,7 +96,7 @@ main() {
     done
 
     # Validate that all mandatory arguments have been provided.
-    if [[ -z "$source_repo" || -z "$target_repo" || -z "$container_name" || -z "$display_name" ]]; then
+    if [[ -z "$source_repo" || -z "$target_repo" || -z "$display_name" ]]; then
         echo "Error: Missing one or more required arguments." >&2
         usage
         exit 1
@@ -117,6 +119,17 @@ main() {
         exit 1
     fi
     echo "    Source and target paths are valid."
+
+    # --- Step 1b: Validate Required Files ---
+    echo "--> Validating required files..."
+    local required_files=("Dockerfile" "devcontainer.json" ".p10k.zsh" ".zshrc" "entrypoint.sh" "set-git-global.sh" "ohmyzsh-container-setup.sh")
+    for file in "${required_files[@]}"; do
+        if [ ! -f "${source_devcontainer_path}/${file}" ]; then
+            echo "Error: Required file '${file}' not found in source .devcontainer!" >&2
+            exit 1
+        fi
+    done
+    echo "    All required files present."
 
     # --- Step 2: Copy and Set Permissions ---
     echo "--> Copying .devcontainer directory and setting permissions..."
@@ -158,16 +171,11 @@ main() {
     temp_json=$(echo "$temp_json" | \
         # 1. Ensure .runArgs exists and is an array; create it if null.
         jq '.runArgs |= if . == null then [] else . end' | \
-        # 2. Unconditionally remove any existing '--name' flag and its subsequent value.
-        jq 'if (.runArgs | index("--name")) then del(.runArgs[(.runArgs | index("--name")) : ((.runArgs | index("--name")) + 2)]) else . end' | \
-        # 3. Unconditionally remove any existing '--env-file' flag and its subsequent value.
+        # 2. Unconditionally remove any existing '--env-file' flag and its subsequent value.
         jq 'if (.runArgs | index("--env-file")) then del(.runArgs[(.runArgs | index("--env-file")) : ((.runArgs | index("--env-file")) + 2)]) else . end'
     )
 
-    # Now that the slate is clean, add the new arguments to runArgs.
-    echo "    Setting Docker container name to '${container_name}'."
-    temp_json=$(echo "$temp_json" | jq --arg name "$container_name" '.runArgs += ["--name", $name]')
-
+    # Add --env-file if requested
     if [ "$use_env_file" = true ]; then
         echo "    Enabling --env-file argument."
         temp_json=$(echo "$temp_json" | jq '.runArgs += ["--env-file", "${localWorkspaceFolder}/.env"]')
@@ -178,7 +186,29 @@ main() {
 
     echo "    devcontainer.json has been successfully configured."
     echo ""
-    echo "Setup complete! Your new project at '${target_repo}' is ready."
+    echo "✅ Setup complete! Your new project at '${target_repo}' is ready."
+    echo ""
+
+    # Display important post-setup reminders
+    if [ "$use_env_file" = true ]; then
+        echo "⚠️  IMPORTANT: Create a .env file in ${target_repo} with:"
+        echo "    GIT_NAME=\"your-name\""
+        echo "    GIT_EMAIL=\"your-email@example.com\""
+        echo ""
+    fi
+
+    echo "📋 Next steps:"
+    echo "    1. cd ${target_repo}"
+    echo "    2. Create .env file (if using -e flag)"
+    echo "    3. code . (from inside WSL)"
+    echo "    4. Ctrl+Shift+P → 'Dev Containers: Rebuild and Reopen in Container'"
+    echo ""
+    echo "📚 See .devcontainer/NON-ROOT-SETUP.md for troubleshooting"
+    echo ""
+    echo "ℹ️  Requirements:"
+    echo "    - CUDA 12.6.3 compatible NVIDIA driver (≥530.30)"
+    echo "    - Docker network 'ai-sandbox' must exist"
+    echo "    - Rootless Docker socket at /run/user/1000/docker.sock"
 }
 
 # This standard guard ensures the main function is called only when the script is executed directly.

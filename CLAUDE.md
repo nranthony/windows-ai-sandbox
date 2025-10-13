@@ -71,8 +71,10 @@ systemctl --user restart docker.service
 
 ### Dev Container Setup
 - `.devcontainer/devcontainer.json`: VS Code dev container configuration with CUDA support
-- `.devcontainer/Dockerfile`: NVIDIA CUDA base image with miniforge3
+- `.devcontainer/Dockerfile`: NVIDIA CUDA 12.6.3 base image (Ubuntu 24.04)
 - `.devcontainer/entrypoint.sh`: Runs oh-my-zsh and git setup on container creation
+- `.devcontainer/ohmyzsh-container-setup.sh`: Installs miniforge3, oh-my-zsh, and shell plugins
+- `.devcontainer/NON-ROOT-SETUP.md`: Troubleshooting guide for non-root container setup
 
 ### Environment Requirements
 - Create `.env` file in repo root:
@@ -86,7 +88,7 @@ systemctl --user restart docker.service
 - Rootless Docker daemon configuration in `~/.config/docker/daemon.json`
 - Isolated Docker network: `ai-sandbox` (172.20.0.0/16)
 - iptables rules: Default DROP with SSH (tcp/22) allowed
-- Container security: `--security-opt=no-new-privileges`
+- Non-root container user: `ubuntu` (UID 1000) with passwordless sudo
 
 ## File Structure
 
@@ -103,6 +105,8 @@ systemctl --user restart docker.service
 
 - **Always run `code .` from inside WSL Ubuntu**, never from Windows
 - Rootless Docker socket: `/run/user/1000/docker.sock`
-- Dev container uses root user with miniforge3 in `/root/miniforge3`
+- **Dev container runs as root** (container UID 0 = host UID 1000 with rootless Docker)
+- **CUDA version**: 12.6.3 (requires NVIDIA driver ≥ 530.30.02, tested with 566.36)
 - GPU passthrough requires Windows with WSL2 and NVIDIA drivers
 - D-Bus issues on WSL restart are handled by profile kickstart script
+- Miniforge3 installed in `/root/miniforge3`
