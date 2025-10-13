@@ -93,17 +93,17 @@ MINIFORGE_DIR="$HOME/miniforge3"
 if [ -d "$MINIFORGE_DIR" ]; then
     echo "✅ Miniforge is already installed at: $MINIFORGE_DIR"
     
-    # Prompt the user to update or skip
-    read -p "Do you want to check for updates with 'conda update --all'? (y/N) " -n 1 -r REPLY
-    echo # Move to a new line
+    # # Prompt the user to update or skip
+    # read -p "Do you want to check for updates with 'conda update --all'? (y/N) " -n 1 -r REPLY
+    # echo # Move to a new line
     
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
-        echo "🔄 Updating Conda base environment and packages..."
-        # Use conda's own update mechanism for safety and efficiency
-        "$MINIFORGE_DIR/bin/conda" update --all -y
-    else
-        echo "⏩ Skipping update."
-    fi
+    # if [[ $REPLY =~ ^[Yy]$ ]]; then
+    #     echo "🔄 Updating Conda base environment and packages..."
+    #     # Use conda's own update mechanism for safety and efficiency
+    #     "$MINIFORGE_DIR/bin/conda" update --all -y
+    # else
+    #     echo "⏩ Skipping update."
+    # fi
 
 else
     echo "# ----- Installing Miniforge -----"
