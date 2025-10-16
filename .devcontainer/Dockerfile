@@ -5,7 +5,7 @@ FROM nvidia/cuda:12.6.3-base-ubuntu24.04
 # -------------------------------------------------
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-        git zsh vim curl wget fontconfig locales lsd ca-certificates && \
+        git zsh vim curl wget fontconfig locales lsd ca-certificates lsof && \
     rm -rf /var/lib/apt/lists/*
 
 # -------------------------------------------------
