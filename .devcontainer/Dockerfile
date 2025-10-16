@@ -1,68 +1,27 @@
-# FROM ubuntu:24.04
-FROM nvidia/cuda:12.8.0-base-ubuntu24.04
+FROM nvidia/cuda:12.6.3-base-ubuntu24.04
 
 # -------------------------------------------------
-# Essential packages (unchanged)
+# Essential packages
 # -------------------------------------------------
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-        git zsh vim curl wget fontconfig locales lsd ca-certificates && \
+        git zsh vim curl wget fontconfig locales lsd ca-certificates lsof && \
     rm -rf /var/lib/apt/lists/*
 
-
-HEALTHCHECK --interval=60s --timeout=3s \
-  CMD curl -f http://localhost/health || exit 1
-
 # -------------------------------------------------
-# Create an unprivileged user that matches host UID=1000
-#    (rootless Docker volumes will be owned by this UID already)
-# -------------------------------------------------
-# RUN useradd -m -u 1000 -s /bin/bash ubuntu && \
-#     echo 'ubuntu ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/ubuntu && \
-#     chmod 0440 /etc/sudoers.d/ubuntu
-
-# -------------------------------------------------
-# Copy dotfiles for root AND the ubuntu user
+# Copy dotfiles for root user
 # -------------------------------------------------
 COPY .p10k.zsh /root/.p10k.zsh
-COPY .zshrc     /root/.zshrc
-COPY .p10k.zsh /home/ubuntu/.p10k.zsh
-COPY .zshrc     /home/ubuntu/.zshrc
-RUN chown ubuntu:ubuntu /home/ubuntu/.p10k.zsh /home/ubuntu/.zshrc
+COPY .zshrc /root/.zshrc
 
+# -------------------------------------------------
+# Set PATH for root's miniforge installation
+# -------------------------------------------------
 ENV PATH="/root/miniforge3/bin:/root/miniforge3/condabin:${PATH}"
 
-# Copy the simple health check server into the container
-COPY health_server.py /usr/local/bin/health_server.py
-
-# Tell Docker to run this Python script as the main process.
-# This command will be executed by the base image's ENTRYPOINT.
-CMD ["python3", "/usr/local/bin/health_server.py"]
-
-
 # -------------------------------------------------
-# Don’t pre-create /home/ubuntu/repo/workspace
-#    → the named volume will be mounted there automatically
+# Run as root (safe with rootless Docker)
+# Container root (UID 0) = Host user (UID 1000)
 # -------------------------------------------------
-
-# USER ubuntu
-# WORKDIR /home/ubuntu
-
-
-
-# FROM ubuntu:24.04
-
-# RUN apt-get update && \
-#     apt-get install -y --no-install-recommends \
-#         git zsh vim curl wget fontconfig locales lsd ca-certificates && \
-#     rm -rf /var/lib/apt/lists/*
-
-# RUN mkdir "/data"
-
-# COPY .p10k.zsh /root/.p10k.zsh
-# COPY .zshrc /root/.zshrc
-# COPY .p10k.zsh /home/ubuntu/.p10k.zsh
-# COPY .zshrc /home/ubuntu/.zshrc
-
-# RUN mkdir -p /home/ubuntu/repo/workspace
-# RUN chown -R 1000:1000 /home/ubuntu/repo/workspace
+USER root
+WORKDIR /root

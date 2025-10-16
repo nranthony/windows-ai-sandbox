@@ -81,10 +81,11 @@ grep -qxF 'alias ls="lsd -lah --group-dirs first"' "$HOME/.zshrc" \
   || echo 'alias ls="lsd -lah --group-dirs first"' >> "$HOME/.zshrc"
 
 # -----------------------------------------------------------------------------
-# 6. Miniforge (conda / mamba, Python 3.12)
+# 6. Miniforge (conda / mamba)
 #
 # This script checks for an existing Miniforge installation. If found, it
 # offers to update it. Otherwise, it installs it fresh.
+# Note: Python version is set per-environment via environment.yml or manual creation
 # -----------------------------------------------------------------------------
 
 MINIFORGE_DIR="$HOME/miniforge3"
