@@ -144,6 +144,16 @@ main() {
     done
     echo "    Copy and permission setup complete."
 
+    # --- Step 2b: Copy .env file if present and -e flag is set ---
+    if [ "$use_env_file" = true ]; then
+        local source_env_path="${source_repo}/.env"
+        if [ -f "$source_env_path" ]; then
+            echo "--> Copying .env file from source repository..."
+            cp "$source_env_path" "$target_repo/.env"
+            echo "    .env file copied successfully."
+        fi
+    fi
+
     # --- Step 3: Modify devcontainer.json ---
     local devcontainer_json_path="${target_devcontainer_path}/devcontainer.json"
     if [ ! -f "$devcontainer_json_path" ]; then
