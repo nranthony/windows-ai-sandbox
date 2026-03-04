@@ -40,9 +40,8 @@
   "customizations": {
     "vscode": {
       "settings": {
-        "python.condaPath": "/root/miniforge3/bin/conda",          // tells VS Code where conda lives
-        "python.defaultInterpreterPath": "/root/miniforge3/bin/python",
-        "python.venvPath": "/root/miniforge3/envs",                 // let the extension scan that tree
+        "python.defaultInterpreterPath": "/root/.venv/bin/python",
+        "python.venvPath": "/root",                                  // VS Code scans /root/.venv
         "remote.autoForwardPorts": false
       },
       "extensions": [

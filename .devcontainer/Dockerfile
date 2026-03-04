@@ -15,9 +15,9 @@ COPY .p10k.zsh /root/.p10k.zsh
 COPY .zshrc /root/.zshrc
 
 # -------------------------------------------------
-# Set PATH for root's miniforge installation
+# Set PATH for uv (installed to ~/.local/bin)
 # -------------------------------------------------
-ENV PATH="/root/miniforge3/bin:/root/miniforge3/condabin:${PATH}"
+ENV PATH="/root/.local/bin:${PATH}"
 
 # -------------------------------------------------
 # Run as root (safe with rootless Docker)

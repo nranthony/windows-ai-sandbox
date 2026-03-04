@@ -13,7 +13,7 @@ The system follows this layered architecture:
 
 Key components:
 - **Host Setup Scripts** (`host_setup/`): Configure WSL2 Ubuntu with rootless Docker
-- **Dev Container** (`.devcontainer/`): CUDA-enabled container with miniforge3, VS Code extensions
+- **Dev Container** (`.devcontainer/`): CUDA-enabled container with uv, VS Code extensions
 - **Container Testing** (`container_testing/`): PyTorch/CUDA validation notebooks and environments
 - **Security Configuration**: Isolated Docker networks with iptables firewall rules
 
@@ -34,8 +34,8 @@ sudo ./wsl_conf_update.sh               # Configure WSL
 code .  # Must be run from WSL, not Windows
 # Ctrl+Shift+P → "Dev Containers: Rebuild and Reopen in Container"
 
-# Inside dev container - create ML environment
-mamba env create -f ./container_testing/environment.yml
+# Inside dev container - install ML packages into default venv
+cd container_testing && uv sync
 ```
 
 ### Testing GPU/CUDA
@@ -73,7 +73,7 @@ systemctl --user restart docker.service
 - `.devcontainer/devcontainer.json`: VS Code dev container configuration with CUDA support
 - `.devcontainer/Dockerfile`: NVIDIA CUDA 12.6.3 base image (Ubuntu 24.04)
 - `.devcontainer/entrypoint.sh`: Runs oh-my-zsh and git setup on container creation
-- `.devcontainer/ohmyzsh-container-setup.sh`: Installs miniforge3, oh-my-zsh, and shell plugins
+- `.devcontainer/ohmyzsh-container-setup.sh`: Installs uv, oh-my-zsh, and shell plugins; creates default `~/.venv`
 - `.devcontainer/NON-ROOT-SETUP.md`: Troubleshooting guide for non-root container setup
 
 ### Environment Requirements
@@ -109,4 +109,4 @@ systemctl --user restart docker.service
 - **CUDA version**: 12.6.3 (requires NVIDIA driver ≥ 530.30.02, tested with 566.36)
 - GPU passthrough requires Windows with WSL2 and NVIDIA drivers
 - D-Bus issues on WSL restart are handled by profile kickstart script
-- Miniforge3 installed in `/root/miniforge3`
+- uv installed to `/root/.local/bin/uv`; default venv at `/root/.venv` (Python 3.12)
