@@ -1,0 +1,62 @@
+# =============================================================================
+# windows-ai-sandbox — multi-profile CUDA + Claude Code stack
+# =============================================================================
+# Parameterized by PROFILE. Drive via scripts/profile.sh, which exports PROFILE
+# and COMPOSE_PROJECT_NAME=ai-sandbox-<profile>. Each profile gets its own
+# container, reusing the single shared image (windows-ai-sandbox:latest) and
+# the ai-sandbox Docker network created by host_setup/setup-rootless-docker-wsl.sh.
+# =============================================================================
+
+services:
+  ai-sandbox:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: windows-ai-sandbox:latest
+    container_name: ai-sandbox-${PROFILE:?PROFILE env var required — use scripts/profile.sh}
+    hostname: ai-sandbox-${PROFILE}
+
+    # GPU passthrough (WSL2 native — replaces --gpus all, which is broken with
+    # rootless Docker + NVIDIA Container Toolkit ≥1.18, see .devcontainer/GPU-FIX-MIGRATION.md)
+    devices:
+      - /dev/dxg
+
+    # --userns=host in the old devcontainer.json is implicit under rootless
+    # Docker. Verify with:  docker exec ... cat /proc/self/uid_map  →  0 1000 1
+
+    volumes:
+      # The profile's repo parent folder = /workspace. Holds many repos.
+      - ${HOME}/repo/${PROFILE}:/workspace:rw
+
+      # WSL2 driver libs (paired with LD_LIBRARY_PATH below).
+      - /usr/lib/wsl:/usr/lib/wsl:ro
+
+      # Per-profile persistent state (auth, config, caches) — outlives recreates.
+      - ${HOME}/.ai-sandbox/profiles/${PROFILE}/claude-home:/root/.claude:rw
+      - ${HOME}/.ai-sandbox/profiles/${PROFILE}/claude.json:/root/.claude.json:rw
+      - ${HOME}/.ai-sandbox/profiles/${PROFILE}/cache:/root/.cache:rw
+      # .config mounted as a directory (not per-file) — git's atomic rename()
+      # during `git config --global set` fails with EBUSY across single-file
+      # bind mounts. Directory mounts avoid that.
+      - ${HOME}/.ai-sandbox/profiles/${PROFILE}/config:/root/.config:rw
+
+    environment:
+      - LD_LIBRARY_PATH=/usr/lib/wsl/lib
+      - DOCKER_HOST=unix:///run/user/1000/docker.sock
+      - GIT_CONFIG_GLOBAL=/root/.config/git/config
+      - SANDBOX_PROFILE=${PROFILE}
+
+    # No env_file: GIT_NAME / GIT_EMAIL from host .env are consumed on the host
+    # side by scripts/setup.sh, which seeds them via `git config --global`.
+
+    networks:
+      - ai-sandbox
+
+    working_dir: /workspace
+    command: ["sleep", "infinity"]
+    restart: unless-stopped
+
+networks:
+  ai-sandbox:
+    name: ai-sandbox
+    external: true

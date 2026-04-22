@@ -1,0 +1,14 @@
+.git
+.gitignore
+.env
+LICENSE
+*.md
+host_setup/
+win_setup/
+reports/
+images/
+archived_script_ref/
+container_testing/
+devcontainer-template/
+scripts/
+.devcontainer/
