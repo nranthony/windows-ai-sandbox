@@ -23,9 +23,9 @@ Key components:
 ```bash
 # Inside WSL Ubuntu
 cd host_setup
-sudo ./setup-rootless-docker-wsl.sh    # Setup rootless Docker
-sudo ./wsl_conf_update.sh               # Configure WSL
-./ohmyzsh-host-setup.sh                 # Optional: Install oh-my-zsh
+./setup-rootless-docker-wsl.sh         # Setup rootless Docker (script uses sudo internally)
+sudo ./wsl_conf_update.sh              # Configure /etc/wsl.conf
+./ohmyzsh-host-setup.sh                # Optional: Install oh-my-zsh
 ```
 
 ### Dev Container Operations
@@ -70,11 +70,13 @@ systemctl --user restart docker.service
 ## Key Files and Configuration
 
 ### Dev Container Setup
-- `.devcontainer/devcontainer.json`: VS Code dev container configuration with CUDA support
-- `.devcontainer/Dockerfile`: NVIDIA CUDA 12.6.3 base image (Ubuntu 24.04)
-- `.devcontainer/entrypoint.sh`: Runs oh-my-zsh and git setup on container creation
+- `.devcontainer/devcontainer.json`: VS Code dev container configuration; mounts WSL2 GPU via `/dev/dxg` and `/usr/lib/wsl`
+- `.devcontainer/Dockerfile`: NVIDIA CUDA 12.6.3 base image (Ubuntu 24.04), runs as root
+- `.devcontainer/entrypoint.sh`: Runs oh-my-zsh and git setup on container creation (once)
 - `.devcontainer/ohmyzsh-container-setup.sh`: Installs uv, oh-my-zsh, and shell plugins; creates default `~/.venv`
-- `.devcontainer/NON-ROOT-SETUP.md`: Troubleshooting guide for non-root container setup
+- `.devcontainer/set-git-global.sh`: Sets git user.name / user.email from `.env`
+- `.devcontainer/ROOTLESS-DOCKER-NOTES.md`: Why root-in-container is correct with rootless Docker
+- `.devcontainer/GPU-FIX-MIGRATION.md`: Notes on the `--gpus all` → `/dev/dxg` + `/usr/lib/wsl` migration (NVIDIA Container Toolkit 1.18+ / cgroup v2 fix)
 
 ### Environment Requirements
 - Create `.env` file in repo root:
@@ -85,20 +87,23 @@ systemctl --user restart docker.service
 - Copy `win_setup/.wslconfig` to `C:\Users\<UserName>\.wslconfig`
 
 ### Security Configuration
-- Rootless Docker daemon configuration in `~/.config/docker/daemon.json`
-- Isolated Docker network: `ai-sandbox` (172.20.0.0/16)
-- iptables rules: Default DROP with SSH (tcp/22) allowed
-- Non-root container user: `ubuntu` (UID 1000) with passwordless sudo
+- Rootless Docker daemon configuration written to `/etc/docker/daemon.json` (system-wide, read via `XDG_CONFIG_HOME`/`DOCKER_CONFIG` override)
+- Systemd user unit promoted to `/etc/systemd/user/docker.service`
+- Isolated Docker network: `ai-sandbox` bridge `docker-secure` (172.20.0.0/16)
+- iptables `DOCKER-USER`: default DROP on `docker-secure` ingress, SSH (tcp/22) allowed
+- auditd rules installed for `/etc/docker`, containerd, runc
+- Container runs as **root** (UID 0 in container = host UID 1000 via rootless user-namespace mapping — see `.devcontainer/ROOTLESS-DOCKER-NOTES.md`)
 
 ## File Structure
 
 ```
 ├── .devcontainer/          # Dev container configuration
-├── host_setup/            # WSL Ubuntu setup scripts
-├── container_testing/     # CUDA/PyTorch test environment
-├── archived_script_ref/   # Deprecated scripts and guides
-├── win_setup/            # Windows configuration files
-└── reports/              # Security audit reports
+├── host_setup/             # WSL Ubuntu setup scripts + per-script guides
+├── container_testing/      # CUDA/PyTorch test environment (uv project)
+├── archived_script_ref/    # Deprecated scripts and guides (incl. rootless_docker_guide.md)
+├── win_setup/              # Windows configuration (.wslconfig)
+├── reports/                # Security audit reports (docker-bench)
+└── images/                 # README screenshots
 ```
 
 ## Important Notes
@@ -107,6 +112,8 @@ systemctl --user restart docker.service
 - Rootless Docker socket: `/run/user/1000/docker.sock`
 - **Dev container runs as root** (container UID 0 = host UID 1000 with rootless Docker)
 - **CUDA version**: 12.6.3 (requires NVIDIA driver ≥ 530.30.02, tested with 566.36)
-- GPU passthrough requires Windows with WSL2 and NVIDIA drivers
-- D-Bus issues on WSL restart are handled by profile kickstart script
+- **GPU passthrough**: uses WSL2 device mount (`--device=/dev/dxg` + `/usr/lib/wsl` volume + `LD_LIBRARY_PATH=/usr/lib/wsl/lib`), not `--gpus all` — rootless Docker + NVIDIA Container Toolkit ≥1.18 breaks the old approach
+- NVIDIA Container Toolkit pinned to `1.17.8-1` in `setup-rootless-docker-wsl.sh`
+- D-Bus issues on WSL restart are handled by a kickstart block appended to `~/.zprofile` or `~/.profile`
 - uv installed to `/root/.local/bin/uv`; default venv at `/root/.venv` (Python 3.12)
+- Forwarded ports: 8080, 8501, 8188
