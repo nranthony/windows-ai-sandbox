@@ -31,4 +31,15 @@ if [[ ! -s "$BASE/claude.json" ]]; then
 fi
 chmod 644 "$BASE/claude.json"
 
+# Defensive credential-helper scrub — audit Finding C, layer 2.
+# VS Code Dev Containers can inject a host-routed git credential.helper into
+# .config/git/config (via VSCODE_GIT_IPC_HANDLE + a node shim in
+# .vscode-server). That helper forwards git auth to the host's credential
+# manager, bypassing the sandbox's network identity entirely. Strip any
+# credential.helper on every `up` so the setting can't survive a recreate
+# even if the host's `dev.containers.copyGitConfig: false` gets reverted.
+if [[ -f "$BASE/config/git/config" ]]; then
+  git config --file "$BASE/config/git/config" --unset-all credential.helper 2>/dev/null || true
+fi
+
 echo "profile state ready: $BASE"

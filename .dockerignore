@@ -12,3 +12,6 @@ container_testing/
 devcontainer-template/
 scripts/
 .devcontainer/
+proxy/
+seccomp.json
+docker-compose.yml

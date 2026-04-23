@@ -8,6 +8,11 @@
 #
 #   Everything a profile needs is baked here; per-profile auth/config lives in
 #   bind mounts under ~/.ai-sandbox/profiles/<profile>/ at runtime.
+#
+#   Base digest pin: to lock in a known-good base, run from the repo root:
+#     docker pull nvidia/cuda:12.6.3-base-ubuntu24.04
+#     DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' nvidia/cuda:12.6.3-base-ubuntu24.04 | sed 's/.*@//')
+#     sed -i "s|^FROM nvidia/cuda:12.6.3-base-ubuntu24.04.*|FROM nvidia/cuda:12.6.3-base-ubuntu24.04@$DIGEST|" Dockerfile
 # =============================================================================
 
 FROM nvidia/cuda:12.6.3-base-ubuntu24.04
@@ -17,14 +22,19 @@ ENV DEBIAN_FRONTEND=noninteractive \
     LC_ALL=C.UTF-8
 
 # ---------- system packages --------------------------------------------------
-# bubblewrap + socat: Claude Code's in-process sandbox.
 # tini: PID 1 signal handling.
 # build-essential + python3-venv: native builds for ML wheels.
 # ripgrep/jq/less/vim-tiny: agent + interactive ergonomics.
+# NOT installed (deliberate, see sandbox-hardening-package.md §7):
+#   - bubblewrap: Claude Code's in-process sandbox needs unprivileged user
+#                 namespaces, which our seccomp profile correctly blocks.
+#                 The container is the security boundary; bwrap-inside would
+#                 be redundant nesting that breaks Bash.
+#   - socat:      raw-TCP exfil channel bypassing the HTTP-only Squid proxy.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
       ca-certificates curl wget git \
-      bubblewrap socat tini \
+      tini \
       build-essential \
       python3 python3-pip python3-venv \
       ripgrep jq less vim-tiny \

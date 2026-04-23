@@ -90,17 +90,10 @@ ensure_repo_dir() {
   fi
 }
 
-ensure_network() {
-  if ! docker network inspect ai-sandbox >/dev/null 2>&1; then
-    fail "Docker network 'ai-sandbox' not found. Run host_setup/setup-rootless-docker-wsl.sh first."
-  fi
-}
-
 # --- dispatch ----------------------------------------------------------------
 case "$CMD" in
   up)
     ensure_repo_dir
-    ensure_network
     bash "$SCRIPT_DIR/scripts/init-profile-state.sh" "$PROFILE"
     info "Bringing up profile '$PROFILE' (project: $COMPOSE_PROJECT_NAME)"
     docker compose up -d "$@"
@@ -143,7 +136,6 @@ case "$CMD" in
 
   rebuild)
     ensure_repo_dir
-    ensure_network
     bash "$SCRIPT_DIR/scripts/init-profile-state.sh" "$PROFILE"
     info "Rebuilding image + recreating profile '$PROFILE'"
     docker compose build ai-sandbox

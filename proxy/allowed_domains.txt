@@ -1,0 +1,65 @@
+# =============================================================================
+# Outbound domain allowlist for windows-ai-sandbox
+# =============================================================================
+# One domain per line. A leading dot (e.g. .github.com) matches all subdomains.
+# Keep this list minimal — fewer domains = smaller attack surface.
+#
+# This repo's primary workload is CUDA/ML dev, so package registries and
+# CDNs are pre-enabled by default (unlike macolima's "planning mode only"
+# gating). If running Claude Code in fully autonomous mode with no dev
+# workload, comment the "Dev/ML essentials" block below to shrink egress.
+#
+# Hot-reload after edits:
+#   COMPOSE_PROJECT_NAME=ai-sandbox-<profile> PROFILE=<profile> \
+#     docker compose restart egress-proxy
+# =============================================================================
+
+# --- Claude / Anthropic (always on) ---
+.anthropic.com
+.claude.com
+.claude.ai
+statsig.anthropic.com
+
+# --- VS Code Marketplace (IDE integration) ---
+marketplace.visualstudio.com
+.vscode-unpkg.net
+update.code.visualstudio.com
+
+# =============================================================================
+# Dev/ML essentials — comment out for autonomous-only agent runs
+# =============================================================================
+
+# --- Source code / git ---
+.github.com
+.githubusercontent.com
+.githubassets.com
+.gitlab.com
+.gitlab-static.net
+
+# --- Python package ecosystem ---
+.pypi.org
+.files.pythonhosted.org
+.astral.sh
+
+# --- PyTorch / NVIDIA CUDA wheels ---
+download.pytorch.org
+.pytorch.org
+
+# --- Node.js / npm (Claude Code updates + per-repo npm) ---
+.registry.npmjs.org
+.npmjs.com
+.nodejs.org
+deb.nodesource.com
+
+# --- NVIDIA container + compute stack (used during image builds / apt updates) ---
+.nvidia.com
+.nvidia.github.io
+
+# --- OS packages (only needed if you apt-get inside the container) ---
+.ubuntu.com
+.debian.org
+archive.ubuntu.com
+security.ubuntu.com
+
+# --- GitHub CLI / HashiCorp-style TLS bootstrap ---
+cli.github.com

@@ -1,13 +1,22 @@
 # =============================================================================
-# windows-ai-sandbox — multi-profile CUDA + Claude Code stack
+# windows-ai-sandbox — multi-profile CUDA + Claude Code stack (hardened)
 # =============================================================================
 # Parameterized by PROFILE. Drive via scripts/profile.sh, which exports PROFILE
 # and COMPOSE_PROJECT_NAME=ai-sandbox-<profile>. Each profile gets its own
-# container, reusing the single shared image (windows-ai-sandbox:latest) and
-# the ai-sandbox Docker network created by host_setup/setup-rootless-docker-wsl.sh.
+# containers, compose-managed networks, and state dir — concurrent profiles
+# do not share any of these.
+#
+# Network model (load-bearing — see sandbox-hardening-package.md §4):
+#   sandbox-internal (internal: true)  — agent-only; no direct internet
+#   sandbox-external                   — Squid proxy's outbound side
+# The proxy is the ONLY way out. Allowlist: proxy/allowed_domains.txt
 # =============================================================================
 
 services:
+
+  # ---------------------------------------------------------------------------
+  # CUDA + Claude Code agent container — one per profile
+  # ---------------------------------------------------------------------------
   ai-sandbox:
     build:
       context: .
@@ -16,13 +25,35 @@ services:
     container_name: ai-sandbox-${PROFILE:?PROFILE env var required — use scripts/profile.sh}
     hostname: ai-sandbox-${PROFILE}
 
-    # GPU passthrough (WSL2 native — replaces --gpus all, which is broken with
-    # rootless Docker + NVIDIA Container Toolkit ≥1.18, see .devcontainer/GPU-FIX-MIGRATION.md)
+    # GPU passthrough — WSL2-native, not --gpus all (see .devcontainer/GPU-FIX-MIGRATION.md).
     devices:
       - /dev/dxg
 
-    # --userns=host in the old devcontainer.json is implicit under rootless
-    # Docker. Verify with:  docker exec ... cat /proc/self/uid_map  →  0 1000 1
+    # Hardening — non-negotiable per audit §4.
+    security_opt:
+      - no-new-privileges:true
+      - seccomp=./seccomp.json
+    cap_drop:
+      - ALL
+    pids_limit: 512
+    mem_limit: 8g
+    memswap_limit: 8g
+    cpus: 4
+    ulimits:
+      nofile:
+        soft: 2048
+        hard: 8192
+      nproc:
+        soft: 512
+        hard: 512
+
+    # tmpfs for scratch + npm/local under /root (container root = host UID 1000
+    # via rootless Docker userns=host). noexec explicit per audit Finding G.
+    tmpfs:
+      - /tmp:size=1g,noexec,nosuid,nodev
+      - /run:size=64m,noexec,nosuid,nodev
+      - /root/.npm-global:size=512m,noexec,nosuid,nodev
+      - /root/.local:size=256m,noexec,nosuid,nodev
 
     volumes:
       # The profile's repo parent folder = /workspace. Holds many repos.
@@ -45,18 +76,60 @@ services:
       - DOCKER_HOST=unix:///run/user/1000/docker.sock
       - GIT_CONFIG_GLOBAL=/root/.config/git/config
       - SANDBOX_PROFILE=${PROFILE}
-
-    # No env_file: GIT_NAME / GIT_EMAIL from host .env are consumed on the host
-    # side by scripts/setup.sh, which seeds them via `git config --global`.
+      # All outbound HTTP(S) is forced through the Squid sidecar.
+      - HTTP_PROXY=http://egress-proxy:3128
+      - HTTPS_PROXY=http://egress-proxy:3128
+      - http_proxy=http://egress-proxy:3128
+      - https_proxy=http://egress-proxy:3128
+      - NO_PROXY=localhost,127.0.0.1,egress-proxy
 
     networks:
-      - ai-sandbox
+      - sandbox-internal
+
+    depends_on:
+      - egress-proxy
 
     working_dir: /workspace
     command: ["sleep", "infinity"]
     restart: unless-stopped
 
+  # ---------------------------------------------------------------------------
+  # Egress proxy — domain-allowlisted outbound traffic
+  # ---------------------------------------------------------------------------
+  egress-proxy:
+    image: ubuntu/squid:latest
+    container_name: egress-proxy-${PROFILE}
+    hostname: egress-proxy
+    read_only: true
+    tmpfs:
+      - /var/spool/squid:size=256m
+      - /var/log/squid:size=64m
+      - /run:size=8m
+    volumes:
+      - ./proxy/squid.conf:/etc/squid/squid.conf:ro
+      - ./proxy/allowed_domains.txt:/etc/squid/allowed_domains.txt:ro
+    # Squid needs SETUID+SETGID at startup to drop from root to the `proxy`
+    # user. 3128 is unprivileged, so NET_BIND_SERVICE is NOT needed.
+    cap_drop:
+      - ALL
+    cap_add:
+      - SETUID
+      - SETGID
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 512m
+    cpus: 0.5
+    networks:
+      - sandbox-internal
+      - sandbox-external
+    restart: unless-stopped
+
 networks:
-  ai-sandbox:
-    name: ai-sandbox
-    external: true
+  # Agent-only network. internal: true is LOAD-BEARING — removing it turns the
+  # proxy into a suggestion (see audit §4).
+  sandbox-internal:
+    driver: bridge
+    internal: true
+  # Proxy's outbound side only.
+  sandbox-external:
+    driver: bridge
