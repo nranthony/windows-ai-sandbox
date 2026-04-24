@@ -88,8 +88,11 @@ else
 fi
 
 # --- deliberately-absent tools ----------------------------------------------
+# ssh: openssh-client purged in Dockerfile so VS Code's SSH_AUTH_SOCK
+# forwarding has no tool to weaponize even if the host setting reverts.
 command -v bwrap  >/dev/null && fail "bwrap present (should be uninstalled — audit §7)"  || pass "bwrap absent (intended)"
 command -v socat  >/dev/null && fail "socat present (should be uninstalled — audit §7)"  || pass "socat absent (intended)"
+command -v ssh    >/dev/null && fail "ssh present (openssh-client should be purged)"     || pass "ssh absent (intended)"
 
 # --- expected tools ---------------------------------------------------------
 command -v claude >/dev/null && pass "claude CLI present" || fail "claude CLI missing"
@@ -109,10 +112,18 @@ else
 fi
 
 # --- SSH agent forwarding NOT enabled (audit Finding A) ---------------------
+# Two signals here — VS Code can leave either the env var or the socket
+# file behind, and in some attach flows one appears without the other.
 if [[ -n "${SSH_AUTH_SOCK:-}" ]]; then
-  warn "SSH_AUTH_SOCK=$SSH_AUTH_SOCK (disable VS Code remote.SSH.enableAgentForwarding)"
+  fail "SSH_AUTH_SOCK=$SSH_AUTH_SOCK (disable VS Code remote.SSH.enableAgentForwarding)"
 else
-  pass "no SSH agent forwarding"
+  pass "SSH_AUTH_SOCK unset (no agent forwarding)"
+fi
+# shellcheck disable=SC2144 -- glob check, not iteration
+if ls /tmp/vscode-ssh-auth-*.sock >/dev/null 2>&1; then
+  fail "VS Code SSH auth socket present in /tmp"
+else
+  pass "no VS Code SSH auth socket in /tmp"
 fi
 
 # --- git credential.helper NOT injected (audit Finding C) -------------------

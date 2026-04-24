@@ -1,139 +1,194 @@
 # Custom Windows AI Sandbox
 ![tech stack logo](images/ai-sandbox-v02crop800px.png)
 
-Setup notes and scripts for my WSL2 Ubuntu 'AI Sandbox'. Work in progress; comments and testing welcome. See [Rootless Docker Guide](./archived_script_ref/rootless_docker_guide.md) for a comprehensive description of script functionality.
+WSL2 Ubuntu 24.04 + rootless Docker + NVIDIA CUDA, organized as a **profile-based sandbox**: one shared hardened image, many per-profile workspaces, Squid-gated egress. Adapted from the sibling [macolima](https://github.com/nranthony/macolima) project.
 
-#### Windows OS &#8594; WSL2 Ubuntu 24.04 LTS &#8594; Rootless Docker &#8594; Custom AI Sandbox Containers
+#### Windows OS &#8594; WSL2 Ubuntu 24.04 LTS &#8594; Rootless Docker &#8594; `windows-ai-sandbox:latest` (one per profile)
 
-# General Information
+---
 
-This repository contains scripts and notes for configuring a secure, rootless Docker environment specifically on WSL2 running Ubuntu on Windows.
+## Quick Start
 
-# Usage
+```bash
+# One-time host setup (see "Initial Setup" below)
+cd host_setup && ./setup-rootless-docker-wsl.sh && sudo ./wsl_conf_update.sh
 
-* **Clone Repo**
+# Build the shared image
+scripts/profile.sh build
 
-* **In Windows:**
-  * Copy `\win_setup\.wslconfig` to `C:\Users\<UserName>\.wslconfig`; this enables Windows/3rd Party firewall usage.
-  * NOTE - on creating Ubuntu pwsh/cmd will auto log into the terminal.  Issue with command/terminal outputs can happen if you jump straight in with that terminal.  Use `exit`, and specifically open a new teminal tab. 
+# Bring up a profile (first profile = nranthony, workspace = ~/repo/nranthony/)
+mkdir -p ~/repo/nranthony
+scripts/profile.sh nranthony up
+scripts/profile.sh nranthony auth           # claude login (one-time)
+scripts/profile.sh nranthony auth-github    # optional
+scripts/profile.sh nranthony attach         # zsh into the container
+```
 
-* **Inside WSL Ubuntu**
-  * `cd` into `host_setup`
-  * NOTE - **sudo** is required for these scripts for installs and modification of system files - PLEASE read scripts to convince yourself the scripts are not malicious.
-  * Run `./setup-rootless-docker-wsl.sh`
-    * This will setup rootless docker, and only needs to be run ONCE!
-    * NOTE - if docker doesn't restart, it may have gotten stuck. Run `journalctl --user -u docker -n 50` and `systemctl --user status docker.service` to start the debug diagnostics.
-  * Run `sudo ./wsl_conf_update.sh`
-  * (Optional) Run `./ohmyzsh-host-setup.sh`
-  * `exit` (twice if inside zsh), and in Powershell run `wsl --shutdown`
-    * WAIT at least 8 seconds and reopen the WSL Ubuntu terminal
-  * `cd` back in to repo, and run `code .` and ensure Remote Development extension pack is installed <span style="color:red; font-weight:bold">IMPORTANT!</span> &#8594; Code must be run from inside WSL2 Ubuntu, not from Windows. Running from Windows can switch to rootful Docker if Docker installed in Windows OS.
-    * _Side Note_ - run `zsh` to use launch into oh-my-zsh with p10k settings.
-  * Add a .env file in repo workspace root and add git name and email. Don't forget this part; the dev container will fail if these environment variables are not available. I typically have a .env file for this stored in C:\dev\git and drag and drop for ease.
-  * ``` bash
-    GIT_NAME="dave"
-    GIT_EMAIL="1234567+dave@users.noreply.github.com"
-    ```
-  * Ctrl/CMD + Shift + P and select: `Dev Containers: Rebuild and Reopen in Container`
-  * Rootless docker should start as a dev container; see `./.devcontainer/devcontainer.json` for parameters.
-    * Container runs as **`root`** (container UID 0 = host UID 1000 with rootless Docker)
-    * `./.devcontainer/entrypoint.sh` will setup git global variables, and run a full ohmyzsh setup script.
-    * Typically need to hit any key and then kill that terminal in VSCode and open a fresh one.
-    * Shell defaults to `zsh` with oh-my-zsh configuration
-  * **Inside Dev Container**
-    * **Container Configuration**
-      * Base image: `nvidia/cuda:12.6.3-base-ubuntu24.04`
-      * User: `root` (container UID 0 = host UID 1000 with rootless Docker)
-      * Python: uv installed at `/root/.local/bin/uv`; default venv at `/root/.venv` (Python 3.12)
-      * Rootless Docker provides isolation despite running as root in container
-    * **Testing GPU**
-      * Run `cd container_testing && uv sync` to install torch/torchvision (~2 GB from the PyTorch CUDA 12.6 index — go make a cuppa).
-      * Open `./container_testing/cuda_test.ipynb`, and ensure the kernel is set to the `.venv` Python interpreter.  **Run All** and you should see `CUDA available:  True` printed from the first cell.
+Day-to-day: `scripts/profile.sh <profile> {up,down,attach,logs,status,exec,clean}`. See `scripts/profile.sh list` for all profiles.
 
+---
 
+## What's inside
 
+| Layer | Details |
+|---|---|
+| Base image | NVIDIA CUDA 12.6.3 on Ubuntu 24.04 (digest-pinned) |
+| Tools baked in | Claude Code, GitHub CLI (`gh`), GitLab CLI (`glab`), `uv`, zsh + oh-my-zsh + powerlevel10k |
+| Runtime hardening | `cap_drop: ALL`, `seccomp=./seccomp.json`, `no-new-privileges`, tmpfs noexec, `pids_limit:512`, `mem_limit:8g` |
+| Network | `sandbox-internal` (internal:true) + Squid sidecar on `sandbox-external`; allowlist is the only way out |
+| User | root-in-container (UID 0) — remaps to host UID 1000 under rootless Docker userns=host |
+| GPU | `/dev/dxg` + `/usr/lib/wsl` bind + `LD_LIBRARY_PATH=/usr/lib/wsl/lib` (WSL2-native, not `--gpus all`) |
+| Persistent state | `~/.ai-sandbox/profiles/<profile>/` — outlives container recreates |
 
-## Insert Into New Repo
-* Once rootless docker setup inside WSL2 Ubuntu, copy and paste `.devcontainer` folder into any given repo and modify as needed, use `Dev Containers: Rebuild and Reopen in Container` and continue to develop in that sandbox.
+**Not installed, by design** (see `sandbox-hardening-package.md` §7): `bubblewrap`, `socat`, `openssh-client`. These are the tools that would weaponize container escape or VS Code agent-forwarding leaks. See `scripts/verify-sandbox.sh` for the full tripwire.
+
+---
+
+## Initial Setup
+
+### Windows side
+1. Copy `win_setup/.wslconfig` → `C:\Users\<UserName>\.wslconfig` (enables Windows firewall integration).
+2. Open WSL Ubuntu in a fresh terminal tab (not the one auto-launched by `pwsh` — it has known stdout quirks).
+
+### WSL Ubuntu side
+```bash
+cd host_setup
+./setup-rootless-docker-wsl.sh     # rootless Docker (sudo used internally — read first!)
+sudo ./wsl_conf_update.sh          # /etc/wsl.conf
+./ohmyzsh-host-setup.sh            # optional: host-side oh-my-zsh
+exit                               # then `wsl --shutdown` in Powershell, wait 8s, reopen
+```
+
+### VS Code host settings (important — audit Findings A + B)
+Add to your VS Code `settings.json`:
+```jsonc
+{
+  "remote.SSH.enableAgentForwarding": false,
+  "dev.containers.copyGitConfig": false
+}
+```
+These prevent host SSH agent sockets and `~/.gitconfig` (including credential helpers) from leaking into the container. The image also purges `openssh-client` and `init-profile-state.sh` scrubs injected credential helpers on every `up`, as belt-and-braces.
+
+### Repo root `.env`
+```bash
+GIT_NAME="your-name"
+GIT_EMAIL="your-email@example.com"
+```
+Used by `scripts/setup.sh` to seed `git config --global user.name/email` inside the profile.
+
+---
+
+## Profile Workflow
+
+### Bring up a profile
+```bash
+mkdir -p ~/repo/<profile>                # workspace parent (holds one or more repos)
+scripts/profile.sh <profile> up          # creates state dirs, brings up agent + egress-proxy
+scripts/profile.sh <profile> auth        # claude login — one-time; token persists in ~/.ai-sandbox/
+```
+
+### Commands
+| Command | Action |
+|---|---|
+| `up` | brings up stack + seeds state dirs |
+| `down` | stops container (state preserved) |
+| `attach` | zsh into the agent container |
+| `auth` / `auth-github` / `auth-gitlab` | interactive logins |
+| `logs` / `status` | compose logs / ps |
+| `build` | rebuild shared image (all profiles pick up) |
+| `rebuild` | build + recreate this profile |
+| `reset-settings` | overwrite claude settings.json from template (backs up old) |
+| `clean` [`--deep`] | prune rotating state (backups, paste-cache, MCP logs) |
+| `list` | all profiles with up/down status |
+| `exec <cmd>` | run arbitrary command inside the container |
+
+### Per-profile state
+```
+~/.ai-sandbox/profiles/<profile>/
+├── claude-home/       # claude sessions, settings, credentials, MCP
+├── claude.json        # first-run state, oauthAccount
+├── cache/             # npm, uv, pip caches
+└── config/            # gh tokens, glab tokens, git config
+```
+
+### Inside the container
+- `claude`, `gh`, `glab`, `uv`, `python3`, `node` pre-installed.
+- `/workspace` = `~/repo/<profile>/` (many repos).
+- `/root/.venv` (Python 3.12) — VS Code's default interpreter for smoke tests.
+- Claude's `Bash` tool is restricted by `config/claude-settings.json` (pip/uv/git push/curl/ssh denied). The interactive zsh is NOT restricted — install deps yourself during planning, then hand off to the agent.
+
+---
+
+## VS Code
+
+Two flows supported:
+1. **Attach to Running Container** (simplest): `scripts/profile.sh <profile> up` first, then in VS Code: `Ctrl+Shift+P` → `Dev Containers: Attach to Running Container...` → `ai-sandbox-<profile>`.
+2. **Reopen in Container** (uses devcontainer.json): `export PROFILE=<profile> && code .` in this repo, then `Dev Containers: Reopen in Container`. VS Code delegates to the shared `docker-compose.yml`.
+
+For other repos under `~/repo/<profile>/<repo>/`, copy `devcontainer-template/devcontainer.json` → `<repo>/.devcontainer/devcontainer.json`. Same `PROFILE=...` requirement.
+
+---
+
+## Testing GPU/CUDA
+```bash
+scripts/profile.sh <profile> exec bash -lc '
+  cd /workspace/windows-ai-sandbox/container_testing && uv sync && \
+  uv run python -c "import torch; print(torch.cuda.is_available())"
+'
+# Expected: True
+```
+Or inside the attached container: `jupyter notebook container_testing/cuda_test.ipynb` — `CUDA available: True` in the first cell.
+
+---
+
+## Hardening Verification
+```bash
+scripts/profile.sh <profile> exec bash /workspace/windows-ai-sandbox/scripts/verify-sandbox.sh
+```
+Expected summary: direct internet blocked, `api.anthropic.com` reachable via proxy, `example.com` blocked, `CapEff=0`, `NoNewPrivs=1`, `Seccomp=2`, `bwrap/socat/ssh` absent, no leaked `/root/.gitconfig`, no `SSH_AUTH_SOCK`, no `credential.helper` injection.
+
+## Image CVE Scan (trivy)
+```bash
+# On WSL host (see scripts/trivy-scan.sh header for install instructions)
+scripts/trivy-scan.sh              # config + secret + image
+scripts/trivy-scan.sh image        # CVE scan only
+```
+Accepted CVEs live in `.trivyignore.yaml`; each has an `expired_at` so it re-surfaces on re-scan.
+
+---
 
 ## Troubleshooting
 
-### Permission Issues
-If you encounter permission errors in the dev container, see **`.devcontainer/ROOTLESS-DOCKER-NOTES.md`** for:
-- Bind mount permission issues
-- Sudo not working (`no new privileges` flag)
-- File ownership problems
-- CUDA version compatibility
+### Permission issues
+See `.devcontainer/ROOTLESS-DOCKER-NOTES.md` — bind mount ownership, sudo blocked by `no-new-privileges`, CUDA version matching.
 
-### Common Issues
-* **sudo blocked**: Remove `--security-opt=no-new-privileges` from `devcontainer.json` (already done)
-* **CUDA version mismatch**: Container uses CUDA 12.6.3 (requires driver ≥530.30, tested with 566.36)
-* **Docker not starting**: Run `systemctl --user restart docker.service` on WSL host
+### Common
+- **Docker not starting on WSL resume**: `systemctl --user restart docker.service`. D-Bus race is kickstarted from `.zprofile`/`.profile` by the host setup.
+- **CUDA version mismatch**: container uses 12.6.3 (driver ≥530.30).
+- **VS Code `Exec format error` after Ubuntu upgrade**: `wsl --shutdown` in Powershell, reopen.
+- **`code .` from Windows opens rootful Docker**: always launch from inside WSL.
 
-## Next Steps
-* **Creating Container Images** - Scripts and controls for saving AI Sandbox images once setup complete - currently need to wait for ohmyzsh to setup, and `uv sync` for ML packages in any given project
-* **Container Breakout Testing** - see, for example: https://unit42.paloaltonetworks.com/container-escape-techniques
-
-# Miscellaneous Notes
-
-### Zsh & Oh-My-Zsh
-* I love ohmyzsh and like to have it everywhere possible.  The `./.devcontainer/entrypoint.sh` will run a container ohmyzsh setup script.  The host equivalent is also useful, and will require a sudo password for installs and font cache refresh. Don't take my word for it; read the script to make sure !
-![OhMyZsh Pretty Pretty](images/zsh-in-ai-sandbox.png)
-### Issue - D-Bus persistence
-* Issues with dbus and bus not being setup on reboots of WSL or Win OS appear to be a race condition between systemd and WSLg. D-Bus socket does not activate, and docker does not start properly.  A *kickstart* method has been implemented into .profile, together with a passwordless sudo for restarting the user service only.
-  * docker.service file moved to permanent location in `/etc/systemd/user/`
-
-### Modified Service File
-
-~~Ensure the Docker service environment paths in `/home/[username]/.config/systemd/user/docker.service` are wrapped in quotes:~~
-
-```ini
-[Service]
-Environment=PATH="/usr ... "
-```
-
-**UPDATED** The path issue is now handled by the setup script. If any problems persist, refer to the uninstall section below.
-
-## VSCode Error Post Ubuntu Updates
-
-Running frequent updates are advised, e.g.:
-```sh 
-sudo apt update && sudo apt upgrade && sudo reboot
-```
-This can lead to:  
-`❯ code --version
-/mnt/c/Program Files/Microsoft VS Code/bin/code: 61: /mnt/c/Program Files/Microsoft VS Code/Code.exe: Exec format error`
-
-Exit Ubuntu and shutdown in Windows: `wsl --shutdown`  
-
-## Uninstalling Rootless Docker
-
-To reset your environment, execute:
-
+### Uninstall rootless Docker
 ```bash
-/usr/bin/dockerd-rootless-setuptool.sh uninstall -f; /usr/bin/rootlesskit rm -rf /home/"$(id -un)"/.local/share/docker
-/usr/bin/rootlesskit rm -rf /home/"$(id -un)"/.local/share/docker
+/usr/bin/dockerd-rootless-setuptool.sh uninstall -f
+/usr/bin/rootlesskit rm -rf "$HOME/.local/share/docker"
 ```
 
-## Docker security and testing
+---
 
-### Docker Bench
+## Docker Security Audit
 
-Given that the docker bench is run rootless, there are a number of moot points - anybody feedback from those with time/interest in finding ways to harden this is truly appreciated.
+Docker Bench results under `./reports/docker-bench-security-report.md`. Many rootful-Docker findings don't apply here (rootless daemon, user-namespaced); feedback on further hardening welcome.
 ```bash
 git clone https://github.com/docker/docker-bench-security.git
-cd docker-bench-security
-# run docker bench in user to access user specific docker socket - sudo testing is not the idea here
-docker-bench-security.sh
+cd docker-bench-security && ./docker-bench-security.sh
 ```
-see `./reports/docker-bench-security-report.md`
 
-# Resources
+---
 
-## WSL
-* Windows and WSL Ubuntu Host WSL docs: https://learn.microsoft.com/en-us/windows/wsl/wsl-config
+## Resources
+- WSL config: https://learn.microsoft.com/en-us/windows/wsl/wsl-config
+- CUDA on WSL: https://docs.nvidia.com/cuda/wsl-user-guide/
+- Container breakout reading: https://unit42.paloaltonetworks.com/container-escape-techniques
 
-## CUDA
-* See `Docker support`: https://docs.nvidia.com/cuda/wsl-user-guide/index.html#nvidia-compute-software-support-on-wsl-2
-<!-- * Pre installation steps:  https://docs.nvidia.com/cuda/cuda-installation-guide-linux/#windows-subsystem-for-linux -->
-
+![OhMyZsh inside the sandbox](images/zsh-in-ai-sandbox.png)

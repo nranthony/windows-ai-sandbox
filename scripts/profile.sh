@@ -17,6 +17,11 @@
 #   status          docker compose ps for this profile
 #   build           force-rebuild the shared image (all profiles pick it up)
 #   rebuild         build + recreate this profile's container
+#   reset-settings  overwrite this profile's claude settings.json from
+#                   config/claude-settings.json (backs up the old one)
+#   clean           prune rotating state (old .claude.json backups, paste-cache,
+#                   shell-snapshots). Pass --deep to also drop MCP debug logs
+#                   and settings.json.bak.* backups.
 #   list            list all existing profiles with up/down status
 #   exec <cmd...>   run arbitrary command inside the container
 # =============================================================================
@@ -145,6 +150,61 @@ case "$CMD" in
   exec)
     [[ $# -ge 1 ]] || fail "Usage: scripts/profile.sh $PROFILE exec <cmd> [args...]"
     exec docker exec -it "$AGENT" "$@"
+    ;;
+
+  reset-settings)
+    # Overwrite this profile's claude-home/settings.json from the template.
+    # init-profile-state.sh only seeds when absent; use this when the
+    # template evolves and you want to apply it to an existing profile.
+    src="$SCRIPT_DIR/config/claude-settings.json"
+    dst="$PROFILES_ROOT/$PROFILE/claude-home/settings.json"
+    [[ -f "$src" ]] || fail "template missing: $src"
+    mkdir -p "$(dirname "$dst")"
+    if [[ -f "$dst" ]]; then
+      backup="$dst.bak.$(date +%Y%m%d-%H%M%S)"
+      cp "$dst" "$backup"
+      info "backed up existing settings → $backup"
+    fi
+    cp "$src" "$dst"
+    ok "settings.json reset for '$PROFILE'. Restart claude inside the container to pick up."
+    ;;
+
+  clean)
+    # Prune rotating state that Claude/npm/zsh regenerate on demand. Safe by default.
+    # --deep also drops MCP debug logs and reset-settings backups.
+    # Never touches: .credentials.json, live settings.json, live claude.json,
+    # file-history, projects/, plugins/, gitstatusd binary.
+    deep=0
+    for a in "$@"; do [[ "$a" == "--deep" ]] && deep=1; done
+    p="$PROFILES_ROOT/$PROFILE"
+    [[ -d "$p" ]] || fail "no state dir: $p"
+
+    info "cleaning $p (deep=$deep)"
+
+    # Claude Code's own rotating .claude.json backups — keep the single newest.
+    bdir="$p/claude-home/backups"
+    if [[ -d "$bdir" ]]; then
+      # shellcheck disable=SC2012
+      ls -t "$bdir"/.claude.json.backup.* 2>/dev/null | tail -n +2 | xargs -r rm -f
+      rm -f "$bdir"/.claude.json.corrupted.* 2>/dev/null || true
+      ok "pruned $bdir (kept newest .claude.json.backup)"
+    fi
+
+    # Paste cache and shell snapshots — regenerated per session.
+    rm -rf "$p/claude-home/paste-cache" "$p/claude-home/shell-snapshots" 2>/dev/null || true
+    mkdir -p "$p/claude-home/paste-cache" "$p/claude-home/shell-snapshots"
+    ok "reset paste-cache + shell-snapshots"
+
+    if [[ "$deep" == "1" ]]; then
+      find "$p/cache/claude-cli-nodejs" -type f -name '*.jsonl' -delete 2>/dev/null || true
+      ok "dropped MCP debug logs under cache/claude-cli-nodejs"
+      find "$p/claude-home" -maxdepth 1 -name 'settings.json.bak.*' -delete 2>/dev/null || true
+      ok "dropped settings.json.bak.* backups"
+    else
+      info "skip --deep targets (MCP logs, settings.json.bak.*) — pass --deep to include"
+    fi
+
+    ok "clean done for '$PROFILE'"
     ;;
 
   *)

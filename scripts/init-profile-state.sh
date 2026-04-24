@@ -31,6 +31,16 @@ if [[ ! -s "$BASE/claude.json" ]]; then
 fi
 chmod 644 "$BASE/claude.json"
 
+# Seed claude-home/settings.json with our restricted-agent template if the
+# profile doesn't have one yet. Only runs on first `up` — use `profile.sh
+# <p> reset-settings` to re-seed after the template changes.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SEED="$SCRIPT_DIR/config/claude-settings.json"
+DEST="$BASE/claude-home/settings.json"
+if [[ ! -f "$DEST" ]] && [[ -f "$SEED" ]]; then
+  cp "$SEED" "$DEST"
+fi
+
 # Defensive credential-helper scrub — audit Finding C, layer 2.
 # VS Code Dev Containers can inject a host-routed git credential.helper into
 # .config/git/config (via VSCODE_GIT_IPC_HANDLE + a node shim in

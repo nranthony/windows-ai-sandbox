@@ -1,0 +1,42 @@
+# =============================================================================
+# .trivyignore.yaml — CVEs & misconfigs explicitly accepted for
+# windows-ai-sandbox. Every entry MUST carry a statement (why accepted) and
+# expired_at (when to re-evaluate). On expiry the entry goes inactive and the
+# finding re-appears in scans — that's the re-check signal.
+#
+# Workflow on re-check:
+#   1. Re-run `scripts/trivy-scan.sh image`.
+#   2. If still present: check upstream for a fix. If fixed, bump the tool
+#      in the Dockerfile and re-scan (the entry can then be deleted).
+#      If not fixed, extend expired_at with a refreshed statement.
+#   3. If gone: delete the entry.
+# =============================================================================
+
+vulnerabilities:
+  # --- glab / Go stdlib (placeholder; verify after first trivy scan) ------
+  # glab is pinned to v1.93.0 (GLAB_VERSION ARG). Re-check the Go version
+  # printed by `trivy image windows-ai-sandbox:latest` and confirm whether
+  # the four 2026-Q1 Go stdlib CVEs (CVE-2026-32280/32281/32283/33810) are
+  # still flagged. If yes, leave these entries; if not, delete them.
+  # In this sandbox glab only talks gitlab.com over TLS via the Squid HTTP
+  # proxy (no MITM), so the TLS session terminates at gitlab.com and glab's
+  # x509 code is the validator. Reachable exploit requires compromising the
+  # Squid proxy or the WSL networking — neither is agent-reachable.
+  - id: CVE-2026-32280
+    statement: "glab Go stdlib TLS DoS; verify on first scan whether v1.93.0 still bundles vulnerable Go."
+    expired_at: 2026-05-21
+  - id: CVE-2026-32281
+    statement: "glab Go stdlib x509 DoS; verify on first scan."
+    expired_at: 2026-05-21
+  - id: CVE-2026-32283
+    statement: "glab Go stdlib TLS key update DoS; verify on first scan."
+    expired_at: 2026-05-21
+  - id: CVE-2026-33810
+    statement: "glab Go stdlib x509 DNS constraint bypass; verify on first scan."
+    expired_at: 2026-05-21
+
+misconfigurations:
+  # --- Dockerfile cosmetic -------------------------------------------------
+  - id: DS-0026
+    statement: "No HEALTHCHECK — interactive dev container, not orchestrated by anything that reads the signal."
+    expired_at: 2027-04-21

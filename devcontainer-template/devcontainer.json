@@ -1,16 +1,12 @@
 {
-  "//": "Slim shim for VS Code 'Reopen in Container'. Delegates to the shared docker-compose.yml so VS Code sees the same per-profile state the CLI does. Before launching VS Code, export PROFILE=<name> in the shell so compose resolves the bind mounts correctly. The CLI equivalent is: scripts/profile.sh <profile> up && scripts/profile.sh <profile> attach.",
+  "//": "Drop this file into any repo under ~/repo/<profile>/<repo>/.devcontainer/devcontainer.json to get a 'Reopen in Container' workflow for that repo. Requires PROFILE to be exported in the shell before launching VS Code (e.g. `export PROFILE=nranthony && code .`). VS Code will delegate to windows-ai-sandbox's compose file, so CLI and IDE share the same per-profile container.",
 
-  "name": "windows-ai-sandbox",
-  "dockerComposeFile": ["../docker-compose.yml"],
+  "name": "windows-ai-sandbox (${localEnv:PROFILE})",
+  "dockerComposeFile": ["../../windows-ai-sandbox/docker-compose.yml"],
   "service": "ai-sandbox",
-  "workspaceFolder": "/workspace/windows-ai-sandbox",
+  "workspaceFolder": "/workspace/${localWorkspaceFolderBasename}",
   "shutdownAction": "none",
 
-  // Finding D — root-in-container is intentional under rootless Docker
-  // userns=host (container UID 0 = host UID 1000). Making this explicit
-  // prevents VS Code from trying to chown recursively or spawn orphan
-  // root shells during attach.
   "remoteUser": "root",
   "containerUser": "root",
   "updateRemoteUserUID": false,

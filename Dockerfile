@@ -9,13 +9,14 @@
 #   Everything a profile needs is baked here; per-profile auth/config lives in
 #   bind mounts under ~/.ai-sandbox/profiles/<profile>/ at runtime.
 #
-#   Base digest pin: to lock in a known-good base, run from the repo root:
-#     docker pull nvidia/cuda:12.6.3-base-ubuntu24.04
-#     DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' nvidia/cuda:12.6.3-base-ubuntu24.04 | sed 's/.*@//')
-#     sed -i "s|^FROM nvidia/cuda:12.6.3-base-ubuntu24.04.*|FROM nvidia/cuda:12.6.3-base-ubuntu24.04@$DIGEST|" Dockerfile
+#   Base digest pinned — captured at first successful build so the image is
+#   reproducible across rebuilds. To re-pin after bumping CUDA:
+#     docker pull nvidia/cuda:<new-tag>
+#     docker inspect --format='{{index .RepoDigests 0}}' nvidia/cuda:<new-tag>
+#   and paste the @sha256:... portion below.
 # =============================================================================
 
-FROM nvidia/cuda:12.6.3-base-ubuntu24.04
+FROM nvidia/cuda:12.6.3-base-ubuntu24.04@sha256:c87e78933f4c16e3272123bf2f75537306596d0fbaa395a29696a22786e5ee0e
 
 ENV DEBIAN_FRONTEND=noninteractive \
     LANG=C.UTF-8 \
@@ -26,11 +27,17 @@ ENV DEBIAN_FRONTEND=noninteractive \
 # build-essential + python3-venv: native builds for ML wheels.
 # ripgrep/jq/less/vim-tiny: agent + interactive ergonomics.
 # NOT installed (deliberate, see sandbox-hardening-package.md §7):
-#   - bubblewrap: Claude Code's in-process sandbox needs unprivileged user
-#                 namespaces, which our seccomp profile correctly blocks.
-#                 The container is the security boundary; bwrap-inside would
-#                 be redundant nesting that breaks Bash.
-#   - socat:      raw-TCP exfil channel bypassing the HTTP-only Squid proxy.
+#   - bubblewrap:     Claude Code's in-process sandbox needs unprivileged user
+#                     namespaces, which our seccomp profile correctly blocks.
+#                     The container is the security boundary; bwrap-inside
+#                     would be redundant nesting that breaks Bash.
+#   - socat:          raw-TCP exfil channel bypassing the HTTP-only Squid proxy.
+#   - openssh-client: ssh/scp/sftp/ssh-agent are the tool surface that would
+#                     weaponize VS Code's SSH_AUTH_SOCK forwarding if the host
+#                     setting (remote.SSH.enableAgentForwarding) ever reverts.
+#                     Purging physically closes the exfil path. gh/glab auth
+#                     with HTTPS tokens; git uses HTTPS remotes; Claude's
+#                     permission profile already denies `git push/clone/fetch`.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
       ca-certificates curl wget git \
@@ -38,14 +45,20 @@ RUN apt-get update \
       build-essential \
       python3 python3-pip python3-venv \
       ripgrep jq less vim-tiny \
-      openssh-client \
       zsh lsd fontconfig locales lsof \
+ && apt-get purge -y openssh-client 2>/dev/null || true \
+ && apt-get autoremove -y \
  && apt-get clean \
  && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
 # ---------- Node.js 20 + Claude Code (baked, auth at runtime) ----------------
+# Upgrade bundled npm first — NodeSource ships an older npm whose vendored
+# deps (tar, cross-spawn, glob, minimatch) accumulate CVEs between publishes.
+# Pulling npm@latest before global installs means claude-code gets extracted
+# by the newer tar, too.
 RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
  && apt-get install -y --no-install-recommends nodejs \
+ && npm install -g npm@latest \
  && npm install -g @anthropic-ai/claude-code \
  && apt-get clean \
  && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
@@ -72,19 +85,17 @@ RUN install -d -m 0755 /etc/apt/keyrings \
  && apt-get clean \
  && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
-# ---------- GitLab CLI (glab) — official release tarball, arch-aware ---------
-ARG GLAB_VERSION=1.92.1
+# ---------- GitLab CLI (glab) — official .deb, arch-aware -------------------
+# Upstream stopped publishing linux amd64/arm64 .tar.gz around v1.93.0; only
+# .deb / .rpm / .apk now. dpkg -i is enough since glab is a static Go binary
+# with no runtime deps.
+ARG GLAB_VERSION=1.93.0
 RUN ARCH="$(dpkg --print-architecture)" \
- && case "$ARCH" in \
-      amd64) GARCH=x86_64 ;; \
-      arm64) GARCH=arm64 ;; \
-      *)     echo "unsupported arch: $ARCH" >&2; exit 1 ;; \
-    esac \
- && curl -fsSL "https://gitlab.com/gitlab-org/cli/-/releases/v${GLAB_VERSION}/downloads/glab_${GLAB_VERSION}_linux_${GARCH}.tar.gz" \
-      | tar -xz -C /tmp bin/glab \
- && mv /tmp/bin/glab /usr/local/bin/glab \
- && rm -rf /tmp/bin \
- && chmod 0755 /usr/local/bin/glab
+ && case "$ARCH" in amd64|arm64) DARCH="$ARCH" ;; *) echo "unsupported arch: $ARCH" >&2; exit 1 ;; esac \
+ && curl -fsSL -o /tmp/glab.deb "https://gitlab.com/gitlab-org/cli/-/releases/v${GLAB_VERSION}/downloads/glab_${GLAB_VERSION}_linux_${DARCH}.deb" \
+ && dpkg -i /tmp/glab.deb \
+ && rm -f /tmp/glab.deb \
+ && glab --version
 
 # ---------- zsh + oh-my-zsh + powerlevel10k + plugins -----------------------
 # Dotfiles come in via `config/`. Fonts are a host-terminal concern, not baked.
