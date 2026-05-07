@@ -66,7 +66,6 @@ update.code.visualstudio.com
 .githubassets.com
 .gitlab.com
 .gitlab-static.net
-cli.github.com
 
 # --- Python package ecosystem [pypi] ---
 .pypi.org
@@ -74,7 +73,6 @@ cli.github.com
 .astral.sh
 
 # --- PyTorch / NVIDIA CUDA wheels [pytorch] ---
-download.pytorch.org
 .pytorch.org
 
 # --- Node.js / npm (Claude Code updates + per-repo npm) [npm] ---
@@ -90,8 +88,6 @@ deb.nodesource.com
 # --- OS packages — apt-get inside the container [apt] ---
 .ubuntu.com
 .debian.org
-archive.ubuntu.com
-security.ubuntu.com
 
 
 # =============================================================================

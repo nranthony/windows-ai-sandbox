@@ -25,11 +25,14 @@ UID_IN=$(id -u)
                     || warn "unexpected UID $UID_IN (expected 0)"
 
 # Verify userns mapping actually maps 0 to host 1000 (not to rootful root).
-UID_MAP=$(cat /proc/self/uid_map 2>/dev/null | tr -s ' ' | sed 's/^ //')
-if [[ "$UID_MAP" == "0 1000 1" ]]; then
+# Rootless Docker emits a two-line map: "0 1000 1" (container root → host UID 1000)
+# followed by "1 100000 65536" (subuid range for non-root container UIDs). Only the
+# first line is load-bearing for the security boundary, so check that explicitly.
+UID0_MAP=$(awk 'NR==1{$1=$1; print}' /proc/self/uid_map 2>/dev/null)
+if [[ "$UID0_MAP" == "0 1000 1" ]]; then
   pass "uid_map: container UID 0 = host UID 1000 (rootless)"
 else
-  warn "uid_map unexpected: '$UID_MAP'"
+  warn "uid_map line 1 unexpected: '$UID0_MAP' (full map: $(tr '\n' '|' < /proc/self/uid_map))"
 fi
 
 # --- rootfs ------------------------------------------------------------------
