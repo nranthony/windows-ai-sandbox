@@ -46,7 +46,11 @@ RUN apt-get update \
       python3 python3-pip python3-venv \
       ripgrep jq less vim-tiny \
       zsh lsd fontconfig locales lsof \
- && apt-get purge -y openssh-client 2>/dev/null || true \
+ && apt-get purge -y openssh-client \
+ && if dpkg -l openssh-client 2>/dev/null | awk '/^ii/{found=1} END{exit !found}'; then \
+      echo "FATAL: openssh-client still installed after purge — invariant violated" >&2; \
+      exit 1; \
+    fi \
  && apt-get autoremove -y \
  && apt-get clean \
  && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*

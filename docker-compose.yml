@@ -97,13 +97,25 @@ services:
   # Egress proxy — domain-allowlisted outbound traffic
   # ---------------------------------------------------------------------------
   egress-proxy:
-    image: ubuntu/squid:latest
+    # Pinned by digest — Squid is the single choke-point for all agent egress,
+    # so an unvetted tag bump could re-open a bypass. Mirrors the macolima
+    # pin (ubuntu/squid:latest as of 2026-04-24). To refresh:
+    #   docker pull ubuntu/squid:latest && docker image inspect ubuntu/squid:latest \
+    #     --format '{{index .RepoDigests 0}}'
+    image: ubuntu/squid:latest@sha256:6a097f68bae708cedbabd6188d68c7e2e7a38cedd05a176e1cc0ba29e3bbe029
     container_name: egress-proxy-${PROFILE}
     hostname: egress-proxy
     read_only: true
     tmpfs:
-      - /var/spool/squid:size=256m
-      - /var/log/squid:size=64m
+      # Squid starts as root (writes /run/squid.pid, opens cache.log) then
+      # drops to user `proxy` (uid 13, baked into ubuntu/squid image) via
+      # cache_effective_user. After drop, Squid opens access.log and writes
+      # cache disk. Tmpfs ownership needs to satisfy both phases:
+      #   /var/spool/squid  — post-drop only → proxy:proxy
+      #   /var/log/squid    — cache.log (root) + access.log (proxy) → root:proxy 0775
+      #   /run              — /run/squid.pid written by root → leave default
+      - /var/spool/squid:size=256m,uid=13,gid=13,mode=0750
+      - /var/log/squid:size=64m,uid=0,gid=13,mode=0775
       - /run:size=8m
     volumes:
       - ./proxy/squid.conf:/etc/squid/squid.conf:ro

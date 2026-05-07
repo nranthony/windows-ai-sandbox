@@ -127,10 +127,19 @@ else
 fi
 
 # --- git credential.helper NOT injected (audit Finding C) -------------------
-if grep -Eq '^\s*helper\s*=' /root/.config/git/config 2>/dev/null; then
-  fail "git credential.helper present in config — scrub failed"
+# Only flag host-reaching helpers. Benign in-container helpers (e.g. glab
+# auth setup-git writes `!/usr/local/bin/glab auth git-credential`, gh does
+# the same via /usr/local/bin/gh) are expected and use the sandbox's own
+# tokens. The injections we're watching for are VS Code Dev Containers'
+# IPC-backed shim (vscode-server / vscode-remote-containers paths) and host
+# credential managers (git-credential-manager) leaked via copyGitConfig.
+# osxkeychain is macOS-only and not checked here.
+if [[ -f /root/.config/git/config ]] && \
+   grep -qE 'helper\s*=.*(vscode-server|vscode-remote-containers|git-credential-manager)' \
+     /root/.config/git/config; then
+  fail "host-reaching credential.helper in .config/git/config (VS Code shim or host helper — init-profile-state.sh ensure_state should strip it)"
 else
-  pass "no git credential.helper injected"
+  pass "no host-reaching credential.helper in .config/git/config"
 fi
 
 echo ""

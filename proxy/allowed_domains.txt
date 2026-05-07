@@ -2,64 +2,110 @@
 # Outbound domain allowlist for windows-ai-sandbox
 # =============================================================================
 # One domain per line. A leading dot (e.g. .github.com) matches all subdomains.
-# Keep this list minimal — fewer domains = smaller attack surface.
+# Comments use `#` at the START of a line. INLINE comments after a domain
+# WILL BREAK Squid — `dstdomain` treats the whole line (including `#` and
+# any trailing text) as one hostname string. Keep notes on their own lines.
 #
-# This repo's primary workload is CUDA/ML dev, so package registries and
-# CDNs are pre-enabled by default (unlike macolima's "planning mode only"
-# gating). If running Claude Code in fully autonomous mode with no dev
-# workload, comment the "Dev/ML essentials" block below to shrink egress.
+# Three lifecycle tiers, top to bottom:
+#   - ALWAYS ON: every profile needs these. Never comment out.
+#   - PROJECT-PERSISTENT: the dev/ML stack. This repo's primary workload is
+#     CUDA/ML dev, so package registries + CDNs are uncommented by default
+#     (unlike macolima, where they live in PLANNING-MODE and are commented).
+#     Comment a block out only for fully autonomous agent runs that should
+#     not be able to install or fetch anything.
+#   - PLANNING-MODE: short-lived installs you want to gate manually. Empty
+#     today — most of what was here lives in PROJECT-PERSISTENT to match
+#     this repo's policy. Add commented blocks here if you want a domain
+#     reachable only while you're driving the shell.
 #
 # Hot-reload after edits:
 #   COMPOSE_PROJECT_NAME=ai-sandbox-<profile> PROFILE=<profile> \
 #     docker compose restart egress-proxy
+#
+# Blocks are tagged like `[name]` for grep — e.g. `grep "\[claude\]" allowed_domains.txt`.
+# To bulk-toggle a block: select its lines and `s/^# //` (uncomment) or
+# `s/^/# /` (recomment). Blank lines inside blocks are intentional visual
+# chunking — Squid ignores them.
 # =============================================================================
 
-# --- Claude / Anthropic (always on) ---
-.anthropic.com
-.claude.com
-.claude.ai
-statsig.anthropic.com
 
-# --- VS Code Marketplace (IDE integration) ---
+# =============================================================================
+# === ALWAYS ON ==============================================================
+# =============================================================================
+
+# --- Claude / Anthropic [claude] ---
+# Specific subdomains only — broad wildcards (`.anthropic.com`, `.claude.com`,
+# `.claude.ai`) were dropped per macolima security audit M3. A future
+# subdomain hosting user-controllable content under one of those parents
+# would otherwise become an exfil channel. Add specific hosts here as Claude
+# Code needs them; the 403 from Squid tells you which to add.
+api.anthropic.com
+console.anthropic.com
+statsig.anthropic.com
+api.claude.com
+platform.claude.com
+claude.ai
+
+# --- VS Code Marketplace [vscode] ---
+# `.vscode-unpkg.net` is kept as a wildcard because VS Code's extension fetcher
+# rotates across many subdomains under that single MS-controlled parent. No
+# known third-party-owned subdomain under it.
 marketplace.visualstudio.com
 .vscode-unpkg.net
 update.code.visualstudio.com
 
-# =============================================================================
-# Dev/ML essentials — comment out for autonomous-only agent runs
-# =============================================================================
 
-# --- Source code / git ---
+# =============================================================================
+# === PROJECT-PERSISTENT — dev/ML stack (uncommented by default) =============
+# =============================================================================
+# Comment a block to shrink egress for autonomous-only agent runs.
+
+# --- Source code / git [git] ---
 .github.com
 .githubusercontent.com
 .githubassets.com
 .gitlab.com
 .gitlab-static.net
+cli.github.com
 
-# --- Python package ecosystem ---
+# --- Python package ecosystem [pypi] ---
 .pypi.org
 .files.pythonhosted.org
 .astral.sh
 
-# --- PyTorch / NVIDIA CUDA wheels ---
+# --- PyTorch / NVIDIA CUDA wheels [pytorch] ---
 download.pytorch.org
 .pytorch.org
 
-# --- Node.js / npm (Claude Code updates + per-repo npm) ---
+# --- Node.js / npm (Claude Code updates + per-repo npm) [npm] ---
 .registry.npmjs.org
 .npmjs.com
 .nodejs.org
 deb.nodesource.com
 
-# --- NVIDIA container + compute stack (used during image builds / apt updates) ---
+# --- NVIDIA container + compute stack (image builds / apt updates) [nvidia] ---
 .nvidia.com
 .nvidia.github.io
 
-# --- OS packages (only needed if you apt-get inside the container) ---
+# --- OS packages — apt-get inside the container [apt] ---
 .ubuntu.com
 .debian.org
 archive.ubuntu.com
 security.ubuntu.com
 
-# --- GitHub CLI / HashiCorp-style TLS bootstrap ---
-cli.github.com
+
+# =============================================================================
+# === PLANNING-MODE — short-lived installs (commented by default) ============
+# =============================================================================
+# Uncomment while you're driving installs/clones manually; recomment before
+# handing the session back to the agent. Empty by default — add hosts here
+# (e.g. cdn.playwright.dev for `playwright install chromium`) when needed.
+
+
+# =============================================================================
+# === DROPPED — explicitly NOT in the list ===================================
+# =============================================================================
+# scholar.google.com   — CAPTCHA / aggressive rate-limit on programmatic
+#                        access. Use CrossRef/OpenAlex/PubMed clients instead.
+# www.researchgate.net — paywall + auth wall + CAPTCHA. Returns near-zero
+#                        useful content unauthenticated.

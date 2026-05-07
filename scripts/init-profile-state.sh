@@ -44,12 +44,20 @@ fi
 # Defensive credential-helper scrub — audit Finding C, layer 2.
 # VS Code Dev Containers can inject a host-routed git credential.helper into
 # .config/git/config (via VSCODE_GIT_IPC_HANDLE + a node shim in
-# .vscode-server). That helper forwards git auth to the host's credential
-# manager, bypassing the sandbox's network identity entirely. Strip any
-# credential.helper on every `up` so the setting can't survive a recreate
-# even if the host's `dev.containers.copyGitConfig: false` gets reverted.
-if [[ -f "$BASE/config/git/config" ]]; then
-  git config --file "$BASE/config/git/config" --unset-all credential.helper 2>/dev/null || true
+# .vscode-server), and copyGitConfig can leak host helpers like
+# git-credential-manager. Both forward git auth to the host, bypassing the
+# sandbox's network identity. Strip those on every `up` — but leave benign
+# in-container helpers alone (glab and gh's own credential shims, which use
+# in-container tokens from ~/.config/<tool>/). Mirrors verify-sandbox.sh's
+# narrower grep so the tripwire and scrub agree on what counts as drift.
+if [[ -f "$BASE/config/git/config" ]] && \
+   grep -qE 'helper\s*=.*(vscode-server|vscode-remote-containers|git-credential-manager)' \
+     "$BASE/config/git/config"; then
+  awk '
+    /^[[:space:]]*helper[[:space:]]*=.*(vscode-server|vscode-remote-containers|git-credential-manager)/ { next }
+    { print }
+  ' "$BASE/config/git/config" > "$BASE/config/git/config.scrubbed" \
+    && mv "$BASE/config/git/config.scrubbed" "$BASE/config/git/config"
 fi
 
 echo "profile state ready: $BASE"
