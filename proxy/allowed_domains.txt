@@ -94,8 +94,19 @@ deb.nodesource.com
 # === PLANNING-MODE — short-lived installs (commented by default) ============
 # =============================================================================
 # Uncomment while you're driving installs/clones manually; recomment before
-# handing the session back to the agent. Empty by default — add hosts here
-# (e.g. cdn.playwright.dev for `playwright install chromium`) when needed.
+# handing the session back to the agent. Or use:
+#   scripts/with-egress.sh <profile> --with <tag> -- '<cmd>'
+# which uncomments the matching `[tag]` block, runs the command, restores.
+# Section headers MUST be `# # ---NAME [TAG] ---` (double-comment) for
+# with-egress to find them; domain lines inside MUST start with `# ` so the
+# script can strip one `# ` to enable them. See the playwright block below
+# for the canonical pattern.
+
+# # --- Playwright browser binaries [playwright-install] ---
+# # Used by `playwright install chromium` etc. Short-lived — keep commented
+# # unless you're actively installing browsers.
+# cdn.playwright.dev
+# playwright.download.prss.microsoft.com
 
 
 # =============================================================================

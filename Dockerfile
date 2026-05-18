@@ -106,6 +106,16 @@ RUN ARCH="$(dpkg --print-architecture)" \
 COPY config/.zshrc    /root/.zshrc
 COPY config/.p10k.zsh /root/.p10k.zsh
 
+# ---------- deny-destructive PreToolUse hook --------------------------------
+# Closes the deny-list bypass class where permissions.deny's prefix matcher
+# cannot see destructive flags (find -delete, dd of=) or path targets (Edit
+# to /usr/local/lib/claude-hooks/). See docs/deny-destructive-hook-plan.md.
+# Baked into the image so it survives container recreates; rebuild restores
+# the canonical script on every up. Not using COPY --chmod= to stay portable
+# across non-BuildKit builders.
+COPY config/hooks/deny-destructive.sh /usr/local/lib/claude-hooks/deny-destructive.sh
+RUN chmod 0755 /usr/local/lib/claude-hooks/deny-destructive.sh
+
 ENV RUNZSH=no CHSH=no
 RUN sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --unattended --keep-zshrc \
  && ZSH_CUSTOM="/root/.oh-my-zsh/custom" \

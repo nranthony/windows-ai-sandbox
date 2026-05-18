@@ -152,6 +152,70 @@ case "$CMD" in
     exec docker exec -it "$AGENT" "$@"
     ;;
 
+  verify)
+    # Stream the host-side tripwire into the container via stdin. The sandbox
+    # repo itself is NOT bind-mounted into /workspace (by design — workspace
+    # holds the user's profile repos, not the sandbox tooling), so a path
+    # like /workspace/windows-ai-sandbox/scripts/verify-sandbox.sh would not
+    # resolve. `bash -s` reads the script from stdin and runs it inside the
+    # container with the host file as source of truth.
+    src="$SCRIPT_DIR/scripts/verify-sandbox.sh"
+    [[ -f "$src" ]] || fail "verify-sandbox.sh missing: $src"
+    info "Running verify-sandbox.sh inside $AGENT (streamed via stdin)"
+    exec docker exec -i "$AGENT" bash -s -- "$@" < "$src"
+    ;;
+
+  audit)
+    # Tier 2 of the 3-tier audit model (tripwire → JSON → agent report).
+    # Stage sandbox config + audit probes into the profile workspace (so the
+    # probes' static checks of seccomp.json/squid.conf/etc. have files to
+    # read at /workspace/temp_audit_package/), then run audit.sh inside the
+    # container, and write the JSON next to the live claude state on the
+    # host so it's accessible without re-attaching.
+    #
+    # Flags:
+    #   --stage-only   stage the package, don't run audit
+    #   --clean        remove the staged package
+    #   --compact      pass-through to aggregate.py (one-line JSON)
+    flag=""
+    for a in "$@"; do
+      case "$a" in
+        --stage-only|--clean|--compact) flag="$a" ;;
+      esac
+    done
+
+    if [[ "$flag" == "--clean" ]]; then
+      exec bash "$SCRIPT_DIR/scripts/stage-audit-package.sh" "$PROFILE" --clean
+    fi
+
+    info "Staging audit package for '$PROFILE'"
+    bash "$SCRIPT_DIR/scripts/stage-audit-package.sh" "$PROFILE"
+
+    if [[ "$flag" == "--stage-only" ]]; then
+      ok "Stage complete. Run audit with:  scripts/profile.sh $PROFILE audit"
+      exit 0
+    fi
+
+    stamp=$(date -u +%Y-%m-%dT%H-%M-%SZ)
+    audits_host="$PROFILES_ROOT/$PROFILE/claude-home/audits"
+    mkdir -p "$audits_host"
+    json_host="$audits_host/$stamp-$PROFILE-audit.json"
+
+    info "Running audit inside $AGENT → $json_host"
+    pretty_flag=""
+    [[ "$flag" == "--compact" ]] && pretty_flag="--compact"
+    if docker exec "$AGENT" bash /workspace/temp_audit_package/scripts/audit/audit.sh $pretty_flag > "$json_host"; then
+      ok "Audit JSON saved: $json_host"
+      ok "Container path:   /root/.claude/audits/$stamp-$PROFILE-audit.json"
+      # Brief verdict summary if jq is available host-side.
+      if command -v jq >/dev/null 2>&1; then
+        info "Summary: $(jq -c .summary "$json_host")"
+      fi
+    else
+      fail "Audit run failed; partial JSON at $json_host"
+    fi
+    ;;
+
   reset-settings)
     # Overwrite this profile's claude-home/settings.json from the template.
     # init-profile-state.sh only seeds when absent; use this when the

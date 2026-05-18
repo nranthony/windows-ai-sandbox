@@ -3,7 +3,10 @@
 # verify-sandbox.sh — run INSIDE the container to confirm hardening is active
 # =============================================================================
 # Usage (from host):
-#   scripts/profile.sh <profile> exec bash /workspace/windows-ai-sandbox/scripts/verify-sandbox.sh
+#   scripts/profile.sh <profile> verify
+# The `verify` subcommand streams this file into the container via stdin
+# (`docker exec -i ... bash -s`) because the sandbox repo itself is NOT
+# bind-mounted into /workspace — workspace holds per-profile repos only.
 #
 # Adapted from macolima/scripts/verify-sandbox.sh. Differences for this repo:
 #   - container runs as root (UID 0) under rootless Docker userns=host, not UID 1000
@@ -88,6 +91,25 @@ if curl -s --connect-timeout 5 https://example.com >/dev/null 2>&1; then
   fail "disallowed domain (example.com) reachable — allowlist misconfigured"
 else
   pass "disallowed domain blocked by proxy"
+fi
+
+# --- deny-destructive PreToolUse hook ---------------------------------------
+# File invariants (baked into image at /usr/local/lib/claude-hooks/):
+HOOK=/usr/local/lib/claude-hooks/deny-destructive.sh
+if [[ -x "$HOOK" ]]; then
+  pass "deny-destructive hook present and executable ($HOOK)"
+  HMODE=$(stat -c '%a' "$HOOK" 2>/dev/null || echo "?")
+  [[ "$HMODE" == "755" ]] && pass "deny-destructive hook mode 0755" \
+                          || warn "deny-destructive hook mode $HMODE (expected 755)"
+  # Behavioural assertion: a find -delete envelope must yield a deny decision.
+  HOOK_OUT=$(printf '%s' '{"tool_name":"Bash","tool_input":{"command":"find /tmp -delete"}}' | "$HOOK" 2>/dev/null || true)
+  if printf '%s' "$HOOK_OUT" | grep -q '"permissionDecision":"deny"'; then
+    pass "deny-destructive hook blocks find -delete"
+  else
+    fail "deny-destructive hook did NOT block find -delete (output: $HOOK_OUT)"
+  fi
+else
+  fail "deny-destructive hook missing or not executable at $HOOK (rebuild image)"
 fi
 
 # --- deliberately-absent tools ----------------------------------------------

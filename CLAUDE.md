@@ -70,6 +70,31 @@ scripts/profile.sh <profile> clean --deep       # also drop MCP logs + settings.
 scripts/profile.sh <profile> reset-settings     # re-seed claude settings.json from template
 ```
 
+### Temporarily widen egress for installs
+```bash
+# Uncomments the matching [tag] block in proxy/allowed_domains.txt, hot-reloads
+# Squid, runs the command, restores the allowlist verbatim. flock-serialised.
+scripts/with-egress.sh <profile> --with playwright-install -- \
+  'cd /workspace/foo && playwright install chromium'
+
+# Multiple sections:
+scripts/with-egress.sh <profile> --with pypi,npm -- \
+  'cd /workspace/foo && npm install && uv pip install -e ".[dev]"'
+
+# Default --with is `pypi`. Sections live under PLANNING-MODE in
+# proxy/allowed_domains.txt; PROJECT-PERSISTENT sections (already open by
+# default) accept --with too but it's a no-op.
+```
+
+### Ephemeral one-shot container
+```bash
+# Disposable --rm container with the same hardening, attached to the running
+# profile's sandbox-internal. Profile stack must already be up.
+scripts/run-ephemeral.sh <profile>          # zsh shell
+scripts/run-ephemeral.sh <profile> claude   # one-shot claude run
+scripts/run-ephemeral.sh <profile> bash -c 'uv run python -c "import torch; print(torch.cuda.is_available())"'
+```
+
 ### Testing GPU/CUDA
 ```bash
 scripts/profile.sh <profile> exec bash -lc '
@@ -78,12 +103,31 @@ scripts/profile.sh <profile> exec bash -lc '
 '
 ```
 
-### Hardening Verification
+### Hardening Verification — three tiers
+
+| Tier | Cost | What | When |
+|---|---|---|---|
+| 1 | ~3s | `scripts/profile.sh <p> verify` — fast tripwire, ~20 pass/fail checks | every `up` |
+| 2 | ~10s | `scripts/profile.sh <p> audit` — ~80 structured probes, JSON to `~/.ai-sandbox/profiles/<p>/claude-home/audits/` | on demand or post config change |
+| 3 | ~5k toks | agent invokes `audit-sandbox` skill — judgment over the JSON, writes report.md next to the JSON | on demand |
+
 ```bash
-scripts/profile.sh <profile> exec bash /workspace/windows-ai-sandbox/scripts/verify-sandbox.sh
+# Tier 1 — tripwire (streams scripts/verify-sandbox.sh into container via stdin).
+scripts/profile.sh <profile> verify
 # Expected: uid_map "0 1000 1", CapEff=0, NoNewPrivs=1, Seccomp=2,
 # direct internet blocked, api.anthropic.com reachable via proxy,
-# example.com blocked, ssh/socat/bwrap absent.
+# example.com blocked, ssh/socat/bwrap absent, deny-destructive hook present.
+
+# Tier 2 — structured audit (stages config to /workspace/temp_audit_package/
+# then runs ~80 probes, saves JSON to host).
+scripts/profile.sh <profile> audit
+scripts/profile.sh <profile> audit --stage-only   # just stage, don't run
+scripts/profile.sh <profile> audit --clean        # remove staged package
+
+# Tier 3 — inside an attached agent session:
+#   "Use the audit-sandbox skill"
+# The skill reads the JSON, cross-references the staged CLAUDE.md, and
+# writes a report.md next to the JSON.
 ```
 
 ### Image CVE Scan (trivy on host)
@@ -103,14 +147,21 @@ scripts/trivy-scan.sh image   # CVE scan of windows-ai-sandbox:latest only
 - `config/.zshrc`, `config/.p10k.zsh` — baked into image at build.
 - `config/claude-settings.json` — **restricts Claude's Bash/Read tools only** (not the shell). Denies `pip install`, `uv add`, `curl`, `git push/fetch`, secrets reads. User shells are unrestricted — install deps at the CLI, then hand off to Claude.
 - `.trivyignore.yaml` — CVE/misconfig accepts. Each entry has `expired_at` so it re-surfaces on re-scan.
-- `sandbox-hardening-package.md` + `claude_internal_audit_macolima.md` — ported audit docs; keep in sync with macolima.
+- `sandbox-hardening-package.md` — ported audit doc; keep in sync with macolima.
+- `claude_internal_audit_wsl.md` — self-audit prompt for an in-container agent (WSL2 + rootless Docker + container-as-root edition; macolima-origin, fully adapted to this repo).
 
 ### Scripts
-- `scripts/profile.sh` — lifecycle driver. All commands live here.
+- `scripts/profile.sh` — lifecycle driver. All commands live here (`up`, `down`, `attach`, `auth`, `verify`, `audit`, `rebuild`, `clean`, etc.).
 - `scripts/init-profile-state.sh` — idempotent state bootstrap. Seeds `claude.json='{}'`, `claude-home/settings.json` from template, scrubs VS Code-injected `credential.helper` on every `up`.
 - `scripts/setup.sh` — optional onboarding wrapper (brings up + seeds git user from `.env`).
-- `scripts/verify-sandbox.sh` — in-container tripwire. Runs the full hardening check.
+- `scripts/verify-sandbox.sh` — tier-1 in-container tripwire. Runs the full hardening check.
+- `scripts/audit/` — tier-2 structured audit (8 stdlib-Python probes + aggregate.py + audit.sh). See `scripts/audit/README.md`.
+- `scripts/stage-audit-package.sh` — copies sandbox config + audit infrastructure into the profile workspace so probes can read seccomp.json / squid.conf / etc. from `/workspace/temp_audit_package/`.
+- `scripts/with-egress.sh` — temporarily widen the allowlist for one command (uncomments `[tag]` blocks in `proxy/allowed_domains.txt`, hot-reloads Squid via `squid -k reconfigure`, restores verbatim on exit). flock-serialised + drift sentinel.
+- `scripts/run-ephemeral.sh` — spawn a disposable `--rm` container attached to the running profile's `sandbox-internal` network. Same hardening as the persistent agent; everything outside bind mounts is discarded on exit.
 - `scripts/trivy-scan.sh` — host-side image/config/secret scan. Requires trivy installed.
+- `config/hooks/deny-destructive.sh` — PreToolUse hook closing the deny-list bypass class (find -delete, dd of=, etc.). See `docs/deny-destructive-hook-plan.md`.
+- `config/skills/audit-sandbox/SKILL.md` — tier-3 agent-side skill for judgment over the audit JSON.
 
 ### Dev Container Integration
 - `.devcontainer/devcontainer.json` — slim shim. Uses `dockerComposeFile` so VS Code and CLI share the profile container. Requires `PROFILE` exported before `code .`.

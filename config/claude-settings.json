@@ -130,5 +130,22 @@
       "Read(**/id_rsa*)",
       "Read(**/id_ed25519*)"
     ]
+  },
+  "hooks": {
+    "_comment": "PreToolUse enforcement upstream of tool dispatch. The matcher-level permissions.deny list is prefix-on-tokens and cannot see destructive flags (find -delete, dd of=, etc.) or path targets (Edit to /usr/local/lib/claude-hooks/... or settings.json). The hook script handles both via regex on the full envelope. Script is baked into the image at /usr/local/lib/claude-hooks/deny-destructive.sh; the Bash/Edit tamper rules are the only enforcement layer on the script itself (agent runs as root in this repo, so the kernel write-protect macolima relies on does not apply). See docs/deny-destructive-hook-plan.md.",
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          { "type": "command", "command": "/usr/local/lib/claude-hooks/deny-destructive.sh", "timeout": 2 }
+        ]
+      },
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          { "type": "command", "command": "/usr/local/lib/claude-hooks/deny-destructive.sh", "timeout": 2 }
+        ]
+      }
+    ]
   }
 }
