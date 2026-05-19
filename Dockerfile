@@ -45,6 +45,7 @@ RUN apt-get update \
       build-essential \
       python3 python3-pip python3-venv \
       ripgrep jq less vim-tiny \
+      postgresql-client \
       zsh lsd fontconfig locales lsof \
  && apt-get purge -y openssh-client \
  && if dpkg -l openssh-client 2>/dev/null | awk '/^ii/{found=1} END{exit !found}'; then \
@@ -55,15 +56,32 @@ RUN apt-get update \
  && apt-get clean \
  && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
-# ---------- Node.js 20 + Claude Code (baked, auth at runtime) ----------------
+# ---------- Playwright / Chromium runtime libraries --------------------------
+# Headless Chromium needs ~20 shared libraries that the base image doesn't
+# ship. Without these the binary won't start even after `playwright install
+# chromium`. Baked in because the agent runs as root with cap_drop: ALL +
+# no_new_privs — apt-get can't acquire locks at runtime with these restrictions.
+# Adds ~150 MB. Justifiable: any profile doing JS-heavy crawling reuses them.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      libglib2.0-0t64 libnspr4 libnss3 \
+      libatk1.0-0t64 libatk-bridge2.0-0t64 libatspi2.0-0t64 \
+      libdbus-1-3 libcups2t64 \
+      libxcb1 libxkbcommon0 libx11-6 libxcomposite1 libxdamage1 \
+      libxext6 libxfixes3 libxrandr2 \
+      libgbm1 libcairo2 libpango-1.0-0 libasound2t64 \
+ && apt-get clean \
+ && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+
+# ---------- Node.js 24 + Claude Code + Gemini CLI ---------------------------
 # Upgrade bundled npm first — NodeSource ships an older npm whose vendored
 # deps (tar, cross-spawn, glob, minimatch) accumulate CVEs between publishes.
 # Pulling npm@latest before global installs means claude-code gets extracted
 # by the newer tar, too.
-RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+RUN curl -fsSL https://deb.nodesource.com/setup_24.x | bash - \
  && apt-get install -y --no-install-recommends nodejs \
  && npm install -g npm@latest \
- && npm install -g @anthropic-ai/claude-code \
+ && npm install -g @anthropic-ai/claude-code mongosh@latest @google/gemini-cli@latest \
  && apt-get clean \
  && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
@@ -126,6 +144,25 @@ RUN sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master
  && git clone --depth=1 https://github.com/zsh-users/zsh-syntax-highlighting.git        "$ZSH_CUSTOM/plugins/zsh-syntax-highlighting" \
  && usermod -s /usr/bin/zsh root
 
+# ---------- gitstatusd (p10k dependency) ------------------------------------
+# Pre-install so powerlevel10k doesn't try to fetch from github.com on first
+# shell start — which the proxy allowlist correctly blocks when the [git]
+# planning-mode section is commented out. Version + sha256 parsed from p10k's
+# own install.info so re-cloning p10k automatically picks up upstream's pin.
+RUN set -eux; \
+    GS_DIR="/root/.oh-my-zsh/custom/themes/powerlevel10k/gitstatus"; \
+    uname_m="$(uname -m)"; \
+    LINE="$(awk -v m="$uname_m" '/^uname_s_glob="linux"/ && $0 ~ "uname_m_glob=\""m"\""' "$GS_DIR/install.info" | head -1)"; \
+    [ -n "$LINE" ] || { echo "no install.info entry for linux/$uname_m" >&2; exit 1; }; \
+    eval "$LINE"; \
+    URL="https://github.com/romkatv/gitstatus/releases/download/${version}/${file}.tar.gz"; \
+    curl -fsSL "$URL" -o /tmp/gsd.tar.gz; \
+    echo "${sha256}  /tmp/gsd.tar.gz" | sha256sum -c -; \
+    tar -xzf /tmp/gsd.tar.gz -C "$GS_DIR/usrbin/"; \
+    rm /tmp/gsd.tar.gz; \
+    chmod +x "$GS_DIR/usrbin/$file"; \
+    test -x "$GS_DIR/usrbin/$file"
+
 # ---------- runtime layout ---------------------------------------------------
 # Expected bind mounts (see docker-compose.yml):
 #   /workspace                <- ~/repo/<profile>/
@@ -133,6 +170,7 @@ RUN sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master
 #   /root/.claude.json        <- ~/.ai-sandbox/profiles/<profile>/claude.json
 #   /root/.cache              <- ~/.ai-sandbox/profiles/<profile>/cache
 #   /root/.config             <- ~/.ai-sandbox/profiles/<profile>/config
+#   /root/.gemini             <- ~/.ai-sandbox/profiles/<profile>/gemini-home
 ENV HOME=/root \
     SHELL=/usr/bin/zsh \
     PATH="/root/.local/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"

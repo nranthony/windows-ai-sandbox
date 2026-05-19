@@ -12,15 +12,18 @@ Secure Windows AI development environment. WSL2 Ubuntu 24.04 LTS + rootless Dock
 Windows OS
   └─ WSL2 Ubuntu 24.04
       └─ rootless Docker (userns=host; container UID 0 ↔ host UID 1000)
-          ├─ windows-ai-sandbox:latest   (shared image: CUDA + claude + gh + glab + uv + zsh)
+          ├─ windows-ai-sandbox:latest   (shared image: CUDA + claude + gemini + gh + glab + uv + zsh)
           └─ per profile:
               ├─ ai-sandbox-<profile>    (agent; /workspace = ~/repo/<profile>/)
-              └─ egress-proxy-<profile>  (Squid; domain allowlist only way out)
+              ├─ egress-proxy-<profile>  (Squid; domain allowlist only way out)
+              ├─ postgres-<profile>      (opt-in via COMPOSE_PROFILES=db-postgres)
+              └─ mongo-<profile>         (opt-in via COMPOSE_PROFILES=db-mongo)
 ```
 
 **Network model (load-bearing — see `sandbox-hardening-package.md` §4):**
-- `sandbox-internal` (internal: true) — agent-only, no direct internet
+- `sandbox-internal` (internal: true, IPAM 172.30.0.0/24) — agent-only, no direct internet
 - `sandbox-external` — Squid's outbound side
+- DNS sinkholed (`dns: [127.0.0.1]`) on the agent; internal names resolved via `extra_hosts` with static IPs. Closes the DNS-exfil side channel that `internal: true` alone does NOT close. See `docs/compose-network-ipam.md`.
 - Removing `internal: true` turns the proxy into a suggestion.
 
 **Per-profile state layout** (outlives container recreates):
@@ -29,10 +32,12 @@ Windows OS
 ├── claude-home/       → /root/.claude           (sessions, settings, credentials, MCP)
 ├── claude.json        → /root/.claude.json      (single-file bind; seeded '{}' on first up)
 ├── cache/             → /root/.cache            (npm, uv, pip caches)
-└── config/            → /root/.config
-    ├── gh/                                      (gh tokens)
-    ├── glab-cli/                                (glab tokens)
-    └── git/config                               (via GIT_CONFIG_GLOBAL)
+├── config/            → /root/.config
+│   ├── gh/                                      (gh tokens)
+│   ├── glab-cli/                                (glab tokens)
+│   └── git/config                               (via GIT_CONFIG_GLOBAL)
+├── gemini-home/       → /root/.gemini           (Gemini CLI oauth, settings, MCP)
+└── db.env             (optional; postgres/mongo credentials — see config/db.env.template)
 ```
 
 ## Common Development Tasks
@@ -54,6 +59,7 @@ scripts/profile.sh <profile> attach             # zsh into container
 scripts/profile.sh <profile> auth               # claude login (one-time)
 scripts/profile.sh <profile> auth-github        # gh auth login
 scripts/profile.sh <profile> auth-gitlab        # glab auth login
+scripts/profile.sh <profile> auth-gemini        # gemini CLI OAuth login
 
 # Day-to-day
 scripts/profile.sh <profile> attach             # get back in
@@ -63,11 +69,20 @@ scripts/profile.sh list                         # all profiles + up/down status
 # Image rebuilds
 scripts/profile.sh build                        # rebuild shared image (all profiles pick up)
 scripts/profile.sh <profile> rebuild            # rebuild + recreate this profile
+scripts/profile.sh <profile> rebuild --expose-dev  # also layer LAN port publishing
 
 # State hygiene
 scripts/profile.sh <profile> clean              # prune rotating state (paste-cache, backups)
 scripts/profile.sh <profile> clean --deep       # also drop MCP logs + settings.json backups
 scripts/profile.sh <profile> reset-settings     # re-seed claude settings.json from template
+scripts/profile.sh <profile> reset-skills       # re-seed skills from config/skills/
+scripts/profile.sh <profile> wipe               # blank-slate profile, keep auth
+scripts/profile.sh <profile> wipe --dry-run     # show what would be wiped
+scripts/profile.sh <profile> wipe --all-volumes # also drop DB named volumes
+
+# Database (opt-in via COMPOSE_PROFILES=db-postgres or db-mongo or db-all)
+COMPOSE_PROFILES=db-postgres scripts/profile.sh <profile> up
+scripts/profile.sh <profile> db-reset           # wipe postgres volume, fresh initdb
 ```
 
 ### Temporarily widen egress for installs
@@ -141,18 +156,19 @@ scripts/trivy-scan.sh image   # CVE scan of windows-ai-sandbox:latest only
 ## Key Files and Configuration
 
 ### Top-level
-- `Dockerfile` — shared image. CUDA 12.6.3 base (pinned by digest). Ships claude + gh + glab + uv + zsh. `bubblewrap` / `socat` / `openssh-client` deliberately NOT installed (see `sandbox-hardening-package.md` §7).
-- `docker-compose.yml` — parameterized by `$PROFILE`. `sandbox-internal` internal:true + `sandbox-external` bridge, Squid sidecar, cap_drop:ALL + seccomp + no-new-privileges, tmpfs noexec.
+- `Dockerfile` — shared image. CUDA 12.6.3 base (pinned by digest). Ships claude + gemini + gh + glab + uv + mongosh + zsh. Node.js 24. Playwright Chromium runtime libs baked in. Gitstatusd pre-installed. `bubblewrap` / `socat` / `openssh-client` deliberately NOT installed (see `sandbox-hardening-package.md` §7).
+- `docker-compose.yml` — parameterized by `$PROFILE`. `sandbox-internal` (internal:true, IPAM 172.30.0.0/24, DNS sinkhole) + `sandbox-external` bridge. Squid sidecar. Optional postgres/mongo siblings via `COMPOSE_PROFILES`. cap_drop:ALL + seccomp + no-new-privileges, tmpfs noexec. `restart: "no"` (explicit `up` required after host reboot).
 - `seccomp.json` — ported verbatim from macolima. `clone3 → ENOSYS`, `unshare(CLONE_NEWUSER)` blocked, full xattr family allowed.
-- `proxy/squid.conf` + `proxy/allowed_domains.txt` — ML-tuned allowlist (Anthropic, GitHub, GitLab, PyPI, PyTorch, NVIDIA, Ubuntu apt). Hot-reload after edits: `docker compose restart egress-proxy` under the profile's `COMPOSE_PROJECT_NAME`.
+- `proxy/squid.conf` + `proxy/allowed_domains.txt` — ML-tuned allowlist (Anthropic, Gemini, GitHub, GitLab, PyPI, PyTorch, NVIDIA, Ubuntu apt). Pinned subdomains (no parent wildcards per audit M3). Hot-reload: `docker exec egress-proxy-<p> squid -k reconfigure`.
 - `config/.zshrc`, `config/.p10k.zsh` — baked into image at build.
-- `config/claude-settings.json` — **restricts Claude's Bash/Read tools only** (not the shell). Denies `pip install`, `uv add`, `curl`, `git push/fetch`, secrets reads. User shells are unrestricted — install deps at the CLI, then hand off to Claude.
+- `config/claude-settings.json` — **restricts Claude's Bash/Read tools only** (not the shell). `defaultMode: auto`. Denies `pip install`, `uv add`, `curl`, `git push/fetch/config/submodule`, `awk`, `sed`, secrets reads. User shells are unrestricted — install deps at the CLI, then hand off to Claude.
+- `config/db.env.template` — template for postgres/mongo credentials. Copy to profile's `db.env` and fill in.
 - `.trivyignore.yaml` — CVE/misconfig accepts. Each entry has `expired_at` so it re-surfaces on re-scan.
 - `sandbox-hardening-package.md` — ported audit doc; keep in sync with macolima.
 - `docs/_archive/claude_internal_audit_wsl.md` — manual audit prompt (superseded by tier-2 probes + tier-3 skill; kept for reference).
 
 ### Scripts
-- `scripts/profile.sh` — lifecycle driver. All commands live here (`up`, `down`, `attach`, `auth`, `verify`, `audit`, `rebuild`, `clean`, etc.).
+- `scripts/profile.sh` — lifecycle driver. All commands live here (`up`, `down`, `attach`, `auth`, `auth-gemini`, `verify`, `audit`, `rebuild`, `clean`, `wipe`, `db-reset`, `reset-skills`, etc.).
 - `scripts/init-profile-state.sh` — idempotent state bootstrap. Seeds `claude.json='{}'`, `claude-home/settings.json` from template, scrubs VS Code-injected `credential.helper` on every `up`.
 - `scripts/setup.sh` — optional onboarding wrapper (brings up + seeds git user from `.env`).
 - `scripts/verify-sandbox.sh` — tier-1 in-container tripwire. Runs the full hardening check.
@@ -190,21 +206,24 @@ Belt-and-braces: the Dockerfile also purges `openssh-client`, and `init-profile-
 | Syscalls | `seccomp=./seccomp.json` (mode 2) — `clone3→ENOSYS`, no user-namespace nesting |
 | Capabilities | `cap_drop: ALL` — no NET_RAW, no SYS_ADMIN, etc. |
 | Privilege escalation | `no-new-privileges:true` |
-| Resources | `pids_limit: 512`, `mem_limit: 8g`, `cpus: 4`, `ulimits.nproc: 512` |
+| Resources | `pids_limit: 512`, `mem_limit: 8g`, `cpus: 4` |
 | Filesystem | rootfs rw (non-root userns + cap_drop is the boundary); `/tmp` + `/run` + `/root/.{npm-global,local}` tmpfs with `noexec,nosuid,nodev` |
-| Network | `sandbox-internal` (internal:true) + Squid sidecar on `sandbox-external` — allowlist is the only way out |
-| Agent tools | `claude settings.json` denies `curl/wget/ssh/scp/socat/nc/telnet`, `git push/clone/fetch`, `pip install`, `uv add`, secrets reads |
+| Network | `sandbox-internal` (internal:true, IPAM 172.30.0.0/24) + Squid sidecar on `sandbox-external` — allowlist is the only way out |
+| DNS | Sinkholed (`dns: [127.0.0.1]`) + `extra_hosts` for internal names — closes DNS exfil channel |
+| Agent tools | `claude settings.json` (defaultMode: auto) denies `curl/wget/ssh/scp/socat/nc/telnet`, `git push/clone/fetch/config/submodule`, `awk/sed`, `pip install`, `uv add`, secrets reads |
+| Restart policy | `restart: "no"` — explicit `up` required after host reboot (prevents silent config-drift recovery) |
 
 ## File Structure
 
 ```
-├── Dockerfile                    # Shared image (CUDA + claude + gh + glab + uv + zsh)
-├── docker-compose.yml            # Parameterized by $PROFILE
+├── Dockerfile                    # Shared image (CUDA + claude + gemini + gh + glab + uv + mongosh + zsh)
+├── docker-compose.yml            # Parameterized by $PROFILE; optional postgres/mongo via COMPOSE_PROFILES
 ├── seccomp.json                  # Syscall filter
 ├── .trivyignore.yaml             # Accepted CVEs/misconfigs with expiries
-├── config/                       # Dotfiles + claude-settings.json template
+├── config/                       # Dotfiles + claude-settings.json + db.env.template + hooks + skills
 ├── proxy/                        # Squid.conf + allowed_domains.txt
-├── scripts/                      # profile.sh, init-profile-state.sh, setup.sh, verify-sandbox.sh, trivy-scan.sh
+├── scripts/                      # profile.sh, init-profile-state.sh, with-egress.sh, verify-sandbox.sh, audit/, trivy-scan.sh
+├── docs/                         # Design notes, permissions model, seccomp/squid internals, debug recipes
 ├── .devcontainer/                # Slim VS Code shim (dockerComposeFile → ../docker-compose.yml)
 ├── devcontainer-template/        # Drop-in for per-repo dev containers
 ├── host_setup/                   # WSL Ubuntu rootless-Docker setup (run once)

@@ -43,9 +43,6 @@ services:
       nofile:
         soft: 2048
         hard: 8192
-      nproc:
-        soft: 512
-        hard: 512
 
     # tmpfs for scratch + npm/local under /root (container root = host UID 1000
     # via rootless Docker userns=host). noexec explicit per audit Finding G.
@@ -70,6 +67,8 @@ services:
       # during `git config --global set` fails with EBUSY across single-file
       # bind mounts. Directory mounts avoid that.
       - ${HOME}/.ai-sandbox/profiles/${PROFILE}/config:/root/.config:rw
+      # Per-profile Gemini CLI state (oauth_creds.json, settings.json, MCP).
+      - ${HOME}/.ai-sandbox/profiles/${PROFILE}/gemini-home:/root/.gemini:rw
 
     environment:
       - LD_LIBRARY_PATH=/usr/lib/wsl/lib
@@ -84,14 +83,118 @@ services:
       - NO_PROXY=localhost,127.0.0.1,egress-proxy
 
     networks:
-      - sandbox-internal
+      sandbox-internal:
+    # DNS lockdown (closes the DNS-exfil side channel that internal:true does
+    # NOT close on its own). Docker's embedded resolver at 127.0.0.11 forwards
+    # queries to the host's resolver, which can reach the internet — an agent
+    # could exfil data in crafted subdomain queries (e.g. secret.evil.com).
+    # Sinkholing to 127.0.0.1 makes all DNS lookups fail, then extra_hosts
+    # below provides the handful of names the agent legitimately needs. This
+    # pair — sinkhole + static hosts — is tighter than relying on the proxy
+    # alone, because DNS exfil bypasses HTTP-level controls entirely.
+    dns:
+      - 127.0.0.1
+    extra_hosts:
+      - "egress-proxy:172.30.0.10"
+      - "postgres:172.30.0.20"
+      - "mongo:172.30.0.30"
+    env_file:
+      # Optional DB creds — only present for profiles that opted into the
+      # postgres/mongo sibling containers. required: false so profiles
+      # without DBs still come up cleanly.
+      - path: ${HOME}/.ai-sandbox/profiles/${PROFILE}/db.env
+        required: false
 
     depends_on:
       - egress-proxy
 
     working_dir: /workspace
     command: ["sleep", "infinity"]
-    restart: unless-stopped
+    restart: "no"
+
+  # ---------------------------------------------------------------------------
+  # Optional: Postgres sibling (opt-in via COMPOSE_PROFILES=db-postgres)
+  # ---------------------------------------------------------------------------
+  # On sandbox-internal only — the agent reaches it at host `postgres:5432`.
+  # Data lives in a named volume (ai-sandbox-<profile>_postgres-data) managed
+  # by Docker inside the WSL2 ext4 rootfs. Back up anything important with
+  # `pg_dump` to /workspace. Credentials come from
+  # profiles/<profile>/db.env (template: config/db.env.template). File is
+  # optional — without POSTGRES_PASSWORD the image refuses to start, which is
+  # the behavior we want.
+  postgres:
+    # Pinned by digest (postgres:18 as of 2026-04-24). To refresh:
+    #   docker pull postgres:18 && docker image inspect postgres:18 \
+    #     --format '{{index .RepoDigests 0}}'
+    image: postgres:18@sha256:78481659c47e862334611ccdaf7c369c986b3046da9857112f3b309114a65fb4
+    container_name: postgres-${PROFILE}
+    hostname: postgres
+    profiles: ["db-postgres", "db-all"]
+    env_file:
+      - path: ${HOME}/.ai-sandbox/profiles/${PROFILE}/db.env
+        required: false
+    volumes:
+      - postgres-data:/var/lib/postgresql:rw
+    networks:
+      sandbox-internal:
+        ipv4_address: 172.30.0.20
+    # Uncomment to expose to host GUI tools (DBeaver, psql on WSL host).
+    # Loopback-only — do not bind 0.0.0.0.
+    # ports:
+    #   - "127.0.0.1:5432:5432"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETGID
+      - SETUID
+    mem_limit: 2g
+    cpus: 2
+    restart: "no"
+
+  # ---------------------------------------------------------------------------
+  # Optional: MongoDB sibling (opt-in via COMPOSE_PROFILES=db-mongo)
+  # ---------------------------------------------------------------------------
+  # Reach from the agent at host `mongo:27017`. Named volume for data.
+  # If MONGO_INITDB_ROOT_USERNAME/PASSWORD are unset the image starts
+  # without auth — acceptable on sandbox-internal (no external reachability),
+  # but set them in db.env if you plan to publish the port.
+  mongo:
+    # Pinned by digest (mongo:8 as of 2026-04-24). To refresh:
+    #   docker pull mongo:8 && docker image inspect mongo:8 \
+    #     --format '{{index .RepoDigests 0}}'
+    image: mongo:8@sha256:7abfba0d07c9330373f8173981ea4d09cd8a82cdf0e86ccaf7008848d1d24f62
+    container_name: mongo-${PROFILE}
+    hostname: mongo
+    profiles: ["db-mongo", "db-all"]
+    env_file:
+      - path: ${HOME}/.ai-sandbox/profiles/${PROFILE}/db.env
+        required: false
+    volumes:
+      - mongo-data:/data/db:rw
+    networks:
+      sandbox-internal:
+        ipv4_address: 172.30.0.30
+    # Uncomment to expose to host GUI tools (Compass, mongosh on WSL host).
+    # ports:
+    #   - "127.0.0.1:27017:27017"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETGID
+      - SETUID
+    mem_limit: 2g
+    cpus: 2
+    restart: "no"
 
   # ---------------------------------------------------------------------------
   # Egress proxy — domain-allowlisted outbound traffic
@@ -132,9 +235,10 @@ services:
     mem_limit: 512m
     cpus: 0.5
     networks:
-      - sandbox-internal
-      - sandbox-external
-    restart: unless-stopped
+      sandbox-internal:
+        ipv4_address: 172.30.0.10
+      sandbox-external:
+    restart: "no"
 
 networks:
   # Agent-only network. internal: true is LOAD-BEARING — removing it turns the
@@ -142,6 +246,18 @@ networks:
   sandbox-internal:
     driver: bridge
     internal: true
+    # Static subnet so we can pin egress-proxy/postgres/mongo to known IPs
+    # and feed them to the agent via extra_hosts. Required to make the
+    # dns: [127.0.0.1] sinkhole workable — without static IPs we'd have no
+    # reliable way to pre-populate /etc/hosts. The /24 is per-profile (each
+    # profile gets its own bridge under its own COMPOSE_PROJECT_NAME).
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24
   # Proxy's outbound side only.
   sandbox-external:
     driver: bridge
+
+volumes:
+  postgres-data:
+  mongo-data:

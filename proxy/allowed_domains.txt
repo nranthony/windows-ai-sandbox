@@ -11,12 +11,12 @@
 #   - PROJECT-PERSISTENT: the dev/ML stack. This repo's primary workload is
 #     CUDA/ML dev, so package registries + CDNs are uncommented by default
 #     (unlike macolima, where they live in PLANNING-MODE and are commented).
+#     Pinned to specific subdomains where possible (per audit M3 discipline).
 #     Comment a block out only for fully autonomous agent runs that should
 #     not be able to install or fetch anything.
-#   - PLANNING-MODE: short-lived installs you want to gate manually. Empty
-#     today — most of what was here lives in PROJECT-PERSISTENT to match
-#     this repo's policy. Add commented blocks here if you want a domain
-#     reachable only while you're driving the shell.
+#   - PLANNING-MODE: short-lived installs you want to gate manually. Commented
+#     by default. Add blocks here for domains reachable only while you're
+#     driving the shell.
 #
 # Hot-reload after edits:
 #   COMPOSE_PROJECT_NAME=ai-sandbox-<profile> PROFILE=<profile> \
@@ -35,10 +35,10 @@
 
 # --- Claude / Anthropic [claude] ---
 # Specific subdomains only — broad wildcards (`.anthropic.com`, `.claude.com`,
-# `.claude.ai`) were dropped per macolima security audit M3. A future
-# subdomain hosting user-controllable content under one of those parents
-# would otherwise become an exfil channel. Add specific hosts here as Claude
-# Code needs them; the 403 from Squid tells you which to add.
+# `.claude.ai`) were dropped per security audit M3. A future subdomain hosting
+# user-controllable content under one of those parents would otherwise become
+# an exfil channel. Add specific hosts here as Claude Code needs them; the
+# 403 from Squid tells you which to add.
 api.anthropic.com
 console.anthropic.com
 statsig.anthropic.com
@@ -54,18 +54,46 @@ marketplace.visualstudio.com
 .vscode-unpkg.net
 update.code.visualstudio.com
 
+# --- Gemini CLI [gemini] ---
+# Runtime + OAuth ("Login with Google") for the official `gemini` CLI
+# (npm @google/gemini-cli). Pinned subdomains only — `.googleapis.com` is a
+# parent hosting hundreds of services and would be a wide exfil channel.
+#
+# OAuth callback: the default flow is a loopback redirect to
+# http://127.0.0.1:<random>/oauth2callback, which the host browser cannot
+# reach inside this sandbox (sandbox-internal is internal:true). The CLI
+# falls back to the out-of-band code flow at codeassist.google.com/authcode —
+# the browser shows an auth code, you paste it in the terminal. That's why
+# codeassist.google.com is on this list.
+#
+# Auth/identity:
+accounts.google.com
+oauth2.googleapis.com
+www.googleapis.com
+codeassist.google.com
+developers.google.com
+# API (chat/completions — Code Assist endpoint for OAuth users):
+cloudcode-pa.googleapis.com
+
 
 # =============================================================================
 # === PROJECT-PERSISTENT — dev/ML stack (uncommented by default) =============
 # =============================================================================
-# Comment a block to shrink egress for autonomous-only agent runs.
+# Pinned to specific subdomains (per audit M3 discipline: no parent wildcards
+# under vendors we don't control). Comment a block to shrink egress for
+# autonomous-only agent runs.
 
 # --- Source code / git [git] ---
-.github.com
-.githubusercontent.com
-.githubassets.com
-.gitlab.com
-.gitlab-static.net
+# Pinned hosts — no parent wildcards like `.github.com`. If a TCP_DENIED hits
+# a sibling subdomain during dev, add the specific host.
+github.com
+api.github.com
+codeload.github.com
+objects.githubusercontent.com
+raw.githubusercontent.com
+gist.githubusercontent.com
+github.io
+gitlab.com
 
 # --- Python package ecosystem [pypi] ---
 .pypi.org
@@ -73,21 +101,20 @@ update.code.visualstudio.com
 .astral.sh
 
 # --- PyTorch / NVIDIA CUDA wheels [pytorch] ---
-.pytorch.org
+download.pytorch.org
 
 # --- Node.js / npm (Claude Code updates + per-repo npm) [npm] ---
-.registry.npmjs.org
-.npmjs.com
-.nodejs.org
+registry.npmjs.org
+nodejs.org
 deb.nodesource.com
 
-# --- NVIDIA container + compute stack (image builds / apt updates) [nvidia] ---
-.nvidia.com
-.nvidia.github.io
+# --- NVIDIA container + compute stack [nvidia] ---
+developer.download.nvidia.com
+developer.nvidia.com
 
 # --- OS packages — apt-get inside the container [apt] ---
-.ubuntu.com
-.debian.org
+archive.ubuntu.com
+security.ubuntu.com
 
 
 # =============================================================================

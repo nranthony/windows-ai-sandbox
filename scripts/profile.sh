@@ -5,6 +5,7 @@
 # Usage:
 #   scripts/profile.sh <profile> <command> [extra args...]
 #   scripts/profile.sh list
+#   scripts/profile.sh build
 #
 # Commands:
 #   up              start the stack for this profile (creates state dirs)
@@ -13,23 +14,40 @@
 #   auth            run `claude login` inside the container
 #   auth-github     run `gh auth login` inside the container
 #   auth-gitlab     run `glab auth login` inside the container
+#   auth-gemini     run `gemini` inside the container (triggers OAuth)
 #   logs            tail container logs
 #   status          docker compose ps for this profile
 #   build           force-rebuild the shared image (all profiles pick it up)
-#   rebuild         build + recreate this profile's container
+#   recreate        force-recreate this profile's containers (no image rebuild)
+#   rebuild         build + recreate this profile's containers
 #   reset-settings  overwrite this profile's claude settings.json from
 #                   config/claude-settings.json (backs up the old one)
+#   reset-skills    overwrite this profile's claude skills from config/skills/
+#                   (backs up old skill dirs)
+#   db-reset        wipe the postgres data volume and bring postgres back up
+#                   with a fresh initdb. Flags: --yes (skip confirmation).
 #   clean           prune rotating state (old .claude.json backups, paste-cache,
 #                   shell-snapshots). Pass --deep to also drop MCP debug logs
 #                   and settings.json.bak.* backups.
+#   wipe            blank-slate this profile: down, nuke per-profile state,
+#                   KEEP auth (claude creds, claude.json, gh, glab, git identity,
+#                   gemini oauth, db.env). Confirms first.
+#                   Flags: --dry-run, --yes, --all-volumes
 #   list            list all existing profiles with up/down status
 #   exec <cmd...>   run arbitrary command inside the container
+#
+# Optional flags (accepted by up / recreate / rebuild):
+#   --expose-dev    layer docker-compose.<profile>.expose-dev.yml on top of the
+#                   base compose file. Used to opt into LAN port publishing for
+#                   a browser to reach a dev server inside the container.
+#                   UNSAFE: may drop the `internal: true` network isolation.
 # =============================================================================
 set -euo pipefail
 
 REPO_ROOT="${HOME}/repo"
 PROFILES_ROOT="${HOME}/.ai-sandbox/profiles"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+COMPOSE_FILE_ARGS=()
 
 info()  { printf '\033[0;36m[INFO]\033[0m  %s\n' "$*"; }
 ok()    { printf '\033[0;32m[ OK ]\033[0m  %s\n' "$*"; }
@@ -39,6 +57,77 @@ fail()  { printf '\033[0;31m[FAIL]\033[0m  %s\n' "$*" >&2; exit 1; }
 usage() {
   sed -n '2,/^# =====/p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
   exit 1
+}
+
+# ---------------------------------------------------------------------------
+# ensure_state — idempotent per-profile dir bootstrap
+# ---------------------------------------------------------------------------
+ensure_state() {
+  local p="$PROFILES_ROOT/$PROFILE"
+  mkdir -p "$p/claude-home" "$p/cache" "$p/config" "$p/gemini-home"
+  if [[ ! -s "$p/claude.json" ]]; then
+    printf '{}\n' > "$p/claude.json"
+  fi
+  mkdir -p "$p/config/git"
+  cp "$SCRIPT_DIR/config/db.env.template" "$p/db.env.example"
+  if [[ ! -f "$p/claude-home/settings.json" ]] && [[ -f "$SCRIPT_DIR/config/claude-settings.json" ]]; then
+    cp "$SCRIPT_DIR/config/claude-settings.json" "$p/claude-home/settings.json"
+  fi
+  if [[ -d "$SCRIPT_DIR/config/skills" ]]; then
+    mkdir -p "$p/claude-home/skills"
+    for skill_src in "$SCRIPT_DIR/config/skills"/*/; do
+      [[ -d "$skill_src" ]] || continue
+      name="$(basename "$skill_src")"
+      if [[ ! -d "$p/claude-home/skills/$name" ]]; then
+        cp -R "$skill_src" "$p/claude-home/skills/$name"
+      fi
+    done
+  fi
+  if [[ -f "$p/config/git/config" ]] && \
+     grep -qE 'helper\s*=.*(vscode-server|vscode-remote-containers|git-credential-manager)' \
+       "$p/config/git/config"; then
+    awk '
+      /^[[:space:]]*helper[[:space:]]*=.*(vscode-server|vscode-remote-containers|git-credential-manager)/ { next }
+      { print }
+    ' "$p/config/git/config" > "$p/config/git/config.scrubbed" \
+      && mv "$p/config/git/config.scrubbed" "$p/config/git/config"
+  fi
+  if [[ -n "${GIT_USER_NAME:-}" ]] && [[ -n "${GIT_USER_EMAIL:-}" ]]; then
+    if [[ ! -f "$p/config/git/config" ]] || \
+       ! grep -qE '^\[user\]' "$p/config/git/config"; then
+      {
+        printf '[user]\n\tname = %s\n\temail = %s\n' \
+          "$GIT_USER_NAME" "$GIT_USER_EMAIL"
+        [[ -f "$p/config/git/config" ]] && cat "$p/config/git/config"
+      } > "$p/config/git/config.new" \
+        && mv "$p/config/git/config.new" "$p/config/git/config"
+    fi
+  fi
+  if [[ -f "$p/db.env" ]]; then
+    chmod 600 "$p/db.env" 2>/dev/null || warn "could not chmod 600 $p/db.env"
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# parse_flags — strip --expose-dev from "$@", populate COMPOSE_FILE_ARGS
+# ---------------------------------------------------------------------------
+parse_flags() {
+  local expose=0 remaining=()
+  for a in "$@"; do
+    case "$a" in
+      --expose-dev) expose=1 ;;
+      *) remaining+=("$a") ;;
+    esac
+  done
+  ARGS=("${remaining[@]+"${remaining[@]}"}")
+  if [[ "$expose" == "1" ]]; then
+    local override="$SCRIPT_DIR/docker-compose.$PROFILE.expose-dev.yml"
+    [[ -f "$override" ]] || fail "--expose-dev: override not found: $override
+       Create the override at the repo root (a YAML file adding a
+       'ports:' block under ai-sandbox), then rerun."
+    COMPOSE_FILE_ARGS+=(-f "docker-compose.$PROFILE.expose-dev.yml")
+    warn "UNSAFE: --expose-dev — layering $override (publishes ports to LAN)"
+  fi
 }
 
 # --- `list` is the only command that doesn't take a profile arg --------------
@@ -66,7 +155,6 @@ fi
 if [[ "${1:-}" == "build" ]]; then
   info "Building windows-ai-sandbox:latest"
   cd "$SCRIPT_DIR"
-  # PROFILE is required by compose's interpolation even for build-only.
   PROFILE=_build docker compose build ai-sandbox
   docker image prune -f
   docker builder prune -f --keep-storage=4g
@@ -100,10 +188,11 @@ ensure_repo_dir() {
 # --- dispatch ----------------------------------------------------------------
 case "$CMD" in
   up)
+    parse_flags "$@"; set -- "${ARGS[@]+"${ARGS[@]}"}"
     ensure_repo_dir
-    bash "$SCRIPT_DIR/scripts/init-profile-state.sh" "$PROFILE"
+    ensure_state
     info "Bringing up profile '$PROFILE' (project: $COMPOSE_PROJECT_NAME)"
-    docker compose up -d "$@"
+    docker compose "${COMPOSE_FILE_ARGS[@]}" up -d "$@"
     ok "Stack up. Attach with:  scripts/profile.sh $PROFILE attach"
     ;;
 
@@ -133,6 +222,11 @@ case "$CMD" in
     exec docker exec -it "$AGENT" glab auth login
     ;;
 
+  auth-gemini)
+    info "Running 'gemini' inside $AGENT (triggers OAuth login)"
+    exec docker exec -it "$AGENT" gemini
+    ;;
+
   logs)
     exec docker compose logs -f "$@"
     ;;
@@ -141,14 +235,23 @@ case "$CMD" in
     exec docker compose ps "$@"
     ;;
 
-  rebuild)
+  recreate)
+    parse_flags "$@"; set -- "${ARGS[@]+"${ARGS[@]}"}"
     ensure_repo_dir
-    bash "$SCRIPT_DIR/scripts/init-profile-state.sh" "$PROFILE"
+    ensure_state
+    info "Force-recreating profile '$PROFILE'"
+    docker compose "${COMPOSE_FILE_ARGS[@]}" up -d --force-recreate "$@"
+    ;;
+
+  rebuild)
+    parse_flags "$@"; set -- "${ARGS[@]+"${ARGS[@]}"}"
+    ensure_repo_dir
+    ensure_state
     info "Rebuilding image + recreating profile '$PROFILE'"
     docker compose build ai-sandbox
     docker image prune -f
     docker builder prune -f --keep-storage=4g
-    docker compose up -d --force-recreate
+    docker compose "${COMPOSE_FILE_ARGS[@]}" up -d --force-recreate
     ;;
 
   exec)
@@ -157,12 +260,6 @@ case "$CMD" in
     ;;
 
   verify)
-    # Stream the host-side tripwire into the container via stdin. The sandbox
-    # repo itself is NOT bind-mounted into /workspace (by design — workspace
-    # holds the user's profile repos, not the sandbox tooling), so a path
-    # like /workspace/windows-ai-sandbox/scripts/verify-sandbox.sh would not
-    # resolve. `bash -s` reads the script from stdin and runs it inside the
-    # container with the host file as source of truth.
     src="$SCRIPT_DIR/scripts/verify-sandbox.sh"
     [[ -f "$src" ]] || fail "verify-sandbox.sh missing: $src"
     info "Running verify-sandbox.sh inside $AGENT (streamed via stdin)"
@@ -170,17 +267,6 @@ case "$CMD" in
     ;;
 
   audit)
-    # Tier 2 of the 3-tier audit model (tripwire → JSON → agent report).
-    # Stage sandbox config + audit probes into the profile workspace (so the
-    # probes' static checks of seccomp.json/squid.conf/etc. have files to
-    # read at /workspace/temp_audit_package/), then run audit.sh inside the
-    # container, and write the JSON next to the live claude state on the
-    # host so it's accessible without re-attaching.
-    #
-    # Flags:
-    #   --stage-only   stage the package, don't run audit
-    #   --clean        remove the staged package
-    #   --compact      pass-through to aggregate.py (one-line JSON)
     flag=""
     for a in "$@"; do
       case "$a" in
@@ -211,7 +297,6 @@ case "$CMD" in
     if docker exec "$AGENT" bash /workspace/temp_audit_package/scripts/audit/audit.sh $pretty_flag > "$json_host"; then
       ok "Audit JSON saved: $json_host"
       ok "Container path:   /root/.claude/audits/$stamp-$PROFILE-audit.json"
-      # Brief verdict summary if jq is available host-side.
       if command -v jq >/dev/null 2>&1; then
         info "Summary: $(jq -c .summary "$json_host")"
       fi
@@ -221,9 +306,6 @@ case "$CMD" in
     ;;
 
   reset-settings)
-    # Overwrite this profile's claude-home/settings.json from the template.
-    # init-profile-state.sh only seeds when absent; use this when the
-    # template evolves and you want to apply it to an existing profile.
     src="$SCRIPT_DIR/config/claude-settings.json"
     dst="$PROFILES_ROOT/$PROFILE/claude-home/settings.json"
     [[ -f "$src" ]] || fail "template missing: $src"
@@ -237,11 +319,198 @@ case "$CMD" in
     ok "settings.json reset for '$PROFILE'. Restart claude inside the container to pick up."
     ;;
 
+  reset-skills)
+    src_dir="$SCRIPT_DIR/config/skills"
+    dst_dir="$PROFILES_ROOT/$PROFILE/claude-home/skills"
+    [[ -d "$src_dir" ]] || fail "no skills templates: $src_dir"
+    mkdir -p "$dst_dir"
+    stamp="$(date +%Y%m%d-%H%M%S)"
+    for skill_src in "$src_dir"/*/; do
+      [[ -d "$skill_src" ]] || continue
+      name="$(basename "$skill_src")"
+      if [[ -d "$dst_dir/$name" ]]; then
+        backup="$dst_dir/$name.bak.$stamp"
+        mv "$dst_dir/$name" "$backup"
+        info "backed up existing skill → $backup"
+      fi
+      cp -R "$skill_src" "$dst_dir/$name"
+      ok "skill '$name' reset for '$PROFILE'"
+    done
+    ok "all skills reset. Restart claude inside the container to pick up."
+    ;;
+
+  db-reset)
+    PG_CONTAINER="postgres-$PROFILE"
+    PG_VOLUME="${COMPOSE_PROJECT_NAME}_postgres-data"
+
+    assume_yes=0
+    for a in "$@"; do
+      case "$a" in
+        --yes|-y) assume_yes=1 ;;
+        *) fail "db-reset: unknown flag '$a' (valid: --yes)" ;;
+      esac
+    done
+
+    warn "This will DESTROY all Postgres data for profile '$PROFILE':"
+    warn "  volume: $PG_VOLUME"
+    warn "  container: $PG_CONTAINER (will be stopped + removed + recreated)"
+    warn "After reset, only the default 'postgres' database will exist."
+    warn "You'll need to CREATE DATABASE for each project and re-seed."
+
+    if [[ "$assume_yes" != "1" ]]; then
+      printf '\nProceed? type the profile name (%s) to confirm: ' "$PROFILE"
+      read -r confirm
+      [[ "$confirm" == "$PROFILE" ]] || fail "confirmation mismatch; aborting"
+    fi
+
+    if docker ps -a --format '{{.Names}}' | grep -qx "$PG_CONTAINER"; then
+      info "stopping $PG_CONTAINER"
+      docker stop "$PG_CONTAINER" 2>/dev/null || true
+      docker rm "$PG_CONTAINER" 2>/dev/null || true
+      ok "removed $PG_CONTAINER"
+    else
+      info "$PG_CONTAINER not found (already removed or never started)"
+    fi
+
+    if docker volume ls -q | grep -qx "$PG_VOLUME"; then
+      docker volume rm "$PG_VOLUME"
+      ok "removed volume $PG_VOLUME"
+    else
+      info "volume $PG_VOLUME not found (already removed)"
+    fi
+
+    info "bringing postgres back up (COMPOSE_PROFILES=db-postgres)"
+    COMPOSE_PROFILES=db-postgres docker compose "${COMPOSE_FILE_ARGS[@]}" up -d postgres
+    ok "postgres is up with a fresh data volume"
+
+    info "waiting for postgres to accept connections..."
+    for i in $(seq 1 15); do
+      if docker exec "$PG_CONTAINER" pg_isready -U agent -d postgres >/dev/null 2>&1; then
+        ok "postgres is ready"
+        break
+      fi
+      [[ "$i" -eq 15 ]] && warn "postgres not ready after 15s — check: docker logs $PG_CONTAINER"
+      sleep 1
+    done
+
+    echo ""
+    info "Next steps — create your project databases:"
+    echo "  docker exec $PG_CONTAINER psql -U agent -d postgres \\"
+    echo "    -c 'CREATE DATABASE <name> OWNER agent;'"
+    echo ""
+    info "Then force-recreate the agent if you changed DSNs in db.env:"
+    echo "  COMPOSE_PROFILES=db-postgres scripts/profile.sh $PROFILE recreate"
+    ;;
+
+  wipe)
+    dry=0; assume_yes=0; all_vols=0
+    for a in "$@"; do
+      case "$a" in
+        --dry-run)     dry=1 ;;
+        --yes|-y)      assume_yes=1 ;;
+        --all-volumes) all_vols=1 ;;
+        *) fail "wipe: unknown flag '$a' (valid: --dry-run --yes --all-volumes)" ;;
+      esac
+    done
+
+    p="$PROFILES_ROOT/$PROFILE"
+    [[ -d "$p" ]] || fail "no state dir to wipe: $p"
+
+    shopt -s nullglob
+    orphans=( "$PROFILES_ROOT"/.wipe-stage-"$PROFILE"-* )
+    shopt -u nullglob
+    if (( ${#orphans[@]} > 0 )); then
+      warn "found orphaned wipe stage dir(s) from a previous interrupted run:"
+      printf '  %s\n' "${orphans[@]}"
+      fail "inspect/restore manually (creds may be inside), then rerun"
+    fi
+
+    info "wipe plan for profile '$PROFILE' (project: $COMPOSE_PROJECT_NAME)"
+    echo "  PRESERVE:"
+    echo "    $p/claude.json"
+    echo "    $p/claude-home/.credentials.json"
+    echo "    $p/config/gh/"
+    echo "    $p/config/glab-cli/"
+    echo "    $p/config/git/"
+    echo "    $p/gemini-home/oauth_creds.json"
+    echo "    $p/db.env  (if present)"
+    echo "  WIPE:"
+    echo "    docker compose down --remove-orphans  ($([[ $all_vols == 1 ]] && echo '+ ALL named volumes' || echo '+ DB volumes preserved'))"
+    echo "    rm -rf $p/*  (everything except the PRESERVE list above)"
+    echo "  AFTER:"
+    echo "    re-seed claude settings.json + skills from config/ (via ensure_state)"
+    echo "    next step: scripts/profile.sh $PROFILE up"
+
+    if [[ "$dry" == "1" ]]; then
+      ok "dry-run; no changes made"
+      exit 0
+    fi
+
+    if [[ "$assume_yes" != "1" ]]; then
+      printf '\nProceed? type the profile name (%s) to confirm: ' "$PROFILE"
+      read -r confirm
+      [[ "$confirm" == "$PROFILE" ]] || fail "confirmation mismatch; aborting"
+    fi
+
+    info "tearing down containers (including db siblings via --profile db-all)"
+    if [[ "$all_vols" == "1" ]]; then
+      docker compose --profile db-all down -v --remove-orphans \
+        || warn "compose down had errors; continuing"
+    else
+      docker compose --profile db-all down --remove-orphans \
+        || warn "compose down had errors; continuing"
+    fi
+
+    leftover=$(docker ps -aq --filter "label=com.docker.compose.project=$COMPOSE_PROJECT_NAME")
+    if [[ -n "$leftover" ]]; then
+      warn "containers still present after down:"
+      docker ps -a --filter "label=com.docker.compose.project=$COMPOSE_PROJECT_NAME" \
+        --format '  {{.Names}}  ({{.Status}})'
+      fail "refusing to continue; tear them down manually (docker rm -f <name>) and rerun"
+    fi
+
+    stage="$PROFILES_ROOT/.wipe-stage-$PROFILE-$(date +%s)"
+    mkdir -p "$stage/claude-home" "$stage/config" "$stage/gemini-home"
+    [[ -f "$p/claude.json" ]]                   && mv "$p/claude.json"                   "$stage/claude.json"
+    [[ -f "$p/claude-home/.credentials.json" ]] && mv "$p/claude-home/.credentials.json" "$stage/claude-home/.credentials.json"
+    [[ -d "$p/config/gh" ]]                     && mv "$p/config/gh"                     "$stage/config/gh"
+    [[ -d "$p/config/glab-cli" ]]               && mv "$p/config/glab-cli"               "$stage/config/glab-cli"
+    [[ -d "$p/config/git" ]]                    && mv "$p/config/git"                    "$stage/config/git"
+    [[ -f "$p/gemini-home/oauth_creds.json" ]]  && mv "$p/gemini-home/oauth_creds.json"  "$stage/gemini-home/oauth_creds.json"
+    [[ -f "$p/db.env" ]]                        && mv "$p/db.env"                        "$stage/db.env"
+    ok "staged auth artefacts → $stage"
+
+    rm -rf "$p"
+    ok "removed $p"
+
+    mkdir -p "$p/claude-home" "$p/config" "$p/gemini-home"
+    [[ -f "$stage/claude.json" ]]                   && mv "$stage/claude.json"                   "$p/claude.json"
+    [[ -f "$stage/claude-home/.credentials.json" ]] && mv "$stage/claude-home/.credentials.json" "$p/claude-home/.credentials.json"
+    [[ -d "$stage/config/gh" ]]                     && mv "$stage/config/gh"                     "$p/config/gh"
+    [[ -d "$stage/config/glab-cli" ]]               && mv "$stage/config/glab-cli"               "$p/config/glab-cli"
+    [[ -d "$stage/config/git" ]]                    && mv "$stage/config/git"                    "$p/config/git"
+    [[ -f "$stage/gemini-home/oauth_creds.json" ]]  && mv "$stage/gemini-home/oauth_creds.json"  "$p/gemini-home/oauth_creds.json"
+    [[ -f "$stage/db.env" ]]                        && mv "$stage/db.env"                        "$p/db.env"
+
+    residue=$(find "$stage" -mindepth 1 -not -type d 2>/dev/null)
+    if [[ -n "$residue" ]]; then
+      warn "unexpected files left in stage dir; not removing automatically:"
+      printf '  %s\n' $residue
+      warn "inspect: $stage"
+    else
+      rm -rf "$stage"
+    fi
+
+    [[ -f "$p/claude-home/.credentials.json" ]] && chmod 600 "$p/claude-home/.credentials.json"
+    [[ -f "$p/db.env" ]]                        && chmod 600 "$p/db.env"
+    ok "restored auth artefacts into fresh $p"
+
+    ensure_state
+    ok "re-seeded settings + skills from config/"
+    ok "wipe done for '$PROFILE'. Next: scripts/profile.sh $PROFILE up"
+    ;;
+
   clean)
-    # Prune rotating state that Claude/npm/zsh regenerate on demand. Safe by default.
-    # --deep also drops MCP debug logs and reset-settings backups.
-    # Never touches: .credentials.json, live settings.json, live claude.json,
-    # file-history, projects/, plugins/, gitstatusd binary.
     deep=0
     for a in "$@"; do [[ "$a" == "--deep" ]] && deep=1; done
     p="$PROFILES_ROOT/$PROFILE"
@@ -249,7 +518,6 @@ case "$CMD" in
 
     info "cleaning $p (deep=$deep)"
 
-    # Claude Code's own rotating .claude.json backups — keep the single newest.
     bdir="$p/claude-home/backups"
     if [[ -d "$bdir" ]]; then
       # shellcheck disable=SC2012
@@ -258,7 +526,6 @@ case "$CMD" in
       ok "pruned $bdir (kept newest .claude.json.backup)"
     fi
 
-    # Paste cache and shell snapshots — regenerated per session.
     rm -rf "$p/claude-home/paste-cache" "$p/claude-home/shell-snapshots" 2>/dev/null || true
     mkdir -p "$p/claude-home/paste-cache" "$p/claude-home/shell-snapshots"
     ok "reset paste-cache + shell-snapshots"
@@ -276,6 +543,13 @@ case "$CMD" in
     ;;
 
   *)
+    printf '\033[0;31m[FAIL]\033[0m  Unknown profile.sh command: %q\n' "$CMD" >&2
+    if [[ "$CMD" == --* ]]; then
+      printf '       Hint: profile.sh uses subcommands (no leading "--").\n' >&2
+      printf '       Did you mean:  scripts/profile.sh %s %s\n' \
+             "$PROFILE" "${CMD#--}" >&2
+    fi
+    echo >&2
     usage
     ;;
 esac

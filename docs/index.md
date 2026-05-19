@@ -3,9 +3,12 @@
 ## Architecture & Security
 
 - [CLAUDE.md](../CLAUDE.md) — primary reference for architecture, file layout, security posture, and all common tasks
-- [VS Code integration security](vscode-integration-security.md) — SSH agent forwarding, gitconfig leaks, credential helper injection, orphaned root shells; required host settings and operational guardrails
+- [Sandbox design notes](sandbox-design-notes.md) — why rootfs is rw, bwrap is disabled, container runs as root, git config is denied
+- [Permissions model](permissions-model.md) — deny/allow posture, two-phase workflow, WebFetch exfil risk, hook self-protection
+- [VS Code integration security](vscode-integration-security.md) — SSH agent forwarding, gitconfig leaks, credential helper injection, orphaned root shells
 - [scripts/audit/README.md](../scripts/audit/README.md) — tier-2 structured probe suite (~80 checks, JSON output)
 - [seccomp.json](../seccomp.json) — syscall filter (`clone3 → ENOSYS`, `unshare(CLONE_NEWUSER)` blocked)
+- [seccomp notes](seccomp-notes.md) — must-keep syscalls, clone3 ENOSYS rule, editing conventions
 
 ## Hardening Verification
 
@@ -20,6 +23,11 @@
 - [config/claude-settings.json](../config/claude-settings.json) — Bash/Read deny lists (curl, git push, pip install, secrets reads, etc.)
 - [deny-destructive hook](deny-destructive-hook-plan.md) — PreToolUse hook blocking destructive commands (find -delete, dd of=, etc.)
 - [config/hooks/deny-destructive.sh](../config/hooks/deny-destructive.sh) — hook implementation
+
+## Proxy & Network
+
+- [Squid internals](squid-internals.md) — cap model, tmpfs ownership, port restrictions, hot reload
+- [Compose network IPAM](compose-network-ipam.md) — why `down` is needed for IPAM changes, DNS lockdown explained
 
 ## GPU & Docker
 
@@ -47,6 +55,12 @@ Guides in [`host_setup/`](../host_setup/):
 - [`scripts/with-egress.sh`](../scripts/with-egress.sh) — temporarily widen Squid allowlist for installs
 - [`scripts/run-ephemeral.sh`](../scripts/run-ephemeral.sh) — disposable one-shot containers
 - [`scripts/init-profile-state.sh`](../scripts/init-profile-state.sh) — idempotent state bootstrap per profile
+
+## Operational
+
+- [Debug recipes](debug-recipes.md) — routine commands for operating a profile
+- [Local wheels](local-wheels.md) — per-profile `dist/` convention for local `.whl` files
+- [config/db.env.template](../config/db.env.template) — database credentials template for postgres/mongo sibling containers
 
 ## Archive
 

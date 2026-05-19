@@ -35,7 +35,8 @@
   },
   "permissions": {
     "_comment": "Plan interactively (you drive the shell, install deps), execute autonomously (tight denies, Anthropic-only egress through Squid). acceptEdits lets Claude freely edit code but still prompts for Bash not on the allow list. The REAL boundary is the egress proxy (domain allowlist) + seccomp (no user namespaces) + cap_drop + rootless userns; this deny list is defense-in-depth and surface-reducing, not the boundary itself. Claude Code's Bash matcher keys off the command prefix, so denies here can be routed around by wrapper commands (env, xargs, find -exec, make targets, language interpreters running local scripts). We deny the obvious routes; the proxy catches anything that makes it through.",
-    "defaultMode": "acceptEdits",
+    "defaultMode": "auto",
+    "_acceptEdits_note": "auto prompts on Bash not on the allow list and on tool calls that are not Read/Glob/Grep. Combined with the /workspace bind mount this means the agent can still autonomously rewrite host-visible files when you approve. To skip per-edit confirmation, change defaultMode to acceptEdits.",
     "allow": [
       "Read",
       "Glob",
@@ -81,6 +82,8 @@
       "Bash(git clone:*)",
       "Bash(git fetch:*)",
       "Bash(git pull:*)",
+      "Bash(git submodule:*)",
+      "Bash(git config:*)",
       "Bash(gh:*)",
       "Bash(glab:*)",
       "Bash(npm install:*)",
@@ -114,6 +117,9 @@
       "Bash(env:*)",
       "Bash(xargs:*)",
       "Bash(eval:*)",
+      "Bash(awk:*)",
+      "Bash(sed:*)",
+      "Bash(ssh-keygen:*)",
       "Bash(rm -rf:*)",
       "Bash(git reset --hard:*)",
       "Bash(git rebase:*)",
