@@ -41,7 +41,6 @@
       "Glob",
       "Grep",
       "WebSearch",
-      "WebFetch",
       "Bash(git status)",
       "Bash(git diff:*)",
       "Bash(git log:*)",

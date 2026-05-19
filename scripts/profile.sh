@@ -68,6 +68,8 @@ if [[ "${1:-}" == "build" ]]; then
   cd "$SCRIPT_DIR"
   # PROFILE is required by compose's interpolation even for build-only.
   PROFILE=_build docker compose build ai-sandbox
+  docker image prune -f
+  docker builder prune -f --keep-storage=4g
   exit 0
 fi
 
@@ -144,6 +146,8 @@ case "$CMD" in
     bash "$SCRIPT_DIR/scripts/init-profile-state.sh" "$PROFILE"
     info "Rebuilding image + recreating profile '$PROFILE'"
     docker compose build ai-sandbox
+    docker image prune -f
+    docker builder prune -f --keep-storage=4g
     docker compose up -d --force-recreate
     ;;
 

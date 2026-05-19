@@ -125,10 +125,9 @@ def run():
             })
 
         # CONNECT on port 80 — must be 4xx, MUST NOT tunnel.
-        # Either `deny CONNECT !SSL_ports` (explicit) or `allow CONNECT
-        # SSL_ports allowed_domains` (implicit fall-through to deny) yields
-        # the same blocked behaviour. A real regression here would return
-        # "HTTP/1.1 200 Connection established".
+        # Requires explicit `http_access deny CONNECT` after the SSL_ports
+        # allow rule. Without it, CONNECT on 80 falls through to the
+        # general `allow allowed_domains` and succeeds.
         try:
             line = _connect_via_proxy("api.anthropic.com", 80)
             code = _status_code(line)

@@ -3,51 +3,43 @@
 White-box check on the staged proxy config. Required-core list, anti-pattern
 detection, planning-mode-block-commented check, squid.conf ACL ordering.
 
-windows-ai-sandbox accepts either of two equivalent CONNECT-gating patterns
-in squid.conf:
-  (a) explicit:  http_access deny CONNECT !SSL_ports
-  (b) implicit:  http_access allow CONNECT SSL_ports allowed_domains
-                 (combined with default `http_access deny all`)
-Both yield the same blocked behaviour for CONNECT on port 80; the runtime
-network.py probe is the authoritative signal."""
+windows-ai-sandbox gates CONNECT to SSL_ports (443) via:
+  http_access allow CONNECT SSL_ports allowed_domains
+  http_access deny CONNECT
+The explicit `deny CONNECT` is required — without it, CONNECT on port 80
+falls through to `http_access allow allowed_domains` and succeeds.
+The runtime network.py probe is the authoritative signal."""
 import os
 import re
 
 ALLOWED = "/workspace/temp_audit_package/proxy/allowed_domains.txt"
 SQUID = "/workspace/temp_audit_package/proxy/squid.conf"
 
-# Leaf hosts that MUST be on the allowlist — agent / Claude Code core paths.
+# Domains that MUST be on the allowlist — agent / Claude Code core paths.
+# Uses the leading-dot wildcard forms that actually appear in
+# allowed_domains.txt (e.g. `.github.com` covers github.com + api.github.com).
 REQUIRED_DOMAINS = [
     "api.anthropic.com",
     "statsig.anthropic.com",
-    "github.com",
-    "api.github.com",
-    "registry.npmjs.org",
-    "pypi.org",
-    "files.pythonhosted.org",
+    ".github.com",
+    ".pypi.org",
+    ".files.pythonhosted.org",
+    ".registry.npmjs.org",
 ]
 
-# Section tags for the planning-mode block (commented-by-default; populated
-# in Phase C). Currently expected absent.
-PLANNING_TAGS = {"[git]", "[pypi]", "[npm]", "[nodejs]", "[apt]",
-                 "[playwright-install]"}
+# Section tags for the planning-mode block (commented-by-default).
+# [git], [pypi], [npm] are PROJECT-PERSISTENT in this repo (uncommented by
+# default) — only gate tags that require manual intervention belong here.
+PLANNING_TAGS = {"[playwright-install]"}
 
-# squid.conf rule markers — order-preserving. Both patterns supported.
-EXPECTED_MARKERS_A = [
-    "acl Safe_ports port",
-    "http_access deny !Safe_ports",
-    "acl SSL_ports",
-    "acl CONNECT method",
-    "http_access deny CONNECT !SSL_ports",
-    "http_access allow allowed_domains",
-    "http_access deny all",
-]
-EXPECTED_MARKERS_B = [
+# squid.conf rule markers — order-preserving.
+EXPECTED_MARKERS = [
     "acl Safe_ports port",
     "http_access deny !Safe_ports",
     "acl SSL_ports",
     "acl CONNECT method",
     "http_access allow CONNECT SSL_ports allowed_domains",
+    "http_access deny CONNECT",
     "http_access allow allowed_domains",
     "http_access deny all",
 ]
@@ -178,32 +170,25 @@ def run():
     with open(SQUID) as f:
         squid_lines = [l.rstrip() for l in f]
 
-    # Try both patterns; whichever fits cleanly wins.
-    for label, markers in [("A_explicit_deny", EXPECTED_MARKERS_A),
-                           ("B_allow_connect_ssl", EXPECTED_MARKERS_B)]:
-        positions = _find_order(squid_lines, markers)
-        line_nums = [p["line"] for p in positions]
-        all_present = all(p > 0 for p in line_nums)
-        in_order = all_present and line_nums == sorted(line_nums)
-        if in_order:
-            out.append(_check(
-                "squid_acl_order",
-                True,
-                pattern=label,
-                positions=positions,
-            ))
-            break
+    positions = _find_order(squid_lines, EXPECTED_MARKERS)
+    line_nums = [p["line"] for p in positions]
+    all_present = all(p > 0 for p in line_nums)
+    in_order = all_present and line_nums == sorted(line_nums)
+    if in_order:
+        out.append(_check(
+            "squid_acl_order",
+            True,
+            positions=positions,
+        ))
     else:
-        # Neither pattern fit — emit DRIFT with both attempts for review.
         out.append({
             "section": "proxy",
             "name": "squid_acl_order",
             "verdict": "DRIFT",
             "details": {
-                "pattern_A_explicit_deny": _find_order(squid_lines, EXPECTED_MARKERS_A),
-                "pattern_B_allow_connect_ssl": _find_order(squid_lines, EXPECTED_MARKERS_B),
-                "rationale": ("expected either explicit `deny CONNECT !SSL_ports` or "
-                              "implicit `allow CONNECT SSL_ports allowed_domains` pattern"),
+                "positions": positions,
+                "rationale": ("expected: allow CONNECT SSL_ports, deny CONNECT, "
+                              "allow allowed_domains, deny all — in that order"),
             },
         })
 

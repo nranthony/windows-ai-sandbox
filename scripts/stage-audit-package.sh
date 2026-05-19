@@ -38,7 +38,7 @@ if [[ "$action" == "--clean" ]]; then
 fi
 
 rm -rf "$dest"
-mkdir -p "$dest/proxy" "$dest/scripts" "$dest/config"
+mkdir -p "$dest/proxy" "$dest/scripts" "$dest/config" "$dest/skills/audit-sandbox"
 
 cp "$SANDBOX_DIR/CLAUDE.md"                       "$dest/CLAUDE.md"
 cp "$SANDBOX_DIR/Dockerfile"                      "$dest/Dockerfile"
@@ -53,11 +53,8 @@ cp "$SANDBOX_DIR/config/claude-settings.json"     "$dest/config/claude-settings.
 # Structured audit package (audit.sh + aggregate.py + probes/*) — keep tree.
 cp -R "$SANDBOX_DIR/scripts/audit"                "$dest/scripts/audit"
 
-# Internal-audit prompt is optional (the audit-sandbox skill body drives the
-# workflow directly). Copy if present.
-[[ -f "$SANDBOX_DIR/claude_internal_audit_wsl.md" ]] && \
-  cp "$SANDBOX_DIR/claude_internal_audit_wsl.md" "$dest/claude_internal_audit.md"
-
+# Tier-3 skill — agent-side judgment instructions over the audit JSON.
+cp "$SANDBOX_DIR/config/skills/audit-sandbox/SKILL.md" "$dest/skills/audit-sandbox/SKILL.md"
 chmod -R a-w "$dest"
 # Restore write on directories so the agent can write /tmp-style artifacts
 # (audit.sh writes nothing into the staged tree, but in case probes evolve).

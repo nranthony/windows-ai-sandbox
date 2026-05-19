@@ -109,7 +109,7 @@ scripts/profile.sh <profile> exec bash -lc '
 |---|---|---|---|
 | 1 | ~3s | `scripts/profile.sh <p> verify` — fast tripwire, ~20 pass/fail checks | every `up` |
 | 2 | ~10s | `scripts/profile.sh <p> audit` — ~80 structured probes, JSON to `~/.ai-sandbox/profiles/<p>/claude-home/audits/` | on demand or post config change |
-| 3 | ~5k toks | agent invokes `audit-sandbox` skill — judgment over the JSON, writes report.md next to the JSON | on demand |
+| 3 | ~5k toks | agent reads JSON + staged SKILL.md, writes report.md next to the JSON (judgment only — no probe execution) | on demand |
 
 ```bash
 # Tier 1 — tripwire (streams scripts/verify-sandbox.sh into container via stdin).
@@ -124,10 +124,11 @@ scripts/profile.sh <profile> audit
 scripts/profile.sh <profile> audit --stage-only   # just stage, don't run
 scripts/profile.sh <profile> audit --clean        # remove staged package
 
-# Tier 3 — inside an attached agent session:
-#   "Use the audit-sandbox skill"
-# The skill reads the JSON, cross-references the staged CLAUDE.md, and
-# writes a report.md next to the JSON.
+# Tier 3 — inside an attached agent session. Tier 2 must be run first.
+# The SKILL.md is staged at /workspace/temp_audit_package/skills/audit-sandbox/
+# and instructs the agent to read the JSON, cross-reference the staged
+# CLAUDE.md, and write a report.md next to the JSON. No probe execution —
+# judgment only.
 ```
 
 ### Image CVE Scan (trivy on host)
@@ -148,7 +149,7 @@ scripts/trivy-scan.sh image   # CVE scan of windows-ai-sandbox:latest only
 - `config/claude-settings.json` — **restricts Claude's Bash/Read tools only** (not the shell). Denies `pip install`, `uv add`, `curl`, `git push/fetch`, secrets reads. User shells are unrestricted — install deps at the CLI, then hand off to Claude.
 - `.trivyignore.yaml` — CVE/misconfig accepts. Each entry has `expired_at` so it re-surfaces on re-scan.
 - `sandbox-hardening-package.md` — ported audit doc; keep in sync with macolima.
-- `claude_internal_audit_wsl.md` — self-audit prompt for an in-container agent (WSL2 + rootless Docker + container-as-root edition; macolima-origin, fully adapted to this repo).
+- `docs/_archive/claude_internal_audit_wsl.md` — manual audit prompt (superseded by tier-2 probes + tier-3 skill; kept for reference).
 
 ### Scripts
 - `scripts/profile.sh` — lifecycle driver. All commands live here (`up`, `down`, `attach`, `auth`, `verify`, `audit`, `rebuild`, `clean`, etc.).
