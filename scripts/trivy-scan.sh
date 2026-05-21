@@ -22,6 +22,10 @@
 #   image    CVE scan of the built windows-ai-sandbox:latest image
 #            (HIGH/CRITICAL, fixed-only — drops the Ubuntu "won't fix" noise)
 #   all      run all three (default)
+#
+# Output: each scan writes JSON to ~/.ai-sandbox/trivy/<UTC-stamp>-<mode>.json
+# and renders the same report to stdout. Mirrors the audit JSON path
+# convention; persists for diff'ing across image rebuilds.
 # =============================================================================
 set -euo pipefail
 
@@ -29,20 +33,34 @@ REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 IMAGE="windows-ai-sandbox:latest"
 IGNORE_FILE="$REPO_DIR/.trivyignore.yaml"
 MODE="${1:-all}"
+OUT_DIR="${HOME}/.ai-sandbox/trivy"
+STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 
 command -v trivy >/dev/null || { echo "trivy not found — see script header for install instructions" >&2; exit 1; }
+mkdir -p "$OUT_DIR"
 
 hdr() { printf '\n\033[1;36m=== %s ===\033[0m\n' "$*"; }
 
+# Each scan writes JSON to $OUT_DIR/<stamp>-<tag>.json, then renders the
+# same report to stdout via `trivy convert` so the interactive view is
+# preserved without a second scan.
+emit() {
+  local tag="$1"; shift
+  local out="$OUT_DIR/${STAMP}-${tag}.json"
+  "$@" --format json --output "$out"
+  trivy convert --format table "$out"
+  printf '\nJSON: %s\n' "$out"
+}
+
 run_config() {
   hdr "config scan (Dockerfile + docker-compose.yml misconfig)"
-  trivy config --exit-code 0 --ignorefile "$IGNORE_FILE" "$REPO_DIR"
+  emit config trivy config --exit-code 0 --ignorefile "$IGNORE_FILE" "$REPO_DIR"
 }
 
 run_secret() {
   hdr "secret scan (repo tree)"
   # Skip local venvs and archived material — noise, not shipped to users.
-  trivy fs --scanners secret \
+  emit secret trivy fs --scanners secret \
     --skip-dirs "container_testing/.venv,archived_script_ref,reports" \
     --exit-code 0 "$REPO_DIR"
 }
@@ -53,7 +71,7 @@ run_image() {
     echo "image $IMAGE not found locally — build first: scripts/profile.sh build" >&2
     return 1
   fi
-  trivy image \
+  emit image trivy image \
     --severity HIGH,CRITICAL \
     --ignore-unfixed \
     --ignorefile "$IGNORE_FILE" \

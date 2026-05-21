@@ -151,6 +151,7 @@ RUN sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master
 # own install.info so re-cloning p10k automatically picks up upstream's pin.
 RUN set -eux; \
     GS_DIR="/root/.oh-my-zsh/custom/themes/powerlevel10k/gitstatus"; \
+    uname_s="$(uname -s | tr '[:upper:]' '[:lower:]')"; \
     uname_m="$(uname -m)"; \
     LINE="$(awk -v m="$uname_m" '/^uname_s_glob="linux"/ && $0 ~ "uname_m_glob=\""m"\""' "$GS_DIR/install.info" | head -1)"; \
     [ -n "$LINE" ] || { echo "no install.info entry for linux/$uname_m" >&2; exit 1; }; \
