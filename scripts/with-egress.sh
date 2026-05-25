@@ -125,7 +125,7 @@ open_section() {
     /^[[:space:]]*$/ { if (inside) inside = 0; print; next }
     inside && /^# / { sub(/^# /, ""); print; next }
     { print }
-  ' "$ALLOWLIST" > "$ALLOWLIST.tmp" && mv "$ALLOWLIST.tmp" "$ALLOWLIST"
+  ' "$ALLOWLIST" > "$ALLOWLIST.tmp" && cat "$ALLOWLIST.tmp" > "$ALLOWLIST" && rm -f "$ALLOWLIST.tmp"
 }
 
 # --- concurrency + drift guard --------------------------------------------

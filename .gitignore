@@ -4,3 +4,5 @@
 .local*
 # fashion mnist testing data
 data/
+
+**.pyc

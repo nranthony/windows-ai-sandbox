@@ -4,7 +4,7 @@
 #   Base: NVIDIA CUDA 12.6.3 on Ubuntu 24.04.
 #   Runs as root. Rootless Docker's userns=host maps container UID 0 to host
 #   UID 1000, so workspace bind mounts stay writable. See
-#   .devcontainer/ROOTLESS-DOCKER-NOTES.md for the why.
+#   CLAUDE.md § "Security Posture" for the why.
 #
 #   Everything a profile needs is baked here; per-profile auth/config lives in
 #   bind mounts under ~/.ai-sandbox/profiles/<profile>/ at runtime.
@@ -139,8 +139,7 @@ RUN sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master
  && ZSH_CUSTOM="/root/.oh-my-zsh/custom" \
  && git clone --depth=1 https://github.com/romkatv/powerlevel10k.git                    "$ZSH_CUSTOM/themes/powerlevel10k" \
  && git clone --depth=1 https://github.com/zsh-users/zsh-autosuggestions.git            "$ZSH_CUSTOM/plugins/zsh-autosuggestions" \
- && git clone --depth=1 https://github.com/marlonrichert/zsh-autocomplete.git           "$ZSH_CUSTOM/plugins/zsh-autocomplete" \
- && git clone --depth=1 https://github.com/zsh-users/zsh-history-substring-search.git   "$ZSH_CUSTOM/plugins/zsh-history-substring-search" \
+&& git clone --depth=1 https://github.com/zsh-users/zsh-history-substring-search.git   "$ZSH_CUSTOM/plugins/zsh-history-substring-search" \
  && git clone --depth=1 https://github.com/zsh-users/zsh-syntax-highlighting.git        "$ZSH_CUSTOM/plugins/zsh-syntax-highlighting" \
  && usermod -s /usr/bin/zsh root
 

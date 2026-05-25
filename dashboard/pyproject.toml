@@ -1,0 +1,13 @@
+[project]
+name = "sandbox-dashboard"
+version = "0.1.0"
+description = "Control dashboard for the windows-ai-sandbox hardened environment"
+dependencies = [
+    "streamlit>=1.33.0",
+    "docker>=7.0.0",
+]
+readme = "README.md"
+requires-python = ">=3.12"
+
+[tool.uv]
+managed = true

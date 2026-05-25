@@ -41,6 +41,14 @@
 #                   base compose file. Used to opt into LAN port publishing for
 #                   a browser to reach a dev server inside the container.
 #                   UNSAFE: may drop the `internal: true` network isolation.
+#
+# Optional flags (accepted by build / rebuild):
+#   --no-cache      pass --no-cache to `docker compose build`. Forces every
+#                   Dockerfile layer to re-run; pulls latest claude-code / npm
+#                   packages / apt indexes instead of reusing cached layers.
+#   --pull          pass --pull to `docker compose build`. Re-checks the base
+#                   image registry for a newer digest (no-op for the pinned
+#                   CUDA digest but future-proof).
 # =============================================================================
 set -euo pipefail
 
@@ -48,6 +56,7 @@ REPO_ROOT="${HOME}/repo"
 PROFILES_ROOT="${HOME}/.ai-sandbox/profiles"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 COMPOSE_FILE_ARGS=()
+BUILD_FLAGS=()
 
 info()  { printf '\033[0;36m[INFO]\033[0m  %s\n' "$*"; }
 ok()    { printf '\033[0;32m[ OK ]\033[0m  %s\n' "$*"; }
@@ -116,6 +125,7 @@ parse_flags() {
   for a in "$@"; do
     case "$a" in
       --expose-dev) expose=1 ;;
+      --no-cache|--pull) BUILD_FLAGS+=("$a") ;;
       *) remaining+=("$a") ;;
     esac
   done
@@ -153,9 +163,16 @@ fi
 
 # --- global `build` (no profile needed) --------------------------------------
 if [[ "${1:-}" == "build" ]]; then
-  info "Building windows-ai-sandbox:latest"
+  build_flags=()
+  for a in "${@:2}"; do
+    case "$a" in
+      --no-cache|--pull) build_flags+=("$a") ;;
+      *) fail "build: unknown flag '$a' (valid: --no-cache --pull)" ;;
+    esac
+  done
+  info "Building windows-ai-sandbox:latest${build_flags[*]:+ (${build_flags[*]})}"
   cd "$SCRIPT_DIR"
-  PROFILE=_build docker compose build ai-sandbox
+  PROFILE=_build docker compose build "${build_flags[@]+"${build_flags[@]}"}" ai-sandbox
   docker image prune -f
   docker builder prune -f --keep-storage=4g
   exit 0
@@ -189,6 +206,8 @@ ensure_repo_dir() {
 case "$CMD" in
   up)
     parse_flags "$@"; set -- "${ARGS[@]+"${ARGS[@]}"}"
+    (( ${#BUILD_FLAGS[@]} == 0 )) || \
+      fail "up: ${BUILD_FLAGS[*]} only applies to build/rebuild (up does not rebuild the image)"
     ensure_repo_dir
     ensure_state
     info "Bringing up profile '$PROFILE' (project: $COMPOSE_PROJECT_NAME)"
@@ -237,6 +256,8 @@ case "$CMD" in
 
   recreate)
     parse_flags "$@"; set -- "${ARGS[@]+"${ARGS[@]}"}"
+    (( ${#BUILD_FLAGS[@]} == 0 )) || \
+      fail "recreate: ${BUILD_FLAGS[*]} only applies to build/rebuild (recreate does not rebuild the image)"
     ensure_repo_dir
     ensure_state
     info "Force-recreating profile '$PROFILE'"
@@ -247,8 +268,8 @@ case "$CMD" in
     parse_flags "$@"; set -- "${ARGS[@]+"${ARGS[@]}"}"
     ensure_repo_dir
     ensure_state
-    info "Rebuilding image + recreating profile '$PROFILE'"
-    docker compose build ai-sandbox
+    info "Rebuilding image + recreating profile '$PROFILE'${BUILD_FLAGS[*]:+ (${BUILD_FLAGS[*]})}"
+    docker compose build "${BUILD_FLAGS[@]+"${BUILD_FLAGS[@]}"}" ai-sandbox
     docker image prune -f
     docker builder prune -f --keep-storage=4g
     docker compose "${COMPOSE_FILE_ARGS[@]}" up -d --force-recreate

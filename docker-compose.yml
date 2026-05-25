@@ -25,7 +25,7 @@ services:
     container_name: ai-sandbox-${PROFILE:?PROFILE env var required — use scripts/profile.sh}
     hostname: ai-sandbox-${PROFILE}
 
-    # GPU passthrough — WSL2-native, not --gpus all (see .devcontainer/GPU-FIX-MIGRATION.md).
+    # GPU passthrough — WSL2-native /dev/dxg, not --gpus all (broken under rootless + toolkit >=1.18).
     devices:
       - /dev/dxg
 

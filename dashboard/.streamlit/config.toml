@@ -1,0 +1,5 @@
+[server]
+# Bind to loopback only — this is a host-side ops tool, not a service.
+# No reason for anything off the local box to reach it.
+address = "127.0.0.1"
+headless = true

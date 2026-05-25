@@ -77,7 +77,7 @@ cloudcode-pa.googleapis.com
 
 
 # =============================================================================
-# === PROJECT-PERSISTENT — dev/ML stack (uncommented by default) =============
+# === PROJECT-PERSISTENT — dev/ML stack (commented by default) =============
 # =============================================================================
 # Pinned to specific subdomains (per audit M3 discipline: no parent wildcards
 # under vendors we don't control). Comment a block to shrink egress for
@@ -86,14 +86,15 @@ cloudcode-pa.googleapis.com
 # --- Source code / git [git] ---
 # Pinned hosts — no parent wildcards like `.github.com`. If a TCP_DENIED hits
 # a sibling subdomain during dev, add the specific host.
-github.com
-api.github.com
-codeload.github.com
-objects.githubusercontent.com
-raw.githubusercontent.com
-gist.githubusercontent.com
-github.io
-gitlab.com
+# github.com
+# api.github.com
+# codeload.github.com
+# objects.githubusercontent.com
+# release-assets.githubusercontent.com
+# raw.githubusercontent.com
+# gist.githubusercontent.com
+# github.io
+# gitlab.com
 
 # --- Python package ecosystem [pypi] ---
 .pypi.org
@@ -101,20 +102,35 @@ gitlab.com
 .astral.sh
 
 # --- PyTorch / NVIDIA CUDA wheels [pytorch] ---
-download.pytorch.org
+# download.pytorch.org
 
 # --- Node.js / npm (Claude Code updates + per-repo npm) [npm] ---
-registry.npmjs.org
-nodejs.org
-deb.nodesource.com
+# registry.npmjs.org
+# nodejs.org
+# deb.nodesource.com
 
 # --- NVIDIA container + compute stack [nvidia] ---
-developer.download.nvidia.com
-developer.nvidia.com
+# developer.download.nvidia.com
+# developer.nvidia.com
+
+# --- Numerai tournament + MCP [numerai] ---
+# GraphQL API (all ops: data listing, submissions, staking, diagnostics, MCP)
+api-tournament.numer.ai
+# Website (MCP device-token auth flow, account/key creation)
+numer.ai
+# S3 data buckets (presigned URLs for dataset download + submission upload).
+# Bucket names returned dynamically by the GraphQL API; these are the known
+# ones. If a download/upload hits TCP_DENIED, check Squid access.log for the
+# actual S3 subdomain and add it here.
+numerai-datasets-us-west-2.s3.amazonaws.com
+numerai-datasets-us-west-2.s3.us-west-2.amazonaws.com
+numerai-datasets-us-west-2.s3-us-west-2.amazonaws.com
+numerai-datasets.s3.amazonaws.com
+numerai-public-datasets.s3-us-west-2.amazonaws.com
 
 # --- OS packages — apt-get inside the container [apt] ---
-archive.ubuntu.com
-security.ubuntu.com
+# archive.ubuntu.com
+# security.ubuntu.com
 
 
 # =============================================================================
