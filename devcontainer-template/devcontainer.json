@@ -1,5 +1,5 @@
 {
-  "//": "Drop this file into any repo under ~/repo/<profile>/<repo>/.devcontainer/devcontainer.json to get a 'Reopen in Container' workflow for that repo. Requires PROFILE to be exported in the shell before launching VS Code (e.g. `export PROFILE=nranthony && code .`). VS Code will delegate to windows-ai-sandbox's compose file, so CLI and IDE share the same per-profile container.",
+  "//": "Drop this file into any repo under ~/repo/<profile>/<repo>/.devcontainer/devcontainer.json to get a 'Reopen in Container' workflow for that repo. Prerequisites: (1) profile stack running via scripts/profile.sh <profile> up, (2) repo-root .env contains PROFILE=<profile> and COMPOSE_PROJECT_NAME=ai-sandbox-<profile> (VS Code does NOT pass shell exports to docker compose). Adjust the dockerComposeFile path below if the sandbox repo is not a sibling at ~/repo/<profile>/windows-ai-sandbox/.",
 
   "name": "windows-ai-sandbox (${localEnv:PROFILE})",
   "dockerComposeFile": ["../../windows-ai-sandbox/docker-compose.yml"],
@@ -27,8 +27,7 @@
         "ms-python.python",
         "ms-python.vscode-pylance",
         "ms-toolsai.jupyter",
-        "ms-python.autopep8",
-        "mhutchie.git-graph"
+        "ms-python.autopep8"
       ]
     }
   },

@@ -6,6 +6,83 @@ repo's rootless Docker + container-root setup.
 
 ---
 
+## Anatomy: what lands where
+
+`devcontainer.json` is a **host-side spec**, not a file that gets copied into
+the container. The Dev Containers extension on Windows parses it, drives
+`docker compose up` against the referenced compose file, then attaches VS Code
+Server to the resulting container.
+
+| Field | Consumed by | In-container artifact |
+|---|---|---|
+| `dockerComposeFile`, `service` | Dev Containers ext (host) | None — just selects which compose service to attach to |
+| `workspaceFolder`, `forwardPorts`, `shutdownAction`, `name` | Dev Containers ext (host) | None |
+| `remoteUser`, `containerUser`, `updateRemoteUserUID`, `overrideCommand` | Dev Containers ext (host) | None — they shape how attach behaves |
+| `customizations.vscode.settings` | VS Code Server (in-container) | `/root/.vscode-server/data/Machine/settings.json` |
+| `customizations.vscode.extensions` | VS Code Server (in-container) | `/root/.vscode-server/extensions/<ext>/` — downloaded on first attach, per-container, NOT baked into the image |
+
+Consequence: **CLI-only users (`scripts/profile.sh attach`) get the same
+hardened container minus the `~/.vscode-server` tree.** None of the security
+posture lives in `devcontainer.json` — it lives in `docker-compose.yml` +
+`seccomp.json` + the image.
+
+### Two attach flows
+
+| Flow | Reads devcontainer.json? | Hardening applied | What you lose with the other |
+|---|---|---|---|
+| **Reopen in Container** (`code .` in a folder with `.devcontainer/devcontainer.json`, then "Dev Containers: Reopen in Container") | Yes | Full compose hardening + `remote.autoForwardPorts: false` guardrail + explicit `forwardPorts` + pinned Python interpreter / zsh terminal | — |
+| **Attach to Running Container** (command palette → pick `ai-sandbox-<profile>`) | No | Full compose hardening | No port-auto-forward guardrail (services binding `0.0.0.0` may surface on Windows localhost without declaration), manual port forwards, default interpreter/terminal |
+
+Security delta between the two flows is **convenience, not safety** — both
+attach to the same compose-hardened container. The Reopen flow's settings are
+predictability/UX guardrails, not sandbox controls.
+
+### Where to add extensions
+
+Extensions are declared in the `customizations.vscode.extensions` array of
+whichever devcontainer.json applies:
+
+- **This repo** → `.devcontainer/devcontainer.json`
+- **Any per-repo container under `~/repo/<profile>/<repo>/`** → that repo's `.devcontainer/devcontainer.json` (copy from `devcontainer-template/`)
+- **The template itself** (so future drop-ins inherit) → `devcontainer-template/devcontainer.json`
+
+Use marketplace IDs (`publisher.extension`). New extensions install on next
+attach — no image rebuild needed, since they live in
+`/root/.vscode-server/extensions/`.
+
+**Escape hatch for the Attach-to-Running flow** (which ignores
+devcontainer.json): in host VS Code user `settings.json`, set
+`"dev.containers.defaultExtensions": [...]` — these install into *any*
+container you attach to.
+
+### Per-repo template requirements
+
+**Compose path:** `devcontainer-template/devcontainer.json` uses
+`../../windows-ai-sandbox/docker-compose.yml` as its compose path. This
+**requires the sandbox repo to be cloned as a sibling at
+`~/repo/<profile>/windows-ai-sandbox/`** — if your sandbox lives elsewhere
+(e.g., `~/repo/sandbox/windows-ai-sandbox/`), edit the relative path or
+symlink the sandbox repo into place.
+
+**`.env` file:** The repo-root `.env` (next to `docker-compose.yml`) must
+contain `PROFILE` and `COMPOSE_PROJECT_NAME`:
+```
+PROFILE=nranthony
+COMPOSE_PROJECT_NAME=ai-sandbox-nranthony
+```
+VS Code's Dev Containers extension does **not** pass shell-session `export`s
+through to docker compose — its `userEnvProbe` (default: `loginInteractiveShell`)
+reads only the login shell environment, not per-session variables. Without
+`PROFILE`, compose interpolation fails (`required variable PROFILE is missing`).
+Without `COMPOSE_PROJECT_NAME`, VS Code derives the project name from the compose
+file's directory (`windows-ai-sandbox`), which creates a second
+`172.30.0.0/24` bridge network that collides with the already-running profile's
+`ai-sandbox-<profile>_sandbox-internal`. `scripts/profile.sh` always exports its
+own values, so the `.env` only affects the VS Code flow. Update these values when
+switching profiles.
+
+---
+
 ## Findings
 
 ### A — VS Code forwards host SSH agent into the container
@@ -93,3 +170,4 @@ Things that look tempting but break the security model:
 | Widen proxy allowlist to include `host.docker.internal` | That's the exact host↔container coupling the sandbox exists to prevent. |
 | Bind-mount `~/.gitconfig` as a single file | `git config --global` writes via `rename()` atomically; single-file bind mounts return `EBUSY`. Use `GIT_CONFIG_GLOBAL` pointing into a directory bind mount instead. |
 | Set `read_only: true` on the agent container | Breaks VS Code Dev Containers environment setup (`/etc/environment` writes). Security gain is zero — non-root userns + `cap_drop: ALL` is the boundary, not filesystem write access. |
+| "Reopen in Container" on a folder without a `.devcontainer/devcontainer.json` | VS Code will offer to generate one from a generic template — that container will NOT use this repo's hardened compose file. Either drop in `devcontainer-template/devcontainer.json` first, or use "Attach to Running Container" against the already-hardened `ai-sandbox-<profile>`. |

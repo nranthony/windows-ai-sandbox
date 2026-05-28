@@ -151,6 +151,15 @@ numerai-public-datasets.s3-us-west-2.amazonaws.com
 # cdn.playwright.dev
 # playwright.download.prss.microsoft.com
 
+# --- Quarto CLI install [quarto-install] ---
+# Used to fetch the Quarto CLI .deb from GitHub Releases. Short-lived —
+# keep commented unless actively installing/upgrading Quarto. Note:
+# github.com + objects.githubusercontent.com overlap with [git]; opening
+# this tag widens GitHub egress for the duration of the run.
+github.com
+objects.githubusercontent.com
+release-assets.githubusercontent.com
+
 
 # =============================================================================
 # === DROPPED — explicitly NOT in the list ===================================

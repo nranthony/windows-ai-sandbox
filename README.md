@@ -60,7 +60,7 @@ exit                               # then `wsl --shutdown` in Powershell, wait 8
 ```
 
 ### VS Code host settings (important — audit Findings A + B)
-Add to your VS Code `settings.json`:
+In Windows VS Code: `Ctrl+Shift+P` → **"Preferences: Open User Settings (JSON)"** (or edit `%APPDATA%\Code\User\settings.json` directly — from WSL that's `/mnt/c/Users/<user>/AppData/Roaming/Code/User/settings.json`). Add:
 ```jsonc
 {
   "remote.SSH.enableAgentForwarding": false,
@@ -73,8 +73,10 @@ These prevent host SSH agent sockets and `~/.gitconfig` (including credential he
 ```bash
 GIT_NAME="your-name"
 GIT_EMAIL="your-email@example.com"
+PROFILE=nranthony
+COMPOSE_PROJECT_NAME=ai-sandbox-nranthony
 ```
-Used by `scripts/setup.sh` to seed `git config --global user.name/email` inside the profile.
+`GIT_NAME`/`GIT_EMAIL` are used by `scripts/setup.sh` to seed git identity. `PROFILE` and `COMPOSE_PROJECT_NAME` are required for VS Code "Reopen in Container" (see the VS Code section below). Update these when switching profiles. `scripts/profile.sh` always exports its own `PROFILE`/`COMPOSE_PROJECT_NAME`, so the `.env` values only affect VS Code.
 
 ---
 
@@ -123,9 +125,22 @@ scripts/profile.sh <profile> auth        # claude login — one-time; token pers
 
 Two flows supported:
 1. **Attach to Running Container** (simplest): `scripts/profile.sh <profile> up` first, then in VS Code: `Ctrl+Shift+P` → `Dev Containers: Attach to Running Container...` → `ai-sandbox-<profile>`.
-2. **Reopen in Container** (uses devcontainer.json): `export PROFILE=<profile> && code .` in this repo, then `Dev Containers: Reopen in Container`. VS Code delegates to the shared `docker-compose.yml`.
+2. **Reopen in Container** (uses devcontainer.json): bring up the profile first, then `code .` in this repo (or a per-repo copy), then `Ctrl+Shift+P` → `Dev Containers: Reopen in Container`.
 
-For other repos under `~/repo/<profile>/<repo>/`, copy `devcontainer-template/devcontainer.json` → `<repo>/.devcontainer/devcontainer.json`. Same `PROFILE=...` requirement.
+**Reopen in Container prerequisites:**
+1. The profile stack must already be running (`scripts/profile.sh <profile> up`).
+2. The repo-root `.env` must contain `PROFILE` and `COMPOSE_PROJECT_NAME` matching the running profile:
+   ```bash
+   PROFILE=nranthony
+   COMPOSE_PROJECT_NAME=ai-sandbox-nranthony
+   ```
+   **Why:** VS Code's Dev Containers extension does **not** pass shell-session `export`s (like `export PROFILE=...`) through to docker compose. Its `userEnvProbe` reads only the login shell environment. And without `COMPOSE_PROJECT_NAME`, VS Code derives the project name from the compose file's directory (`windows-ai-sandbox`), which collides with the running profile's network (`ai-sandbox-<profile>_sandbox-internal`) on the shared `172.30.0.0/24` subnet. `scripts/profile.sh` always exports its own values, so the `.env` only affects VS Code.
+
+**Both flows attach to the same compose-hardened container** — the security posture is identical (seccomp, cap_drop, sandbox-internal, DNS sinkhole all live in `docker-compose.yml`). Reopen adds convenience guardrails on top: `remote.autoForwardPorts: false`, explicit `forwardPorts`, pinned Python interpreter, zsh terminal default. See [`docs/vscode-integration-security.md`](docs/vscode-integration-security.md#anatomy-what-lands-where) for the anatomy.
+
+For other repos under `~/repo/<profile>/<repo>/`, copy `devcontainer-template/devcontainer.json` → `<repo>/.devcontainer/devcontainer.json`. Adjust the `dockerComposeFile` relative path to point to this repo's `docker-compose.yml` — the template assumes the sandbox is a sibling at `~/repo/<profile>/windows-ai-sandbox/`; if your sandbox lives elsewhere (e.g., `~/repo/sandbox/windows-ai-sandbox/`), update the path accordingly.
+
+**Adding extensions:** edit the `customizations.vscode.extensions` array in whichever devcontainer.json applies (this repo's `.devcontainer/`, the per-repo one, or the template). Extensions install into `/root/.vscode-server/extensions/` on next attach — no image rebuild needed. For the Attach-to-Running flow (which ignores devcontainer.json), use `"dev.containers.defaultExtensions": [...]` in host user settings instead.
 
 ---
 

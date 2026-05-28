@@ -181,15 +181,15 @@ scripts/trivy-scan.sh image   # CVE scan of windows-ai-sandbox:latest only
 - `config/skills/audit-sandbox/SKILL.md` — tier-3 agent-side skill for judgment over the audit JSON.
 
 ### Dev Container Integration
-- `.devcontainer/devcontainer.json` — slim shim. Uses `dockerComposeFile` so VS Code and CLI share the profile container. Requires `PROFILE` exported before `code .`.
-- `devcontainer-template/devcontainer.json` — drop-in template for any repo under `~/repo/<profile>/<repo>/`. Same `dockerComposeFile` pattern.
+- `.devcontainer/devcontainer.json` — slim shim. Uses `dockerComposeFile` so VS Code and CLI share the profile container. Requires `PROFILE` and `COMPOSE_PROJECT_NAME` set in repo-root `.env` (see below).
+- `devcontainer-template/devcontainer.json` — drop-in template for any repo under `~/repo/<profile>/<repo>/`. Same `dockerComposeFile` pattern; adjust the relative path if the sandbox isn't a sibling.
 
 ### Environment
-- `.env` (repo root): `GIT_NAME="..."`, `GIT_EMAIL="..."`. Read by `scripts/setup.sh` host-side; not mounted in-container.
+- `.env` (repo root): `GIT_NAME`, `GIT_EMAIL` (read by `scripts/setup.sh`), plus `PROFILE` and `COMPOSE_PROJECT_NAME` (required for VS Code "Reopen in Container" — the Dev Containers extension does **not** pass shell-session `export`s to docker compose; it only probes the login shell environment). Not mounted in-container.
 
 ## Host VS Code Settings (IMPORTANT — audit Findings A + B)
 
-Add to your host VS Code `settings.json`:
+Open via command palette → **"Preferences: Open User Settings (JSON)"**, or edit `%APPDATA%\Code\User\settings.json` directly (from WSL: `/mnt/c/Users/<user>/AppData/Roaming/Code/User/settings.json`). Add:
 ```jsonc
 {
   "remote.SSH.enableAgentForwarding": false,   // Finding A — prevents SSH_AUTH_SOCK leaking into container
@@ -197,6 +197,8 @@ Add to your host VS Code `settings.json`:
 }
 ```
 Belt-and-braces: the Dockerfile also purges `openssh-client`, and `init-profile-state.sh` scrubs any `credential.helper` injected into the profile's `config/git/config` on every `up`.
+
+See [`docs/vscode-integration-security.md`](docs/vscode-integration-security.md) for the anatomy of devcontainer.json (host-side spec vs in-container artifacts), the security delta between Reopen vs Attach flows, and where to add extensions.
 
 ## Security Posture
 
