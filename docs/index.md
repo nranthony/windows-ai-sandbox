@@ -6,6 +6,7 @@
 - [Sandbox design notes](sandbox-design-notes.md) — why rootfs is rw, bwrap is disabled, container runs as root, git config is denied
 - [Permissions model](permissions-model.md) — deny/allow posture, two-phase workflow, WebFetch exfil risk, hook self-protection
 - [VS Code integration security](vscode-integration-security.md) — SSH agent forwarding, gitconfig leaks, credential helper injection, orphaned root shells
+- [Sibling repo: macolima](sibling-repo-relationship.md) — shared vs divergent posture between the two repos, and how to mine the sister repo for flaws we might miss
 - [scripts/audit/README.md](../scripts/audit/README.md) — tier-2 structured probe suite (~80 checks, JSON output)
 - [seccomp.json](../seccomp.json) — syscall filter (`clone3 → ENOSYS`, `unshare(CLONE_NEWUSER)` blocked)
 - [seccomp notes](seccomp-notes.md) — must-keep syscalls, clone3 ENOSYS rule, editing conventions
@@ -31,8 +32,8 @@
 
 ## GPU & Docker
 
-- [GPU-FIX-MIGRATION.md](../.devcontainer/GPU-FIX-MIGRATION.md) — NVIDIA Container Toolkit 1.18+ breakage on rootless Docker; why we pin 1.17.8-1
-- [ROOTLESS-DOCKER-NOTES.md](../.devcontainer/ROOTLESS-DOCKER-NOTES.md) — why container runs as root under rootless Docker (UID 0 = host UID 1000)
+- [CLAUDE.md](../CLAUDE.md#important-notes) (Important Notes) — NVIDIA Container Toolkit 1.18+ breakage on rootless Docker; why we pin 1.17.8-1
+- [sandbox-design-notes.md](sandbox-design-notes.md) — why container runs as root under rootless Docker (UID 0 = host UID 1000)
 - [docker-bench-security-report.md](../reports/docker-bench-security-report.md) — Docker Bench for Security v1.6.0 results
 
 ## Host Setup

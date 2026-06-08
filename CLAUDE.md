@@ -6,6 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Secure Windows AI development environment. WSL2 Ubuntu 24.04 LTS + rootless Docker + NVIDIA CUDA, using a **profile-based pattern** (one shared image, many per-profile workspaces) adapted from the sibling `macolima` repo. Each profile gets its own container, its own persistent auth/config, its own Squid-gated egress.
 
+The two repos implement one threat model on different substrates — keep them as independent cross-checks, but do **not** blind-copy between them (privilege model and VS Code integration diverge). See [`docs/sibling-repo-relationship.md`](docs/sibling-repo-relationship.md).
+
 ## Architecture
 
 ```
@@ -181,11 +183,17 @@ scripts/trivy-scan.sh image   # CVE scan of windows-ai-sandbox:latest only
 - `config/skills/audit-sandbox/SKILL.md` — tier-3 agent-side skill for judgment over the audit JSON.
 
 ### Dev Container Integration
-- `.devcontainer/devcontainer.json` — slim shim. Uses `dockerComposeFile` so VS Code and CLI share the profile container. Requires `PROFILE` and `COMPOSE_PROJECT_NAME` set in repo-root `.env` (see below).
-- `devcontainer-template/devcontainer.json` — drop-in template for any repo under `~/repo/<profile>/<repo>/`. Same `dockerComposeFile` pattern; adjust the relative path if the sandbox isn't a sibling.
+VS Code attaches to the **already-running** profile container — there is no
+`.devcontainer/devcontainer.json` in this repo. The compose-delegating "Reopen
+in Container" path was removed; *Attach to Running Container* ignores a repo
+`devcontainer.json` anyway. Bring the stack up with `scripts/profile.sh
+<profile> up`, then VS Code → **Attach to Running Container** →
+`ai-sandbox-<profile>`. Extensions, the port guardrail, and the required
+security settings live in **host** VS Code config — see
+[`docs/vscode-integration-security.md`](docs/vscode-integration-security.md).
 
 ### Environment
-- `.env` (repo root): `GIT_NAME`, `GIT_EMAIL` (read by `scripts/setup.sh`), plus `PROFILE` and `COMPOSE_PROJECT_NAME` (required for VS Code "Reopen in Container" — the Dev Containers extension does **not** pass shell-session `export`s to docker compose; it only probes the login shell environment). Not mounted in-container.
+- `.env` (repo root): `GIT_NAME`, `GIT_EMAIL` — read by `scripts/setup.sh` to seed git identity. `scripts/profile.sh` exports its own `PROFILE`/`COMPOSE_PROJECT_NAME` for every compose call, so those are not needed in `.env`. Not mounted in-container.
 
 ## Host VS Code Settings (IMPORTANT — audit Findings A + B)
 
@@ -198,7 +206,7 @@ Open via command palette → **"Preferences: Open User Settings (JSON)"**, or ed
 ```
 Belt-and-braces: the Dockerfile also purges `openssh-client`, and `init-profile-state.sh` scrubs any `credential.helper` injected into the profile's `config/git/config` on every `up`.
 
-See [`docs/vscode-integration-security.md`](docs/vscode-integration-security.md) for the anatomy of devcontainer.json (host-side spec vs in-container artifacts), the security delta between Reopen vs Attach flows, and where to add extensions.
+See [`docs/vscode-integration-security.md`](docs/vscode-integration-security.md) for the attach-time leakage findings (SSH agent, gitconfig, credential helper), the host-side attached-container config (extensions + port guardrail), and the in-container defenses.
 
 ## Security Posture
 
@@ -226,8 +234,6 @@ See [`docs/vscode-integration-security.md`](docs/vscode-integration-security.md)
 ├── proxy/                        # Squid.conf + allowed_domains.txt
 ├── scripts/                      # profile.sh, init-profile-state.sh, with-egress.sh, verify-sandbox.sh, audit/, trivy-scan.sh
 ├── docs/                         # Design notes, permissions model, seccomp/squid internals, debug recipes
-├── .devcontainer/                # Slim VS Code shim (dockerComposeFile → ../docker-compose.yml)
-├── devcontainer-template/        # Drop-in for per-repo dev containers
 ├── host_setup/                   # WSL Ubuntu rootless-Docker setup (run once)
 ├── container_testing/            # CUDA/PyTorch test environment (uv project)
 ├── archived_script_ref/          # Deprecated material

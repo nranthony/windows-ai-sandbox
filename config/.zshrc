@@ -115,6 +115,24 @@ alias ls="lsd -lah --group-dirs"
 export PATH="$HOME/.local/bin:$PATH"
 eval "$(uv generate-shell-completion zsh)"
 
+# Defense-in-depth: clear SSH_AUTH_SOCK in every interactive shell. VS Code
+# Dev Containers auto-injects this on every attach (no extension setting
+# disables it; remote.SSH.enableAgentForwarding only governs Remote-SSH).
+# We attach to the already-running container, so there is no devcontainer.json
+# remoteEnv to empty it first — this unset IS the primary defense, alongside
+# the openssh-client purge in the Dockerfile (which makes the socket unusable).
+# Catches every entry path: VS Code attach, docker exec, future tooling.
+# Safe to remove if you ever want SSH back inside the container.
+unset SSH_AUTH_SOCK
+
+# Companion to the unset above: VS Code's Dev Containers attach flow also
+# leaves a `/tmp/vscode-ssh-auth-<id>.sock` file behind on every attach,
+# which the verify-sandbox tripwire flags even though the env is empty and
+# openssh-client is absent. Wipe it on shell start so the tripwire is honest.
+# `(N)` is zsh's null-glob qualifier — expands to empty (silently) when no
+# match, instead of zsh's default "no matches found" error.
+rm -f /tmp/vscode-ssh-auth-*.sock(N) 2>/dev/null || true
+
 # Auto-activate default venv if present and no venv is already active
 [[ -z "$VIRTUAL_ENV" && -f "$HOME/.venv/bin/activate" ]] && source "$HOME/.venv/bin/activate"
 

@@ -22,7 +22,7 @@ warn() { printf '\033[1;33m[WARN]\033[0m %s\n' "$*"; ((++WARN)); }
 
 # --- identity ----------------------------------------------------------------
 # Root-in-container is intentional here (rootless Docker userns=host maps
-# container UID 0 to host UID 1000). See .devcontainer/ROOTLESS-DOCKER-NOTES.md.
+# container UID 0 to host UID 1000). See docs/sandbox-design-notes.md.
 UID_IN=$(id -u)
 [[ "$UID_IN" -eq 0 ]] && pass "running as root (intended under rootless Docker)" \
                     || warn "unexpected UID $UID_IN (expected 0)"
