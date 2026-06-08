@@ -73,10 +73,8 @@ These prevent host SSH agent sockets and `~/.gitconfig` (including credential he
 ```bash
 GIT_NAME="your-name"
 GIT_EMAIL="your-email@example.com"
-PROFILE=nranthony
-COMPOSE_PROJECT_NAME=ai-sandbox-nranthony
 ```
-`GIT_NAME`/`GIT_EMAIL` are used by `scripts/setup.sh` to seed git identity. `PROFILE` and `COMPOSE_PROJECT_NAME` are required for VS Code "Reopen in Container" (see the VS Code section below). Update these when switching profiles. `scripts/profile.sh` always exports its own `PROFILE`/`COMPOSE_PROJECT_NAME`, so the `.env` values only affect VS Code.
+`GIT_NAME`/`GIT_EMAIL` are used by `scripts/setup.sh` to seed git identity. `scripts/profile.sh` always exports its own `PROFILE`/`COMPOSE_PROJECT_NAME` for every compose call, so they are not needed in `.env`.
 
 ---
 
@@ -123,24 +121,60 @@ scripts/profile.sh <profile> auth        # claude login — one-time; token pers
 
 ## VS Code
 
-Two flows supported:
-1. **Attach to Running Container** (simplest): `scripts/profile.sh <profile> up` first, then in VS Code: `Ctrl+Shift+P` → `Dev Containers: Attach to Running Container...` → `ai-sandbox-<profile>`.
-2. **Reopen in Container** (uses devcontainer.json): bring up the profile first, then `code .` in this repo (or a per-repo copy), then `Ctrl+Shift+P` → `Dev Containers: Reopen in Container`.
+The sandbox is entered via **Attach to Running Container** — VS Code connects to
+the container the CLI already brought up. There is no `.devcontainer/` and no
+"Reopen in Container" flow: Reopen would drive `docker compose up` itself (needing
+`.env` plumbing and risking a second colliding `172.30.0.0/24` network), and
+Attach ignores a repo `devcontainer.json` anyway.
 
-**Reopen in Container prerequisites:**
-1. The profile stack must already be running (`scripts/profile.sh <profile> up`).
-2. The repo-root `.env` must contain `PROFILE` and `COMPOSE_PROJECT_NAME` matching the running profile:
-   ```bash
-   PROFILE=nranthony
-   COMPOSE_PROJECT_NAME=ai-sandbox-nranthony
-   ```
-   **Why:** VS Code's Dev Containers extension does **not** pass shell-session `export`s (like `export PROFILE=...`) through to docker compose. Its `userEnvProbe` reads only the login shell environment. And without `COMPOSE_PROJECT_NAME`, VS Code derives the project name from the compose file's directory (`windows-ai-sandbox`), which collides with the running profile's network (`ai-sandbox-<profile>_sandbox-internal`) on the shared `172.30.0.0/24` subnet. `scripts/profile.sh` always exports its own values, so the `.env` only affects VS Code.
+1. Bring the profile up: `scripts/profile.sh <profile> up`.
+2. In VS Code: `Ctrl+Shift+P` → `Dev Containers: Attach to Running Container...` → `ai-sandbox-<profile>`.
 
-**Both flows attach to the same compose-hardened container** — the security posture is identical (seccomp, cap_drop, sandbox-internal, DNS sinkhole all live in `docker-compose.yml`). Reopen adds convenience guardrails on top: `remote.autoForwardPorts: false`, explicit `forwardPorts`, pinned Python interpreter, zsh terminal default. See [`docs/vscode-integration-security.md`](docs/vscode-integration-security.md#anatomy-what-lands-where) for the anatomy.
+All hardening (seccomp, cap_drop, sandbox-internal, DNS sinkhole) lives in
+`docker-compose.yml`, so the attached container is fully hardened regardless of
+VS Code config.
 
-For other repos under `~/repo/<profile>/<repo>/`, copy `devcontainer-template/devcontainer.json` → `<repo>/.devcontainer/devcontainer.json`. Adjust the `dockerComposeFile` relative path to point to this repo's `docker-compose.yml` — the template assumes the sandbox is a sibling at `~/repo/<profile>/windows-ai-sandbox/`; if your sandbox lives elsewhere (e.g., `~/repo/sandbox/windows-ai-sandbox/`), update the path accordingly.
+### Host-side config (the part attach *does* read)
 
-**Adding extensions:** edit the `customizations.vscode.extensions` array in whichever devcontainer.json applies (this repo's `.devcontainer/`, the per-repo one, or the template). Extensions install into `/root/.vscode-server/extensions/` on next attach — no image rebuild needed. For the Attach-to-Running flow (which ignores devcontainer.json), use `"dev.containers.defaultExtensions": [...]` in host user settings instead.
+Attach ignores any repo `devcontainer.json`. VS Code instead reads your **host
+user `settings.json`** plus a per-container *attached-container configuration*
+keyed by image. Configure these once:
+
+**1. Required security settings** — host user `settings.json` (`Ctrl+Shift+P` → *Preferences: Open User Settings (JSON)*):
+```jsonc
+{
+  "remote.SSH.enableAgentForwarding": false,                  // Finding A — SSH agent leak
+  "dev.containers.copyGitConfig": false,                      // Finding B — host gitconfig copy
+  "dev.containers.gitCredentialHelperConfigLocation": "none"  // Finding C — host credential helper
+}
+```
+
+**2. Extensions** — host user `settings.json`. `defaultExtensions` installs into *any* attached container:
+```jsonc
+"dev.containers.defaultExtensions": [
+  "ms-python.python",
+  "ms-python.vscode-pylance",
+  "ms-toolsai.jupyter",
+  "ms-python.autopep8",
+  "mhutchie.git-graph"
+]
+```
+
+**3. Port guardrail + interpreter/terminal** — `Ctrl+Shift+P` → *Dev Containers: Open Attached Container Configuration File* (pick the `windows-ai-sandbox` image):
+```jsonc
+{
+  "forwardPorts": [8080, 8501, 8188],
+  "settings": {
+    "remote.autoForwardPorts": false,
+    "python.defaultInterpreterPath": "/root/.venv/bin/python",
+    "terminal.integrated.defaultProfile.linux": "zsh"
+  }
+}
+```
+`autoForwardPorts: false` matters on Windows — a service binding `0.0.0.0`
+otherwise surfaces on Windows localhost without being declared.
+
+See [`docs/vscode-integration-security.md`](docs/vscode-integration-security.md) for the full findings and in-container defenses.
 
 ---
 
@@ -175,7 +209,7 @@ Accepted CVEs live in `.trivyignore.yaml`; each has an `expired_at` so it re-sur
 ## Troubleshooting
 
 ### Permission issues
-See `.devcontainer/ROOTLESS-DOCKER-NOTES.md` — bind mount ownership, sudo blocked by `no-new-privileges`, CUDA version matching.
+See [`docs/sandbox-design-notes.md`](docs/sandbox-design-notes.md) — bind-mount ownership and why the container runs as root under rootless Docker (`sudo` is blocked by `no-new-privileges`). CUDA version matching is covered below.
 
 ### Common
 - **Docker not starting on WSL resume**: `systemctl --user restart docker.service`. D-Bus race is kickstarted from `.zprofile`/`.profile` by the host setup.

@@ -4,7 +4,7 @@ Background on architectural choices that look surprising in the code but exist f
 
 ## Container runs as root — by design
 
-Under rootless Docker with `userns=host`, container UID 0 maps to host UID 1000 (NOT root). Switching to a non-root user inside the container would remap to host UID 100999 (nobody) and break workspace bind-mount writes. See `.devcontainer/ROOTLESS-DOCKER-NOTES.md`.
+Under rootless Docker with `userns=host`, container UID 0 maps to host UID 1000 (NOT root). Switching to a non-root user inside the container would remap to host UID 100999 (nobody) and break workspace bind-mount writes.
 
 ## Rootfs is NOT read-only
 

@@ -4,82 +4,43 @@ Distilled from a macolima-origin audit. These findings are platform-independent
 (VS Code Dev Containers behavior, not macOS/WSL-specific). All apply to this
 repo's rootless Docker + container-root setup.
 
+This repo is entered **only** via *Attach to Running Container* — there is no
+`.devcontainer/` and no "Reopen in Container" flow. The findings below are about
+what VS Code injects at **attach** time and how host-side config closes it.
+
 ---
 
-## Anatomy: what lands where
+## Anatomy: where VS Code config lives
 
-`devcontainer.json` is a **host-side spec**, not a file that gets copied into
-the container. The Dev Containers extension on Windows parses it, drives
-`docker compose up` against the referenced compose file, then attaches VS Code
-Server to the resulting container.
+On attach, VS Code connects to the container `scripts/profile.sh <profile> up`
+already started — it does **not** read any repo `devcontainer.json` (verified
+against the official Dev Containers docs). The config VS Code *does* read on
+attach comes from two host-side places:
 
-| Field | Consumed by | In-container artifact |
+| Source | Consumed by | Holds |
 |---|---|---|
-| `dockerComposeFile`, `service` | Dev Containers ext (host) | None — just selects which compose service to attach to |
-| `workspaceFolder`, `forwardPorts`, `shutdownAction`, `name` | Dev Containers ext (host) | None |
-| `remoteUser`, `containerUser`, `updateRemoteUserUID`, `overrideCommand` | Dev Containers ext (host) | None — they shape how attach behaves |
-| `customizations.vscode.settings` | VS Code Server (in-container) | `/root/.vscode-server/data/Machine/settings.json` |
-| `customizations.vscode.extensions` | VS Code Server (in-container) | `/root/.vscode-server/extensions/<ext>/` — downloaded on first attach, per-container, NOT baked into the image |
+| Host user `settings.json` | VS Code (host) | `remote.SSH.*` + `dev.containers.*` security keys; `dev.containers.defaultExtensions` |
+| Attached-container config (`Dev Containers: Open Attached Container Configuration File`, keyed by image) | VS Code Server (in-container) | `forwardPorts`, `settings`, `extensions`, `remoteUser` — the per-container UX/guardrail layer (lands in `/root/.vscode-server/`, NOT baked into the image) |
 
-Consequence: **CLI-only users (`scripts/profile.sh attach`) get the same
-hardened container minus the `~/.vscode-server` tree.** None of the security
-posture lives in `devcontainer.json` — it lives in `docker-compose.yml` +
-`seccomp.json` + the image.
+**None of the security posture lives in VS Code config** — it lives in
+`docker-compose.yml` + `seccomp.json` + the image. A CLI-only user
+(`scripts/profile.sh attach`) gets the identical hardened container, minus the
+`~/.vscode-server` tree.
 
-### Two attach flows
+### The one flow: Attach to Running Container
 
-| Flow | Reads devcontainer.json? | Hardening applied | What you lose with the other |
-|---|---|---|---|
-| **Reopen in Container** (`code .` in a folder with `.devcontainer/devcontainer.json`, then "Dev Containers: Reopen in Container") | Yes | Full compose hardening + `remote.autoForwardPorts: false` guardrail + explicit `forwardPorts` + pinned Python interpreter / zsh terminal | — |
-| **Attach to Running Container** (command palette → pick `ai-sandbox-<profile>`) | No | Full compose hardening | No port-auto-forward guardrail (services binding `0.0.0.0` may surface on Windows localhost without declaration), manual port forwards, default interpreter/terminal |
+`scripts/profile.sh <profile> up`, then command palette → *Dev Containers: Attach
+to Running Container...* → `ai-sandbox-<profile>`. Because attach ignores any
+repo `devcontainer.json`, the predictability guardrails the old Reopen path baked
+in — `remote.autoForwardPorts: false`, explicit `forwardPorts`, pinned
+interpreter/terminal — are restored via the **attached-container configuration
+file** instead (below). They are UX guardrails, not sandbox controls; the
+container is equally hardened without them.
 
-Security delta between the two flows is **convenience, not safety** — both
-attach to the same compose-hardened container. The Reopen flow's settings are
-predictability/UX guardrails, not sandbox controls.
+### Extensions and the port guardrail
 
-### Where to add extensions
-
-Extensions are declared in the `customizations.vscode.extensions` array of
-whichever devcontainer.json applies:
-
-- **This repo** → `.devcontainer/devcontainer.json`
-- **Any per-repo container under `~/repo/<profile>/<repo>/`** → that repo's `.devcontainer/devcontainer.json` (copy from `devcontainer-template/`)
-- **The template itself** (so future drop-ins inherit) → `devcontainer-template/devcontainer.json`
-
-Use marketplace IDs (`publisher.extension`). New extensions install on next
-attach — no image rebuild needed, since they live in
-`/root/.vscode-server/extensions/`.
-
-**Escape hatch for the Attach-to-Running flow** (which ignores
-devcontainer.json): in host VS Code user `settings.json`, set
-`"dev.containers.defaultExtensions": [...]` — these install into *any*
-container you attach to.
-
-### Per-repo template requirements
-
-**Compose path:** `devcontainer-template/devcontainer.json` uses
-`../../windows-ai-sandbox/docker-compose.yml` as its compose path. This
-**requires the sandbox repo to be cloned as a sibling at
-`~/repo/<profile>/windows-ai-sandbox/`** — if your sandbox lives elsewhere
-(e.g., `~/repo/sandbox/windows-ai-sandbox/`), edit the relative path or
-symlink the sandbox repo into place.
-
-**`.env` file:** The repo-root `.env` (next to `docker-compose.yml`) must
-contain `PROFILE` and `COMPOSE_PROJECT_NAME`:
-```
-PROFILE=nranthony
-COMPOSE_PROJECT_NAME=ai-sandbox-nranthony
-```
-VS Code's Dev Containers extension does **not** pass shell-session `export`s
-through to docker compose — its `userEnvProbe` (default: `loginInteractiveShell`)
-reads only the login shell environment, not per-session variables. Without
-`PROFILE`, compose interpolation fails (`required variable PROFILE is missing`).
-Without `COMPOSE_PROJECT_NAME`, VS Code derives the project name from the compose
-file's directory (`windows-ai-sandbox`), which creates a second
-`172.30.0.0/24` bridge network that collides with the already-running profile's
-`ai-sandbox-<profile>_sandbox-internal`. `scripts/profile.sh` always exports its
-own values, so the `.env` only affects the VS Code flow. Update these values when
-switching profiles.
+- **Extensions:** host user `settings.json` → `"dev.containers.defaultExtensions": [...]` (marketplace `publisher.extension` IDs). Installs into *any* attached container, on next attach, into `/root/.vscode-server/extensions/` — no image rebuild.
+- **Port guardrail + interpreter/terminal:** `Dev Containers: Open Attached Container Configuration File` (pick the `windows-ai-sandbox` image), then set `forwardPorts: [8080, 8501, 8188]` and `settings: { "remote.autoForwardPorts": false, ... }`. `autoForwardPorts: false` matters on Windows — a service binding `0.0.0.0` otherwise surfaces on Windows localhost without being declared.
 
 ---
 
@@ -95,13 +56,12 @@ direct TCP. Neither control sees SSH traffic routed through the forwarded unix
 socket — the socket itself is the bypass. The container's network identity is
 sandboxed; its SSH identity is the host user's.
 
-**Fix:** Host VS Code setting:
-```json
-"remote.SSH.enableAgentForwarding": false
-```
-
-Belt-and-braces: the Dockerfile also purges `openssh-client`, so even with a
-forwarded socket the agent has no ssh client.
+**Fix:** The primary defense is **in-container**, since attach reads no
+`remoteEnv` to empty the socket: `config/.zshrc` runs `unset SSH_AUTH_SOCK` on
+every shell and the Dockerfile purges `openssh-client` (no `ssh` client to use a
+forwarded socket). The host setting `remote.SSH.enableAgentForwarding: false`
+only governs the Remote-SSH extension, not Dev Containers' attach injection —
+keep it set, but do not rely on it alone.
 
 ### B — VS Code copies host `~/.gitconfig` into container rootfs
 
@@ -138,13 +98,13 @@ during VS Code attach. Capabilities all zero, `NoNewPrivs=1`, `Seccomp=2` — it
 inherits the sandbox posture. Under rootless Docker (container UID 0 = host
 UID 1000) the blast radius is bounded to scribbling on ephemeral overlay state.
 
-**Fix:** In workspace repos, add `.devcontainer/devcontainer.json` with:
-```jsonc
-{
-  "updateRemoteUserUID": false,  // stops VS Code from usermod-ing inside the container
-  "overrideCommand": false       // keeps compose command: ["sleep", "infinity"]
-}
-```
+**Fix:** Under rootless Docker (container UID 0 = host UID 1000) the orphan's
+blast radius is already bounded to ephemeral overlay state, so this is a tidiness
+issue, not a containment boundary. Where you want it suppressed, set
+`remoteUser` / `updateRemoteUserUID: false` in the **attached-container
+configuration file** (the attach-mode equivalent of the old repo
+`devcontainer.json` keys). Compose's `command: ["sleep", "infinity"]` already
+holds PID 1 and attach does not override it.
 
 ---
 
@@ -152,8 +112,9 @@ UID 1000) the blast radius is bounded to scribbling on ephemeral overlay state.
 
 ```jsonc
 {
-  "remote.SSH.enableAgentForwarding": false,  // Finding A
-  "dev.containers.copyGitConfig": false       // Findings B + C
+  "remote.SSH.enableAgentForwarding": false,                  // Finding A (in-container .zshrc unset is primary)
+  "dev.containers.copyGitConfig": false,                      // Finding B
+  "dev.containers.gitCredentialHelperConfigLocation": "none"  // Finding C — stops attach re-injecting the helper
 }
 ```
 
@@ -170,4 +131,4 @@ Things that look tempting but break the security model:
 | Widen proxy allowlist to include `host.docker.internal` | That's the exact host↔container coupling the sandbox exists to prevent. |
 | Bind-mount `~/.gitconfig` as a single file | `git config --global` writes via `rename()` atomically; single-file bind mounts return `EBUSY`. Use `GIT_CONFIG_GLOBAL` pointing into a directory bind mount instead. |
 | Set `read_only: true` on the agent container | Breaks VS Code Dev Containers environment setup (`/etc/environment` writes). Security gain is zero — non-root userns + `cap_drop: ALL` is the boundary, not filesystem write access. |
-| "Reopen in Container" on a folder without a `.devcontainer/devcontainer.json` | VS Code will offer to generate one from a generic template — that container will NOT use this repo's hardened compose file. Either drop in `devcontainer-template/devcontainer.json` first, or use "Attach to Running Container" against the already-hardened `ai-sandbox-<profile>`. |
+| Re-introduce a repo `.devcontainer/devcontainer.json` to get "Reopen in Container" back | Reopen makes VS Code drive `docker compose up` itself — it needs `.env` plumbing (`PROFILE`/`COMPOSE_PROJECT_NAME`) and can spin up a second `172.30.0.0/24` network that collides with the running profile. Attach to the already-hardened `ai-sandbox-<profile>` instead. |

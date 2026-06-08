@@ -78,7 +78,7 @@ Plus env: `GIT_ASKPASS`, `VSCODE_GIT_IPC_HANDLE`, `VSCODE_GIT_ASKPASS_MAIN`.
 docker exec -u 0 claude-agent-<profile> kill <PID>
 ```
 
-*Part 2 (prevent recurrence):* drop a `devcontainer.json` in the **workspace repo** (not the sandbox repo) pinning `remoteUser`, `containerUser`, and `updateRemoteUserUID: false`. See §5 for the template.
+*Part 2 (prevent recurrence):* under rootless userns the orphan is bounded to ephemeral overlay state (container UID 0 = host UID 1000). Where you want it suppressed, pin `remoteUser: root` / `updateRemoteUserUID: false` in the attached-container configuration file — see §5. This repo carries no repo `devcontainer.json`.
 
 ### Finding E — Copilot IDE state (`~/.copilot/ide/`)
 
@@ -204,32 +204,37 @@ The `internal: true` on `sandbox-internal` is what makes the whole model work. W
 
 ---
 
-## 5. The devcontainer.json to add in the **workspace** repo (not the sandbox repo)
+## 5. VS Code integration on this repo — attach-only, host-side config
 
-Drop this at `<workspace-repo>/.devcontainer/devcontainer.json`:
+**This repo does not use a `devcontainer.json`.** It is entered exclusively via
+*Attach to Running Container* against the already-running `ai-sandbox-<profile>`
+(brought up by `scripts/profile.sh <profile> up`). Attach **ignores** any repo
+`.devcontainer/devcontainer.json` (verified against the official Dev Containers
+docs), so the VS Code-side config that closes the leakage findings lives
+**host-side** instead:
 
-```jsonc
-{
-  "name": "<profile-name>",
-  "image": "<image-name>:latest",
-  "workspaceFolder": "/workspace",
-  "remoteUser": "agent",
-  "containerUser": "agent",
-  "overrideCommand": false,
-  "updateRemoteUserUID": false
-}
-```
+- **Required host user `settings.json`** (Windows `%APPDATA%\Code\User\settings.json`; from WSL `/mnt/c/Users/<user>/AppData/Roaming/Code/User/settings.json`):
+  ```jsonc
+  {
+    "remote.SSH.enableAgentForwarding": false,                  // Finding A
+    "dev.containers.copyGitConfig": false,                      // Finding B
+    "dev.containers.gitCredentialHelperConfigLocation": "none", // Finding C
+    "dev.containers.defaultExtensions": ["ms-python.python", "..."]
+  }
+  ```
+- **Per-container UX guardrails** via *Dev Containers: Open Attached Container Configuration File* (image-keyed): `forwardPorts: [8080, 8501, 8188]` + `remote.autoForwardPorts: false` + pinned interpreter/terminal.
 
-Field-by-field:
+See `docs/vscode-integration-security.md` for the canonical, current version of all of this.
 
-- **`remoteUser`**: the UID VS Code's user-facing processes (terminal, tasks, extension host) run as. Without this, VS Code picks a default that may be root.
-- **`containerUser`**: the UID the container is treated as running as. Should match the compose `user:` directive.
-- **`overrideCommand: false`**: do NOT replace the compose `command: ["sleep", "infinity"]`. Default is `true`, which replaces it with a VS Code-specific command that runs as root.
-- **`updateRemoteUserUID: false`**: the critical one. By default, on attach VS Code will try to `usermod` the in-container user to match the **host** UID, because it assumes you want file ownership to line up. That `usermod` runs as root — which is what spawned the orphan shell in Finding D. Under rootful Docker it also fails silently because `sudo` isn't installed. Under rootless Docker the semantics are different (host UID is already remapped), so this setting is even more clearly wrong by default. Setting it `false` tells VS Code "the UIDs inside are intentional, leave them alone."
-
-**Why this goes in the workspace repo, not the sandbox repo:** the sandbox repo defines the image and compose stack, potentially shared across many workspaces. The `devcontainer.json` is attach-time config — it describes how VS Code should enter *this specific workspace*. Putting it in the sandbox repo would impose the same attach semantics on every workspace that uses the image.
-
-**Alternative if you don't want to commit it:** add it to `.git/info/exclude` in the workspace repo. VS Code reads it from the working tree either way.
+**Privilege model — do NOT copy macolima's `remoteUser: agent`.** The sibling
+macolima repo runs the agent as non-root `agent` (UID 1000) under rootful Docker,
+so its attach template pins `remoteUser: agent`. **This repo runs container-root
+under rootless Docker** (`userns=host`, container UID 0 = host UID 1000); a
+non-root `remoteUser` would remap to host UID 100999 (`nobody`) and break
+workspace bind-mount writes. Where the attached-container config supports it, pin
+`remoteUser: root` / `updateRemoteUserUID: false` (Finding D) — but under rootless
+userns the orphan shell's blast radius is already bounded to ephemeral overlay
+state, so that is a tidiness fix, not the containment boundary.
 
 ---
 
