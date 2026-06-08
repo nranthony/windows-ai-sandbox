@@ -144,7 +144,25 @@ if match '(>|>>|\btee\b|\bchmod\b|\bchown\b|\bmv\b|\bcp\b|\brm\b|\bln\b)[^|;&]*(
   emit_block "hook-tamper" "write/modify of hook or settings file is denied; ask the user to rebuild"
 fi
 
-# 9. null-truncate (WARN) — `: > file` and bare `> file` clobber.
+# 9. cred-read — block ANY Bash command that references the agent's credential
+#    stores. The agent runs as root here (rootless userns), so claude-settings'
+#    Read-tool denies and the kernel write-protect do NOT cover `cat`/`cp`/`rg`/
+#    `tar`/`ln` against these paths. Matching the path substring against the
+#    whole command catches read, copy, archive, and symlink-creation alike,
+#    regardless of the leading verb. Covers /root/... and the ~ / $HOME forms.
+#    Residual gaps (cd-then-bare-filename, scripts run via allowed interpreters)
+#    are documented in docs/permissions-model.md — this is defence-in-depth.
+if match '(/root/|~/|\$\{?home\}?/)(\.gemini\b|\.config/(gh|glab-cli)\b|\.claude/\.credentials|\.claude\.json|\.aws\b|\.ssh\b)'; then
+  emit_block "cred-read" "access to credential/identity store is denied; ask the user to run this"
+fi
+# 9b. cred-read by bare filename — catches `cd /root/.config/gh && cat …` style
+#     references where the directory was changed first. These filenames are
+#     credential-specific enough to block unconditionally.
+if match '(oauth_creds\.json|google_accounts\.json|\.credentials\.json)'; then
+  emit_block "cred-read" "access to a credential file is denied; ask the user to run this"
+fi
+
+# 10. null-truncate (WARN) — `: > file` and bare `> file` clobber.
 #    Excludes /dev/null, /dev/stderr, fd-redirects (>&), heredocs, and the
 #    common `cmd > /tmp/x` redirection that overwrites a file the agent owns.
 #    We only flag truly bare-leading clobbers at command start or after ; or &&.
@@ -154,7 +172,7 @@ if match '(^|[;&]|\|\|)[[:space:]]*:?[[:space:]]*>[[:space:]]*[^&[:space:]/]' \
   warn_log "null-truncate" "$envelope"
 fi
 
-# 10. workspace-overwrite (WARN) — bare clobber into /workspace.
+# 11. workspace-overwrite (WARN) — bare clobber into /workspace.
 if match '>[[:space:]]*/workspace/[^[:space:]]'; then
   warn_log "workspace-overwrite" "$envelope"
 fi

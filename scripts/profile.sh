@@ -9,7 +9,10 @@
 #
 # Commands:
 #   up              start the stack for this profile (creates state dirs)
-#   down            stop + remove containers (keeps persistent state)
+#   down            stop + remove containers (keeps persistent state). Also
+#                   age-prunes MCP logs + session transcripts older than
+#                   SANDBOX_LOG_RETENTION_DAYS (default 14; recent sessions
+#                   stay `claude --resume`-able).
 #   attach          zsh into the agent container as root
 #   auth            run `claude login` inside the container
 #   auth-github     run `gh auth login` inside the container
@@ -66,6 +69,33 @@ fail()  { printf '\033[0;31m[FAIL]\033[0m  %s\n' "$*" >&2; exit 1; }
 usage() {
   sed -n '2,/^# =====/p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
   exit 1
+}
+
+# Age-based log retention. Bounds the historical-exposure window for MCP debug
+# logs and Claude session transcripts (full prompts/responses — the privacy
+# "pot of gold" flagged in SECURITY_ASSESSMENT.md) WITHOUT wiping recent
+# sessions: anything newer than the window stays `claude --resume`-able. This
+# is deliberately age-based, not a blanket wipe like `clean --deep`. Runs
+# automatically on `down`. Window configurable via SANDBOX_LOG_RETENTION_DAYS
+# (default 14). Non-fatal — a prune failure must never block taking the stack
+# down.
+prune_logs() {
+  local pdir="$1" days="${SANDBOX_LOG_RETENTION_DAYS:-14}"
+  [[ -d "$pdir" ]] || return 0
+  # Guard: a non-integer window (e.g. empty or "all") would make `-mtime +`
+  # match nothing or everything. Bail loudly rather than risk a surprise wipe.
+  [[ "$days" =~ ^[0-9]+$ ]] || { warn "SANDBOX_LOG_RETENTION_DAYS='$days' not an integer; skipping log prune"; return 0; }
+  local n=0 m=0
+  # MCP debug logs/transcripts.
+  if [[ -d "$pdir/cache/claude-cli-nodejs" ]]; then
+    n=$(find "$pdir/cache/claude-cli-nodejs" -type f -name '*.jsonl' -mtime "+$days" -print -delete 2>/dev/null | wc -l)
+  fi
+  # Session transcripts (full prompts/responses) + prompt history.
+  if [[ -d "$pdir/claude-home/projects" ]]; then
+    m=$(find "$pdir/claude-home/projects" -type f -name '*.jsonl' -mtime "+$days" -print -delete 2>/dev/null | wc -l)
+  fi
+  find "$pdir/claude-home" -maxdepth 1 -name 'history.jsonl' -mtime "+$days" -delete 2>/dev/null || true
+  ok "log prune: removed $((n + m)) transcript/log file(s) older than ${days}d (SANDBOX_LOG_RETENTION_DAYS=${days})"
 }
 
 # ---------------------------------------------------------------------------
@@ -218,6 +248,7 @@ case "$CMD" in
   down)
     info "Taking down profile '$PROFILE'"
     docker compose down "$@"
+    prune_logs "$PROFILES_ROOT/$PROFILE"
     ok "Stack down. Persistent state preserved under $PROFILES_ROOT/$PROFILE/"
     ;;
 

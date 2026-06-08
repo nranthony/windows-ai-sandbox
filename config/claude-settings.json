@@ -133,7 +133,11 @@
       "Read(**/*.key)",
       "Read(**/.credentials*)",
       "Read(**/id_rsa*)",
-      "Read(**/id_ed25519*)"
+      "Read(**/id_ed25519*)",
+      "Read(/root/.gemini/**)",
+      "Read(/root/.config/gh/**)",
+      "Read(/root/.config/glab-cli/**)",
+      "Read(/root/.claude.json)"
     ]
   },
   "hooks": {
