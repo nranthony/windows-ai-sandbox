@@ -15,7 +15,7 @@
 
 | Tier | Script | What |
 |---|---|---|
-| 1 | [`scripts/verify-sandbox.sh`](../scripts/verify-sandbox.sh) | Fast tripwire (~20 pass/fail checks) |
+| 1 | [`scripts/verify-sandbox.sh`](../scripts/verify-sandbox.sh) | Fast tripwire (~57 pass/fail/warn outcomes across ~28 checks) |
 | 2 | [`scripts/audit/`](../scripts/audit/) | ~80 structured probes, JSON output ([README](../scripts/audit/README.md)) |
 | 3 | [`config/skills/audit-sandbox/SKILL.md`](../config/skills/audit-sandbox/SKILL.md) | Agent-side judgment over tier-2 JSON (staged into container by `profile.sh audit`) |
 
@@ -42,7 +42,7 @@ Guides in [`host_setup/`](../host_setup/):
 
 - [setup-rootless-docker-wsl-guide.md](../host_setup/setup-rootless-docker-wsl-guide.md) — rootless Docker on WSL2 Ubuntu 24.04
 - [wsl_conf_update-guide.md](../host_setup/wsl_conf_update-guide.md) — /etc/wsl.conf settings
-- [wsl_insert-guide.md](../host_setup/wsl_insert-guide.md) — WSL kernel/insert configuration
+- [wsl_insert-guide.md](../host_setup/wsl_insert-guide.md) — /etc/wsl.conf insert settings (automount, network, interop)
 - [ohmyzsh-host-setup-guide.md](../host_setup/ohmyzsh-host-setup-guide.md) — host-side oh-my-zsh
 
 ## CVE Management

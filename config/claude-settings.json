@@ -64,6 +64,7 @@
       "Bash(pytest:*)",
       "Bash(uv run:*)",
       "Bash(make:*)",
+      "Bash(just:*)",
       "Bash(jq:*)"
     ],
     "deny": [

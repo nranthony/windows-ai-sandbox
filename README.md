@@ -102,6 +102,23 @@ scripts/profile.sh <profile> auth        # claude login — one-time; token pers
 | `list` | all profiles with up/down status |
 | `exec <cmd>` | run arbitrary command inside the container |
 
+### Optional: `just` front door
+A repo-root `justfile` provides a discoverable, shorter alias over `scripts/profile.sh` and `scripts/setup.sh`. It is a **convenience layer only** — every recipe is a thin pass-through (it never calls `docker compose` directly, so the scripts' `PROFILE`/`COMPOSE_PROJECT_NAME` exports and the compose `${PROFILE:?}` guard stay in force). The bash scripts remain canonical. Run `just` (or `just --list`) to see all recipes.
+
+```bash
+just up <profile>            # = scripts/profile.sh <profile> up
+just attach <profile>        # = scripts/profile.sh <profile> attach   (primary entry — attach-only)
+just verify <profile>        # = scripts/profile.sh <profile> verify   (tier-1 hardening tripwire)
+just rebuild <profile>       # = scripts/profile.sh <profile> rebuild
+just build                   # = scripts/profile.sh build              (no profile arg)
+just setup <profile> --name "Your Name" --email you@x   # = scripts/setup.sh <profile> ...
+just list                    # = scripts/profile.sh list
+```
+
+Profile is the first positional arg to every per-profile recipe (`list` and `build` take none). Requires `just` on the WSL host (`sudo apt install just`, or the static binary from github.com/casey/just). Skip it entirely if you prefer the scripts — they're identical in effect.
+
+> Unlike the sibling `macolima` repo, there are **no `colima-*` recipes** (WSL2 *is* the VM), `verify` fronts `profile.sh verify` rather than `setup.sh --verify`, and `build` takes no profile arg. See `docs/sibling-repo-relationship.md`.
+
 ### Per-profile state
 ```
 ~/.ai-sandbox/profiles/<profile>/
