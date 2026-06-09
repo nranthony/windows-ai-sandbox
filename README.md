@@ -141,7 +141,7 @@ Profile is the first positional arg to every per-profile recipe (`list` and `bui
 The sandbox is entered via **Attach to Running Container** — VS Code connects to
 the container the CLI already brought up. There is no `.devcontainer/` and no
 "Reopen in Container" flow: Reopen would drive `docker compose up` itself (needing
-`.env` plumbing and risking a second colliding `172.30.0.0/24` network), and
+`.env` plumbing and bypassing `profile.sh`'s per-profile subnet allocation), and
 Attach ignores a repo `devcontainer.json` anyway.
 
 1. Bring the profile up: `scripts/profile.sh <profile> up`.

@@ -9,19 +9,43 @@ import glob
 import os
 import re
 import shutil
+import subprocess
 
 CRED_PATTERNS = [
     re.compile(r".*(_TOKEN|_KEY|_SECRET|_PASSWORD|_PASS|_API_KEY)$",
                re.IGNORECASE),
 ]
 
-# Host-reaching credential helpers — VS Code IPC shim or Windows host helpers
-# (git-credential-manager often comes via Git for Windows on the host).
-# Benign in-container helpers (gh / glab) are NOT in this set.
-HOST_REACHING_HELPER = re.compile(
-    r"helper\s*=.*(vscode-server|vscode-remote-containers|"
-    r"git-credential-manager)"
-)
+# Host-reaching credential helpers — VS Code IPC shim or host credential
+# managers (git-credential-manager via Git for Windows; osxkeychain on macOS,
+# kept for macolima parity). Benign in-container helpers (gh / glab) are NOT in
+# this set. _HELPER matches a full `helper = ...` config line (file scan);
+# _VALUE matches a bare helper value (git --get-all output).
+_HOST_REACHING_ALT = (r"vscode-server|vscode-remote-containers|"
+                      r"git-credential-manager|osxkeychain")
+HOST_REACHING_HELPER = re.compile(r"helper\s*=.*(" + _HOST_REACHING_ALT + ")")
+HOST_REACHING_VALUE = re.compile("(" + _HOST_REACHING_ALT + ")")
+
+
+def _resolved_credential_helpers():
+    """`git config --show-origin --get-all credential.helper` across ALL layers
+    (system /etc/gitconfig, global $GIT_CONFIG_GLOBAL, repo-local under cwd).
+    Returns (rows, ok): rows = [{origin, value}], ok = git ran. This is git's
+    own resolution — broader than reading a single file."""
+    try:
+        p = subprocess.run(
+            ["git", "config", "--show-origin", "--get-all",
+             "credential.helper"],
+            capture_output=True, text=True, timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return [], False
+    rows = []
+    for line in p.stdout.splitlines():
+        # `--show-origin` emits "origin\tvalue" (origin like "file:/etc/gitconfig")
+        origin, _, value = line.partition("\t")
+        rows.append({"origin": origin, "value": value})
+    return rows, True
 
 
 def _check(name, ok, **details):
@@ -73,16 +97,26 @@ def run():
         observed="present" if gitcfg else "absent",
     ))
 
-    # No host-reaching credential.helper in .config/git/config. Benign
-    # in-container helpers (`!/usr/local/bin/gh auth git-credential` etc.) pass.
+    # No host-reaching credential.helper across ANY git config layer. Primary:
+    # git's resolved config (`--show-origin --get-all`) spans system
+    # /etc/gitconfig + global + repo-local — catches injection a single-file
+    # grep would miss. Belt: also scan the global file directly, in case
+    # GIT_CONFIG_GLOBAL is unset and the injected line is latent (git wouldn't
+    # resolve it, but it's still a risk). Benign in-container helpers
+    # (`!/usr/local/bin/gh auth git-credential` etc.) pass.
+    resolved, git_ok = _resolved_credential_helpers()
+    host_reaching = [
+        {"source": "resolved", "origin": r["origin"], "value": r["value"]}
+        for r in resolved if HOST_REACHING_VALUE.search(r["value"])
+    ]
     git_cfg_path = "/root/.config/git/config"
-    host_reaching = []
     if os.path.isfile(git_cfg_path):
         try:
             with open(git_cfg_path) as f:
                 for i, line in enumerate(f, 1):
                     if HOST_REACHING_HELPER.search(line):
                         host_reaching.append({
+                            "source": "global-file",
                             "line_no": i,
                             "line": line.strip(),
                         })
@@ -92,9 +126,13 @@ def run():
         "no_host_reaching_credential_helper",
         not host_reaching,
         found=host_reaching,
-        rationale=("benign gh/glab helpers OK; flag only "
-                   "vscode-server | vscode-remote-containers | "
-                   "git-credential-manager"),
+        resolved_origins=[r["origin"] for r in resolved],
+        git_resolution_ok=git_ok,
+        rationale=("resolved via `git config --show-origin --get-all "
+                   "credential.helper` (system/global/local) + global-file "
+                   "belt; benign gh/glab helpers OK; flag vscode-server | "
+                   "vscode-remote-containers | git-credential-manager | "
+                   "osxkeychain"),
     ))
 
     # Env scan — credential-shaped keys (names only, no values).

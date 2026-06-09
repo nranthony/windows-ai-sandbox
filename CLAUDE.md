@@ -23,7 +23,7 @@ Windows OS
 ```
 
 **Network model (load-bearing — see `sandbox-hardening-package.md` §4):**
-- `sandbox-internal` (internal: true, IPAM 172.30.0.0/24) — agent-only, no direct internet
+- `sandbox-internal` (internal: true, IPAM 172.30.`${SANDBOX_OCTET}`.0/24 — per-profile octet allocated by `profile.sh`, defaults to 0) — agent-only, no direct internet
 - `sandbox-external` — Squid's outbound side
 - DNS sinkholed (`dns: [127.0.0.1]`) on the agent; internal names resolved via `extra_hosts` with static IPs. Closes the DNS-exfil side channel that `internal: true` alone does NOT close. See `docs/compose-network-ipam.md`.
 - Removing `internal: true` turns the proxy into a suggestion.
@@ -219,7 +219,7 @@ See [`docs/vscode-integration-security.md`](docs/vscode-integration-security.md)
 | Privilege escalation | `no-new-privileges:true` |
 | Resources | `pids_limit: 512`, `mem_limit: 8g`, `cpus: 4` |
 | Filesystem | rootfs rw (non-root userns + cap_drop is the boundary); `/tmp` + `/run` + `/root/.{npm-global,local}` tmpfs with `noexec,nosuid,nodev` |
-| Network | `sandbox-internal` (internal:true, IPAM 172.30.0.0/24) + Squid sidecar on `sandbox-external` — allowlist is the only way out |
+| Network | `sandbox-internal` (internal:true, IPAM 172.30.`${SANDBOX_OCTET}`.0/24 — per-profile /24 so concurrent profiles don't collide) + Squid sidecar on `sandbox-external` — allowlist is the only way out |
 | DNS | Sinkholed (`dns: [127.0.0.1]`) + `extra_hosts` for internal names — closes DNS exfil channel |
 | Agent tools | `claude settings.json` (defaultMode: auto) denies `curl/wget/ssh/scp/socat/nc/telnet`, `git push/clone/fetch/config/submodule`, `awk/sed`, `pip install`, `uv add`, secrets reads |
 | Restart policy | `restart: "no"` — explicit `up` required after host reboot (prevents silent config-drift recovery) |

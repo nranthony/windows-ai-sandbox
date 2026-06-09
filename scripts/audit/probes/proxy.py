@@ -15,22 +15,36 @@ import re
 ALLOWED = "/workspace/temp_audit_package/proxy/allowed_domains.txt"
 SQUID = "/workspace/temp_audit_package/proxy/squid.conf"
 
-# Domains that MUST be on the allowlist — agent / Claude Code core paths.
-# Uses the leading-dot wildcard forms that actually appear in
-# allowed_domains.txt (e.g. `.github.com` covers github.com + api.github.com).
+# Base-minimum domains the autonomous agent CANNOT run without — the always-on
+# [claude] + [gemini] blocks. Leaf hosts per audit M3 (no parent wildcards).
+# Package / code-fetch ecosystems (PyPI, pythonhosted, npm, github, apt) are
+# deliberately NOT here: they are gated OFF by default and opened per-stage via
+# the Streamlit dashboard (dashboard/src/pages/04_proxy_allowlist.py) or
+# with-egress.sh. Asserting them as "required" would fight that supply-chain
+# stance — see GATED_TAGS / gated_blocks_default_off below.
 REQUIRED_DOMAINS = [
+    # [claude] — Claude Code core API + auth/console surface
     "api.anthropic.com",
+    "console.anthropic.com",
     "statsig.anthropic.com",
-    ".github.com",
-    ".pypi.org",
-    ".files.pythonhosted.org",
-    ".registry.npmjs.org",
+    "api.claude.com",
+    "platform.claude.com",
+    "claude.ai",
+    # [gemini] — Gemini CLI OAuth + Code Assist
+    "accounts.google.com",
+    "oauth2.googleapis.com",
+    "www.googleapis.com",
+    "codeassist.google.com",
+    "developers.google.com",
+    "cloudcode-pa.googleapis.com",
 ]
 
-# Section tags for the planning-mode block (commented-by-default).
-# [git], [pypi], [npm] are PROJECT-PERSISTENT in this repo (uncommented by
-# default) — only gate tags that require manual intervention belong here.
-PLANNING_TAGS = {"[playwright-install]"}
+# Gated blocks: package / code-fetch egress (the supply-chain attack surface for
+# autonomous runs). These MUST stay commented (OFF) in the base; they are opened
+# deliberately, per-stage, via the Streamlit dashboard or with-egress.sh, then
+# closed. Tags without brackets — matched against the `[tag]` block header.
+GATED_TAGS = {"git", "pypi", "pytorch", "npm", "nvidia", "numerai",
+              "apt", "playwright-install", "quarto-install"}
 
 # squid.conf rule markers — order-preserving.
 EXPECTED_MARKERS = [
@@ -121,32 +135,42 @@ def run():
         found=suspicious,
     ))
 
-    # Planning-mode block must be commented in autonomous-mode default.
-    in_planning = False
+    # Gated (package/install) blocks must be commented (OFF) in the autonomous
+    # base. Walk the file tracking the current [tag] block; flag any uncommented
+    # domain under a GATED_TAGS block — that means package/code-fetch egress is
+    # live right now. WEAK (not DRIFT): the dashboard / with-egress.sh open these
+    # deliberately per-stage, so the auditor confirms it was intentional rather
+    # than residual. This is the "nothing instated without my knowledge" guard.
     current_tag = None
-    uncommented_planning = []
+    open_gated = []
     for raw in lines:
         s = raw.strip()
-        m = re.search(r"\[[\w-]+\]", raw)
-        if m and m.group(0) in PLANNING_TAGS:
-            current_tag = m.group(0)
-            in_planning = True
+        m = re.search(r"\[([\w-]+)\]", raw)
+        if m and "---" in raw:                 # a `[tag]` block header
+            current_tag = m.group(1)
             continue
-        if raw.startswith("# ===") or raw.startswith("# ---"):
-            current_tag = None
-            in_planning = False
+        if raw.startswith("# ===") or (raw.startswith("# ---") and not m):
+            current_tag = None                 # section/divider ends the block
             continue
-        if in_planning and s and not s.startswith("#"):
-            uncommented_planning.append({"line": raw, "tag": current_tag})
+        if current_tag in GATED_TAGS and s and not s.startswith("#"):
+            open_gated.append({"domain": s, "tag": current_tag})
 
-    out.append(_check(
-        "planning_mode_commented",
-        not uncommented_planning,
-        uncommented=uncommented_planning[:10],
-        count=len(uncommented_planning),
-        rationale=("autonomous mode: planning-mode blocks should all be "
-                   "commented; uncommented = with-egress.sh sentinel may be live"),
-    ))
+    open_tags = sorted({e["tag"] for e in open_gated})
+    out.append({
+        "section": "proxy",
+        "name": "gated_blocks_default_off",
+        "verdict": "OK" if not open_gated else "WEAK",
+        "details": {
+            "open_blocks": open_tags,
+            "open_domains": [e["domain"] for e in open_gated][:20],
+            "count": len(open_gated),
+            "rationale": ("package/install egress (PyPI, pythonhosted, npm, "
+                          "github, apt, …) must stay OFF in the autonomous base "
+                          "to block supply-chain installs; open = confirm it was "
+                          "a deliberate dashboard / with-egress.sh toggle for an "
+                          "install stage, not residual"),
+        },
+    })
 
     # Per-profile additions — informational.
     extras = [d for d in active if d not in REQUIRED_DOMAINS]

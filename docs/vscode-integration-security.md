@@ -86,10 +86,16 @@ bypassing the proxy allowlist.
 
 **Fix — two layers:**
 
-1. Host: `dev.containers.copyGitConfig: false` (Finding B) prevents initial injection.
-2. Defensive: `init-profile-state.sh` strips any `credential.helper` from the
-   profile's git config on every `up`, so the setting can't survive even if
-   VS Code re-injects on attach.
+1. Host: `dev.containers.gitCredentialHelperConfigLocation: "none"` is the key
+   that actually stops the IPC-helper injection — `copyGitConfig: false`
+   (Finding B) only stops the gitconfig *copy*, not the credential shim, which is
+   a separate Dev Containers mechanism. Set **both** (see machine-scope note
+   below for *which* `settings.json`).
+2. Defensive: `init-profile-state.sh` / `ensure_state` strips any host-reaching
+   `credential.helper` from the profile's git config on every `up`. But this is
+   *reactive* — it runs on `up`, while injection happens at *attach*, so it only
+   cleans up on the next `up`, not the live session. Layer 1 is the real
+   prevention; see **Verification timing** below.
 
 ### D — Orphaned UID-0 shell from VS Code attach
 
@@ -117,6 +123,48 @@ holds PID 1 and attach does not override it.
   "dev.containers.gitCredentialHelperConfigLocation": "none"  // Finding C — stops attach re-injecting the helper
 }
 ```
+
+### Which `settings.json` — the machine-scope nuance (WSL)
+
+Both `dev.containers.*` keys are **`machine`-scoped** (verified in the extension
+manifest, `ms-vscode-remote.remote-containers`). A machine-scoped setting is read
+from **either** of two places, and **not** from workspace/folder settings:
+
+| Tier | File | Role |
+|---|---|---|
+| User (desktop) | Windows `%APPDATA%\Code\User\settings.json` (`/mnt/c/Users/<you>/AppData/Roaming/Code/User/settings.json`) | fallback |
+| Remote/Machine | WSL `~/.vscode-server/data/Machine/settings.json` | **overrides** User when present |
+
+Effective value = WSL Machine setting if set, else Windows User setting, else the
+default (`copyGitConfig: true`, helper `global`) — i.e. **it leaks** if neither is
+set. Because this repo is entered by running `code .` **from WSL** (a Remote-WSL
+window), the WSL side is in play, so:
+
+- **Primary:** set the keys WSL-side. Command palette → *Preferences: Open Remote
+  Settings (JSON) — [WSL: …]* writes `~/.vscode-server/data/Machine/settings.json`.
+- **Belt:** also set them in the Windows User `settings.json` (Dev Containers is a
+  *UI extension* on the Windows client; setting both removes any ambiguity about
+  which machine the scope resolves against). Same values, harmless.
+- `remote.SSH.enableAgentForwarding` is Remote-SSH-scoped, not part of this
+  machine-scope story — the in-container `.zshrc` unset + `openssh-client` purge
+  are the primary Finding-A defense regardless.
+
+### Verification timing — only meaningful AFTER a reattach
+
+The host setting is *prevention*; the on-`up` scrub and the tripwire are
+*cleanup/detection*. Critically, the injection is an **attach-time** event while
+the scrub runs on **`up`** — so the normal flow `up → attach → work` injects
+*after* the scrub already ran. **A tripwire run right after `up` (before VS Code
+attaches) always passes, even with the host settings wrong** — false reassurance.
+
+So the only valid test is: **set the host/WSL settings → fully reattach → then run
+`scripts/profile.sh <profile> verify`** (or the Tier-2 `audit`). The leakage
+checks (`no_host_reaching_credential_helper`, `no_host_gitconfig`,
+`no_vscode_ssh_socket`) query git's *resolved* config across system/global/local
+layers, so they catch a helper injected into any config layer — but only if you
+run them in the session where the injection actually occurred. Re-run after every
+reattach; the host `settings.json` lives outside the repo and nothing here can
+enforce it.
 
 ---
 

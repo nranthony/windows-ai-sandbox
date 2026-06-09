@@ -78,8 +78,10 @@ case "$ACTION" in
     ;;
   recreate)
     step "Force-recreating '$PROFILE'"
-    "$PROFILE_SH" "$PROFILE" up >/dev/null
-    docker compose up -d --force-recreate
+    # Delegate to profile.sh so subnet allocation + pool check apply (a direct
+    # `docker compose up` here would fall back to the SANDBOX_OCTET=0 default
+    # and could move the network off this profile's assigned /24).
+    "$PROFILE_SH" "$PROFILE" recreate
     ok "Recreated."
     exit 0
     ;;

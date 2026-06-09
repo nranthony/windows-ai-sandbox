@@ -94,9 +94,9 @@ services:
     dns:
       - 127.0.0.1
     extra_hosts:
-      - "egress-proxy:172.30.0.10"
-      - "postgres:172.30.0.20"
-      - "mongo:172.30.0.30"
+      - "egress-proxy:172.30.${SANDBOX_OCTET:-0}.10"
+      - "postgres:172.30.${SANDBOX_OCTET:-0}.20"
+      - "mongo:172.30.${SANDBOX_OCTET:-0}.30"
     env_file:
       # Optional DB creds — only present for profiles that opted into the
       # postgres/mongo sibling containers. required: false so profiles
@@ -136,7 +136,7 @@ services:
       - postgres-data:/var/lib/postgresql:rw
     networks:
       sandbox-internal:
-        ipv4_address: 172.30.0.20
+        ipv4_address: 172.30.${SANDBOX_OCTET:-0}.20
     # Uncomment to expose to host GUI tools (DBeaver, psql on WSL host).
     # Loopback-only — do not bind 0.0.0.0.
     # ports:
@@ -177,7 +177,7 @@ services:
       - mongo-data:/data/db:rw
     networks:
       sandbox-internal:
-        ipv4_address: 172.30.0.30
+        ipv4_address: 172.30.${SANDBOX_OCTET:-0}.30
     # Uncomment to expose to host GUI tools (Compass, mongosh on WSL host).
     # ports:
     #   - "127.0.0.1:27017:27017"
@@ -235,7 +235,7 @@ services:
     cpus: 0.5
     networks:
       sandbox-internal:
-        ipv4_address: 172.30.0.10
+        ipv4_address: 172.30.${SANDBOX_OCTET:-0}.10
       sandbox-external:
     restart: "no"
 
@@ -248,11 +248,20 @@ networks:
     # Static subnet so we can pin egress-proxy/postgres/mongo to known IPs
     # and feed them to the agent via extra_hosts. Required to make the
     # dns: [127.0.0.1] sinkhole workable — without static IPs we'd have no
-    # reliable way to pre-populate /etc/hosts. The /24 is per-profile (each
-    # profile gets its own bridge under its own COMPOSE_PROJECT_NAME).
+    # reliable way to pre-populate /etc/hosts.
+    #
+    # The /24's third octet (SANDBOX_OCTET) is allocated per-profile by
+    # profile.sh (ensure_subnet_octet) and persisted to
+    # ~/.ai-sandbox/profiles/<profile>/subnet-octet, so concurrent profiles
+    # land on distinct /24s instead of all fighting over 172.30.0.0/24 (the
+    # "Pool overlaps with other one on this address space" error). The same
+    # variable drives the subnet AND the .10/.20/.30 pins above, so the two
+    # can never drift. Default 0 keeps the legacy subnet for the global
+    # `build` (PROFILE=_build, never creates a network) and the
+    # network-neutral `restart`/`ps` paths.
     ipam:
       config:
-        - subnet: 172.30.0.0/24
+        - subnet: 172.30.${SANDBOX_OCTET:-0}.0/24
   # Proxy's outbound side only.
   sandbox-external:
     driver: bridge

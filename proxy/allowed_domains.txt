@@ -97,9 +97,9 @@ cloudcode-pa.googleapis.com
 # gitlab.com
 
 # --- Python package ecosystem [pypi] ---
-.pypi.org
-.files.pythonhosted.org
-.astral.sh
+# .pypi.org
+# .files.pythonhosted.org
+# .astral.sh
 
 # --- PyTorch / NVIDIA CUDA wheels [pytorch] ---
 # download.pytorch.org
@@ -115,18 +115,18 @@ cloudcode-pa.googleapis.com
 
 # --- Numerai tournament + MCP [numerai] ---
 # GraphQL API (all ops: data listing, submissions, staking, diagnostics, MCP)
-api-tournament.numer.ai
+# api-tournament.numer.ai
 # Website (MCP device-token auth flow, account/key creation)
-numer.ai
+# numer.ai
 # S3 data buckets (presigned URLs for dataset download + submission upload).
 # Bucket names returned dynamically by the GraphQL API; these are the known
 # ones. If a download/upload hits TCP_DENIED, check Squid access.log for the
 # actual S3 subdomain and add it here.
-numerai-datasets-us-west-2.s3.amazonaws.com
-numerai-datasets-us-west-2.s3.us-west-2.amazonaws.com
-numerai-datasets-us-west-2.s3-us-west-2.amazonaws.com
-numerai-datasets.s3.amazonaws.com
-numerai-public-datasets.s3-us-west-2.amazonaws.com
+# numerai-datasets-us-west-2.s3.amazonaws.com
+# numerai-datasets-us-west-2.s3.us-west-2.amazonaws.com
+# numerai-datasets-us-west-2.s3-us-west-2.amazonaws.com
+# numerai-datasets.s3.amazonaws.com
+# numerai-public-datasets.s3-us-west-2.amazonaws.com
 
 # --- OS packages — apt-get inside the container [apt] ---
 # archive.ubuntu.com
@@ -156,9 +156,9 @@ numerai-public-datasets.s3-us-west-2.amazonaws.com
 # keep commented unless actively installing/upgrading Quarto. Note:
 # github.com + objects.githubusercontent.com overlap with [git]; opening
 # this tag widens GitHub egress for the duration of the run.
-github.com
-objects.githubusercontent.com
-release-assets.githubusercontent.com
+# github.com
+# objects.githubusercontent.com
+# release-assets.githubusercontent.com
 
 
 # =============================================================================

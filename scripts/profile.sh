@@ -148,6 +148,132 @@ ensure_state() {
 }
 
 # ---------------------------------------------------------------------------
+# scrub_container_git_leaks — in-container belt for VS Code attach leakage
+# ---------------------------------------------------------------------------
+# ensure_state scrubs the bind-mounted /root/.config/git/config from the host,
+# but VS Code's Dev Containers attach also injects a host-reaching
+# credential.helper into the container ROOTFS — /etc/gitconfig (system layer,
+# git reads it) and /root/.gitconfig (copyGitConfig copy) — which the host-side
+# scrub can't reach. This strips only host-reaching helper lines (targeted, not
+# a file wipe) from those rootfs configs via docker exec, post-up. Like
+# ensure_state it is REACTIVE (cleans on up, not mid-session) — prevention is the
+# host `dev.containers.gitCredentialHelperConfigLocation: none` setting. Runs
+# after the container is up; no-op on a clean recreate; non-fatal.
+scrub_container_git_leaks() {
+  local scrubbed
+  scrubbed="$(docker exec "$AGENT" sh -c '
+    pat="vscode-server|vscode-remote-containers|git-credential-manager|osxkeychain"
+    for f in /etc/gitconfig /root/.gitconfig; do
+      [ -f "$f" ] || continue
+      grep -Eq "helper[[:space:]]*=.*($pat)" "$f" 2>/dev/null || continue
+      if grep -Ev "helper[[:space:]]*=.*($pat)" "$f" > "$f.scrubbed" 2>/dev/null \
+         && mv "$f.scrubbed" "$f"; then
+        echo "$f"
+      fi
+    done
+  ' 2>/dev/null)" || return 0
+  [[ -n "$scrubbed" ]] || return 0
+  while IFS= read -r f; do
+    [[ -n "$f" ]] && warn "scrubbed host-reaching credential.helper from container $f (VS Code attach leak — set host dev.containers.gitCredentialHelperConfigLocation=none to prevent)"
+  done <<< "$scrubbed"
+}
+
+# ---------------------------------------------------------------------------
+# Subnet allocation — give each profile its own 172.30.<octet>.0/24
+# ---------------------------------------------------------------------------
+# The compose file pins egress-proxy/postgres/mongo to 172.30.<octet>.10/.20/.30
+# and feeds the agent the same addresses via extra_hosts (DNS is sinkholed, so
+# extra_hosts is the ONLY name resolution path). All of that reads SANDBOX_OCTET,
+# so the subnet and the static pins can never drift. Allocating a distinct octet
+# per profile is what lets concurrent profiles coexist instead of all colliding
+# on 172.30.0.0/24 ("Pool overlaps with other one on this address space").
+
+# NOTE: deliberately written in the bash-3.2 portable subset (no associative
+# arrays, no `xargs -r`, POSIX `cksum` not `md5sum`) so this allocator drops in
+# verbatim to the sister macolima repo (macOS / bash 3.2). "Used octet" sets are
+# carried as space-padded strings (" 0 65 187 ") tested with a case-glob, which
+# is the 3.2-safe equivalent of an associative-array membership check.
+
+# Deterministic first-choice octet (0-255) from the profile name. Stable across
+# wipes; cksum is POSIX and identical-output on Linux + macOS (md5sum is not).
+octet_start() { printf '%s' "$1" | cksum | awk '{print $1 % 256}'; }
+
+# Collect octets already claimed by OTHER profiles' subnet-octet files into a
+# space-padded string. Shared by both functions below.
+# NOTE: uses `if` blocks, not `[[ ... ]] && continue` — the latter is a standalone
+# command whose nonzero status trips `set -e` (line 56) when this runs inside
+# command substitution, $(sibling_octets). `if` conditions are exempt from set -e.
+sibling_octets() {
+  local d name o out=" "
+  for d in "$PROFILES_ROOT"/*/; do
+    if [[ ! -d "$d" ]]; then continue; fi           # literal glob when no profiles
+    name="$(basename "$d")"
+    if [[ "$name" == "$PROFILE" ]]; then continue; fi
+    if [[ ! -f "$d/subnet-octet" ]]; then continue; fi
+    if ! read -r o < "$d/subnet-octet"; then continue; fi
+    if [[ "$o" =~ ^[0-9]+$ ]]; then out="$out$o "; fi
+  done
+  printf '%s' "$out"
+}
+
+# First free octet at/after the name-hash start that is NOT in $1 (a space-padded
+# "used" string). Echoes the octet, or empty if the /24 space is exhausted.
+first_free_octet() {
+  local used="$1" start i c
+  start="$(octet_start "$PROFILE")"
+  for (( i=0; i<256; i++ )); do
+    c=$(( (start + i) % 256 ))
+    case "$used" in *" $c "*) continue ;; esac
+    printf '%s' "$c"; return
+  done
+}
+
+# Cheap path (no docker calls): reuse the persisted octet, or assign one from the
+# name hash, skipping octets already claimed by other profiles. Always runs;
+# exports SANDBOX_OCTET.
+ensure_subnet_octet() {
+  local f="$PROFILES_ROOT/$PROFILE/subnet-octet" want
+  if [[ -f "$f" ]] && read -r want < "$f" \
+     && [[ "$want" =~ ^[0-9]+$ ]] && (( want <= 255 )); then
+    export SANDBOX_OCTET="$want"; return
+  fi
+  want="$(first_free_octet "$(sibling_octets)")"
+  [[ -n "$want" ]] || fail "no free /24 in 172.30.0.0/16 (256-profile max)"
+  mkdir -p "$(dirname "$f")"
+  printf '%s\n' "$want" > "$f"
+  export SANDBOX_OCTET="$want"
+}
+
+# Pool check (call right before a network-creating `compose up`): if our assigned
+# /24 is already held by ANOTHER docker network — a non-profile project, or a
+# stale/foreign net — bump to the next free octet and rewrite the file. Skips
+# our own sandbox-internal so a recreate doesn't flag itself. One docker pass;
+# only invoked on up/recreate/rebuild, never on down/status/attach.
+ensure_octet_free() {
+  local own="${COMPOSE_PROJECT_NAME}_sandbox-internal" net sub want taken
+  taken="$(sibling_octets)"
+  while read -r net sub; do
+    if [[ "$net" == "$own" ]]; then continue; fi
+    if [[ "$sub" =~ ^172\.30\.([0-9]+)\.0/ ]]; then taken="$taken${BASH_REMATCH[1]} "; fi
+  done < <(docker network ls -q 2>/dev/null \
+            | while read -r id; do
+                docker network inspect "$id" \
+                  --format '{{.Name}} {{range .IPAM.Config}}{{.Subnet}} {{end}}' 2>/dev/null || true
+              done \
+            | awk '{for (i=2;i<=NF;i++) print $1, $i}')
+  case "$taken" in
+    *" ${SANDBOX_OCTET} "*) ;;   # our /24 is occupied — fall through, reallocate
+    *)                      return ;;   # free — keep current assignment
+  esac
+  want="$(first_free_octet "$taken")"
+  if [[ -z "$want" ]]; then fail "no free /24 in 172.30.0.0/16 (pool check)"; fi
+  mkdir -p "$PROFILES_ROOT/$PROFILE"
+  printf '%s\n' "$want" > "$PROFILES_ROOT/$PROFILE/subnet-octet"
+  warn "172.30.${SANDBOX_OCTET}.0/24 already in use; reassigned '$PROFILE' to 172.30.${want}.0/24"
+  export SANDBOX_OCTET="$want"
+}
+
+# ---------------------------------------------------------------------------
 # parse_flags — strip --expose-dev from "$@", populate COMPOSE_FILE_ARGS
 # ---------------------------------------------------------------------------
 parse_flags() {
@@ -222,6 +348,11 @@ export PROFILE
 export COMPOSE_PROJECT_NAME="ai-sandbox-$PROFILE"
 AGENT="ai-sandbox-$PROFILE"
 
+# Resolve this profile's /24 (172.30.<SANDBOX_OCTET>.0/24) for every compose
+# call below. Cheap (file read after first assignment); up-family commands
+# additionally run ensure_octet_free before creating the network.
+ensure_subnet_octet
+
 cd "$SCRIPT_DIR"
 
 ensure_repo_dir() {
@@ -240,8 +371,10 @@ case "$CMD" in
       fail "up: ${BUILD_FLAGS[*]} only applies to build/rebuild (up does not rebuild the image)"
     ensure_repo_dir
     ensure_state
-    info "Bringing up profile '$PROFILE' (project: $COMPOSE_PROJECT_NAME)"
+    ensure_octet_free
+    info "Bringing up profile '$PROFILE' (project: $COMPOSE_PROJECT_NAME, subnet: 172.30.${SANDBOX_OCTET}.0/24)"
     docker compose "${COMPOSE_FILE_ARGS[@]}" up -d "$@"
+    scrub_container_git_leaks
     ok "Stack up. Attach with:  scripts/profile.sh $PROFILE attach"
     ;;
 
@@ -291,8 +424,10 @@ case "$CMD" in
       fail "recreate: ${BUILD_FLAGS[*]} only applies to build/rebuild (recreate does not rebuild the image)"
     ensure_repo_dir
     ensure_state
+    ensure_octet_free
     info "Force-recreating profile '$PROFILE'"
     docker compose "${COMPOSE_FILE_ARGS[@]}" up -d --force-recreate "$@"
+    scrub_container_git_leaks
     ;;
 
   rebuild)
@@ -303,7 +438,9 @@ case "$CMD" in
     docker compose build "${BUILD_FLAGS[@]+"${BUILD_FLAGS[@]}"}" ai-sandbox
     docker image prune -f
     docker builder prune -f --keep-storage=4g
+    ensure_octet_free
     docker compose "${COMPOSE_FILE_ARGS[@]}" up -d --force-recreate
+    scrub_container_git_leaks
     ;;
 
   exec)

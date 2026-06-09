@@ -152,19 +152,26 @@ else
 fi
 
 # --- git credential.helper NOT injected (audit Finding C) -------------------
-# Only flag host-reaching helpers. Benign in-container helpers (e.g. glab
-# auth setup-git writes `!/usr/local/bin/glab auth git-credential`, gh does
-# the same via /usr/local/bin/gh) are expected and use the sandbox's own
-# tokens. The injections we're watching for are VS Code Dev Containers'
-# IPC-backed shim (vscode-server / vscode-remote-containers paths) and host
-# credential managers (git-credential-manager) leaked via copyGitConfig.
-# osxkeychain is macOS-only and not checked here.
-if [[ -f /root/.config/git/config ]] && \
-   grep -qE 'helper\s*=.*(vscode-server|vscode-remote-containers|git-credential-manager)' \
-     /root/.config/git/config; then
-  fail "host-reaching credential.helper in .config/git/config (VS Code shim or host helper — init-profile-state.sh ensure_state should strip it)"
+# Query git's RESOLVED config across ALL layers — system /etc/gitconfig, global
+# $GIT_CONFIG_GLOBAL, and any repo-local .git/config under cwd — via
+# `--show-origin --get-all`, not just one file. An injected helper in any layer
+# is caught (a single-file grep missed /etc/gitconfig and repo-local configs).
+# Plus a belt: grep the global file directly, in case GIT_CONFIG_GLOBAL is unset
+# and the injected line is latent (git wouldn't resolve it, but it's still a
+# risk). Benign in-container helpers (gh/glab write
+# `!/usr/local/bin/gh auth git-credential`) are expected and use the sandbox's
+# own tokens. We flag only host-reaching shims: VS Code Dev Containers' IPC
+# shim (vscode-server / vscode-remote-containers) and host credential managers
+# (git-credential-manager; osxkeychain kept for macolima parity).
+cred_pat='vscode-server|vscode-remote-containers|git-credential-manager|osxkeychain'
+resolved_helpers="$(git config --show-origin --get-all credential.helper 2>/dev/null || true)"
+file_helpers=""
+[[ -f /root/.config/git/config ]] && \
+  file_helpers="$(grep -E 'helper[[:space:]]*=' /root/.config/git/config 2>/dev/null || true)"
+if printf '%s\n%s\n' "$resolved_helpers" "$file_helpers" | grep -qE "$cred_pat"; then
+  fail "host-reaching credential.helper detected (resolved git config or global file) — VS Code shim/host helper; init-profile-state.sh ensure_state should strip it"
 else
-  pass "no host-reaching credential.helper in .config/git/config"
+  pass "no host-reaching credential.helper (resolved across system/global/local + global-file belt)"
 fi
 
 echo ""

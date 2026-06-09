@@ -29,6 +29,19 @@ REQUIRED_HOOKS = [
 # not template-mirrored. Strip before diffing.
 USER_CUSTOMIZATION_KEYS = {"theme", "model", "effortLevel"}
 
+
+def _strip_doc_keys(obj):
+    """Recursively drop keys beginning with '_' (e.g. the template's '_comment'
+    inside `hooks`). JSON has no comment syntax, so '_'-prefixed keys are the
+    convention used to annotate the template for humans; they are never deployed
+    to the live settings and must not register as template drift."""
+    if isinstance(obj, dict):
+        return {k: _strip_doc_keys(v) for k, v in obj.items()
+                if not k.startswith("_")}
+    if isinstance(obj, list):
+        return [_strip_doc_keys(v) for v in obj]
+    return obj
+
 # Required permissions.deny set.
 REQUIRED_DENY = {
     "network": [
@@ -140,15 +153,16 @@ def run():
     # Live vs. template diff.
     if os.path.isfile(TEMPLATE):
         try:
-            template = json.load(open(TEMPLATE))
-            live_filtered = {
+            template = _strip_doc_keys(json.load(open(TEMPLATE)))
+            live_filtered = _strip_doc_keys({
                 k: v for k, v in live.items()
                 if k not in USER_CUSTOMIZATION_KEYS
-            }
+            })
             ok = (json.dumps(live_filtered, sort_keys=True) ==
                   json.dumps(template, sort_keys=True))
             details = {"identical_after_strip": ok,
-                       "stripped_keys": sorted(USER_CUSTOMIZATION_KEYS)}
+                       "stripped_keys": sorted(USER_CUSTOMIZATION_KEYS),
+                       "doc_keys_ignored": "'_'-prefixed (e.g. _comment)"}
             if not ok:
                 diff_keys = set()
                 for k in set(live_filtered.keys()) | set(template.keys()):
