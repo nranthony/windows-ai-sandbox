@@ -17,7 +17,8 @@
 #   auth            run `claude login` inside the container
 #   auth-github     run `gh auth login` inside the container
 #   auth-gitlab     run `glab auth login` inside the container
-#   auth-gemini     run `gemini` inside the container (triggers OAuth)
+#   auth-antigravity  run `agy` (Antigravity CLI) inside the container —
+#                   interactive console sign-in (URL + one-time code)
 #   logs            tail container logs
 #   status          docker compose ps for this profile
 #   build           force-rebuild the shared image (all profiles pick it up)
@@ -34,10 +35,13 @@
 #                   and settings.json.bak.* backups.
 #   wipe            blank-slate this profile: down, nuke per-profile state,
 #                   KEEP auth (claude creds, claude.json, gh, glab, git identity,
-#                   gemini oauth, db.env). Confirms first.
+#                   antigravity (agy) config, db.env). Confirms first.
 #                   Flags: --dry-run, --yes, --all-volumes
 #   list            list all existing profiles with up/down status
 #   exec <cmd...>   run arbitrary command inside the container
+#   api [SUB]       manage the pipeline FastAPI (uvicorn :8001) inside the agent
+#                   (detached + idempotent; targets /workspace/pipeline).
+#                   SUB: up (default) | down | status | logs
 #
 # Optional flags (accepted by up / recreate / rebuild):
 #   --expose-dev    layer docker-compose.<profile>.expose-dev.yml on top of the
@@ -405,9 +409,51 @@ case "$CMD" in
     exec docker exec -it "$AGENT" glab auth login
     ;;
 
-  auth-gemini)
-    info "Running 'gemini' inside $AGENT (triggers OAuth login)"
-    exec docker exec -it "$AGENT" gemini
+  auth-antigravity)
+    info "Running 'agy' inside $AGENT (interactive Antigravity sign-in)"
+    exec docker exec -it "$AGENT" agy
+    ;;
+
+  api)
+    # Manage the pipeline FastAPI (uvicorn :8001) inside the agent. Detached +
+    # idempotent so the API survives the launching shell and is easy to (re)start
+    # after a container restart. Pipeline-specific: targets
+    # /workspace/pipeline/.venv-linux. Subcommands: up (default)|down|status|logs.
+    # Idempotency keys on the live :8001 health endpoint — NOT pgrep, which would
+    # self-match this launcher's own command line.
+    sub="${1:-up}"
+    case "$sub" in
+      up)
+        info "Pipeline API up (uvicorn :8001) in $AGENT (idempotent)"
+        docker exec "$AGENT" bash -c '
+          if curl -fsS --noproxy "*" -o /dev/null http://127.0.0.1:8001/admin/ready 2>/dev/null; then
+            echo "already serving on :8001"; exit 0
+          fi
+          cd /workspace/pipeline 2>/dev/null || { echo "no /workspace/pipeline"; exit 1; }
+          [ -x .venv-linux/bin/uvicorn ] || { echo "no .venv-linux — install pipeline deps first"; exit 1; }
+          setsid bash -c "PIPELINE_DATA_DIR=data/dev .venv-linux/bin/uvicorn pipeline.api:create_app --factory --host 0.0.0.0 --port 8001 --workers 1 > /workspace/pipeline/uvicorn.log 2>&1" </dev/null &
+          echo "launched"
+        '
+        ;;
+      down)
+        info "Pipeline API down in $AGENT"
+        docker exec "$AGENT" pkill -f "uvicorn pipeline.api" 2>/dev/null && info "stopped" || warn "not running"
+        ;;
+      status)
+        exec docker exec "$AGENT" bash -c '
+          if curl -fsS --noproxy "*" http://127.0.0.1:8001/admin/ready 2>/dev/null; then
+            echo; pgrep -af "[u]vicorn pipeline.api" || true
+          else
+            echo "not running (:8001 not responding)"; exit 1
+          fi'
+        ;;
+      logs)
+        exec docker exec "$AGENT" tail -n 40 -f /workspace/pipeline/uvicorn.log
+        ;;
+      *)
+        fail "api: unknown subcommand '$sub' (use: up | down | status | logs)"
+        ;;
+    esac
     ;;
 
   logs)

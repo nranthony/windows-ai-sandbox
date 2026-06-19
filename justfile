@@ -19,7 +19,7 @@
 #   - `verify` fronts `profile.sh verify` (the tier-1 hardening tripwire), NOT
 #     `setup.sh --verify`. Use `setup-verify` for the onboarding sanity block.
 #   - `build` takes NO profile arg (profile.sh dispatches it profile-less).
-#   - extra recipes for this repo's `auth-gemini` and `audit` commands.
+#   - extra recipes for this repo's `auth-antigravity` and `audit` commands.
 #
 # Exceptions (no profile arg): `list`, `build`.
 # =============================================================================
@@ -72,6 +72,10 @@ status profile:
 exec profile *args:
     {{profile_sh}} {{profile}} exec {{args}}
 
+# manage the pipeline FastAPI (uvicorn :8001) in the agent. Sub: up (default)|down|status|logs
+api profile *args:
+    {{profile_sh}} {{profile}} api {{args}}
+
 # list all existing profiles with up/down status (no profile arg)
 list:
     {{profile_sh}} list
@@ -90,9 +94,9 @@ auth-github profile:
 auth-gitlab profile:
     {{profile_sh}} {{profile}} auth-gitlab
 
-# `gemini` inside the container (triggers Gemini CLI OAuth)
-auth-gemini profile:
-    {{profile_sh}} {{profile}} auth-gemini
+# `agy` (Antigravity CLI) inside the container — interactive console sign-in
+auth-antigravity profile:
+    {{profile_sh}} {{profile}} auth-antigravity
 
 # ---- hardening verification (profile.sh) ------------------------------------
 

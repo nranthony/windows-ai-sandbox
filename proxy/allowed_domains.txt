@@ -46,6 +46,15 @@ api.claude.com
 platform.claude.com
 claude.ai
 
+# --- OpenRouter [openrouter] ---
+# claude, fill in here
+openrouter.ai
+
+# --- OpenAI [openai] ---
+# claude, fill in here
+api.openai.com
+
+
 # --- VS Code Marketplace [vscode] ---
 # `.vscode-unpkg.net` is kept as a wildcard because VS Code's extension fetcher
 # rotates across many subdomains under that single MS-controlled parent. No
@@ -54,26 +63,36 @@ marketplace.visualstudio.com
 .vscode-unpkg.net
 update.code.visualstudio.com
 
-# --- Gemini CLI [gemini] ---
-# Runtime + OAuth ("Login with Google") for the official `gemini` CLI
-# (npm @google/gemini-cli). Pinned subdomains only — `.googleapis.com` is a
-# parent hosting hundreds of services and would be a wide exfil channel.
+# --- Antigravity CLI [antigravity] ---
+# Runtime + OAuth for Google's `agy` (Antigravity CLI; replaces the former
+# Gemini CLI). Google-account login uses the standard OAuth/identity hosts; the
+# headless flow prints a URL + one-time code (works in-sandbox — no loopback
+# needed). Pinned subdomains only — never wildcard `.googleapis.com`.
 #
-# OAuth callback: the default flow is a loopback redirect to
-# http://127.0.0.1:<random>/oauth2callback, which the host browser cannot
-# reach inside this sandbox (sandbox-internal is internal:true). The CLI
-# falls back to the out-of-band code flow at codeassist.google.com/authcode —
-# the browser shows an auth code, you paste it in the terminal. That's why
-# codeassist.google.com is on this list.
+# NOTE: the `agy` binary is installed at IMAGE BUILD time (see Dockerfile),
+# which runs on the host network and bypasses Squid — so the download/update
+# hosts are NOT needed here. They live under [antigravity-install] in
+# PLANNING-MODE for the rare in-container install/upgrade.
 #
 # Auth/identity:
 accounts.google.com
 oauth2.googleapis.com
 www.googleapis.com
-codeassist.google.com
-developers.google.com
-# API (chat/completions — Code Assist endpoint for OAuth users):
+# Agentic API backend (Code Assist endpoint — same host family the former
+# Gemini CLI used). `agy` v1.0.9 uses the DAILY channel for its eligibility
+# check (loadCodeAssist) — both confirmed needed via Squid 403s on first
+# console sign-in (2026-06-19):
 cloudcode-pa.googleapis.com
+daily-cloudcode-pa.googleapis.com
+# Candidates also embedded in the `agy` binary — uncomment if startup/auth/run
+# hits a TCP_DENIED (verify against Squid access.log on first authed run; kept
+# commented to keep egress tight):
+# antigravity-unleash.goog          (startup feature flags — Unleash)
+# play.googleapis.com               (experiments / telemetry)
+# oauth2.mtls.googleapis.com        (mTLS OAuth token variant)
+# www.mtls.googleapis.com           (mTLS identity variant)
+# iamcredentials.googleapis.com     (GCP-project auth mode only)
+# aiplatform.googleapis.com         (Vertex / GCP-project mode only)
 
 
 # =============================================================================
@@ -86,7 +105,7 @@ cloudcode-pa.googleapis.com
 # --- Source code / git [git] ---
 # Pinned hosts — no parent wildcards like `.github.com`. If a TCP_DENIED hits
 # a sibling subdomain during dev, add the specific host.
-# github.com
+github.com
 # api.github.com
 # codeload.github.com
 # objects.githubusercontent.com
@@ -97,17 +116,17 @@ cloudcode-pa.googleapis.com
 # gitlab.com
 
 # --- Python package ecosystem [pypi] ---
-# .pypi.org
-# .files.pythonhosted.org
-# .astral.sh
+.pypi.org
+.files.pythonhosted.org
+.astral.sh
 
 # --- PyTorch / NVIDIA CUDA wheels [pytorch] ---
 # download.pytorch.org
 
 # --- Node.js / npm (Claude Code updates + per-repo npm) [npm] ---
-# registry.npmjs.org
-# nodejs.org
-# deb.nodesource.com
+registry.npmjs.org
+nodejs.org
+deb.nodesource.com
 
 # --- NVIDIA container + compute stack [nvidia] ---
 # developer.download.nvidia.com
@@ -115,18 +134,18 @@ cloudcode-pa.googleapis.com
 
 # --- Numerai tournament + MCP [numerai] ---
 # GraphQL API (all ops: data listing, submissions, staking, diagnostics, MCP)
-# api-tournament.numer.ai
+api-tournament.numer.ai
 # Website (MCP device-token auth flow, account/key creation)
-# numer.ai
+numer.ai
 # S3 data buckets (presigned URLs for dataset download + submission upload).
 # Bucket names returned dynamically by the GraphQL API; these are the known
 # ones. If a download/upload hits TCP_DENIED, check Squid access.log for the
 # actual S3 subdomain and add it here.
-# numerai-datasets-us-west-2.s3.amazonaws.com
-# numerai-datasets-us-west-2.s3.us-west-2.amazonaws.com
-# numerai-datasets-us-west-2.s3-us-west-2.amazonaws.com
-# numerai-datasets.s3.amazonaws.com
-# numerai-public-datasets.s3-us-west-2.amazonaws.com
+numerai-datasets-us-west-2.s3.amazonaws.com
+numerai-datasets-us-west-2.s3.us-west-2.amazonaws.com
+numerai-datasets-us-west-2.s3-us-west-2.amazonaws.com
+numerai-datasets.s3.amazonaws.com
+numerai-public-datasets.s3-us-west-2.amazonaws.com
 
 # --- OS packages — apt-get inside the container [apt] ---
 # archive.ubuntu.com
@@ -159,6 +178,15 @@ cloudcode-pa.googleapis.com
 # github.com
 # objects.githubusercontent.com
 # release-assets.githubusercontent.com
+
+# # --- Antigravity CLI install/update [antigravity-install] ---
+# # Binary download + auto-updater for `agy`. Only needed when installing or
+# # upgrading the CLI INSIDE a running container — the image build doesn't need
+# # this (it bypasses Squid). storage.googleapis.com is broad (all public GCS
+# # buckets); keep it gated to install-time only.
+# antigravity.google
+# antigravity-cli-auto-updater-974169037036.us-central1.run.app
+# storage.googleapis.com
 
 
 # =============================================================================

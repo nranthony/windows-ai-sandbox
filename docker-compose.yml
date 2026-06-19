@@ -67,7 +67,10 @@ services:
       # during `git config --global set` fails with EBUSY across single-file
       # bind mounts. Directory mounts avoid that.
       - ${HOME}/.ai-sandbox/profiles/${PROFILE}/config:/root/.config:rw
-      # Per-profile Gemini CLI state (oauth_creds.json, settings.json, MCP).
+      # Per-profile Antigravity CLI (agy) state — agy reuses the ~/.gemini home
+      # (config/keybindings/cache under /root/.gemini/antigravity-cli/). Host dir
+      # is still named gemini-home (former Gemini CLI mount; kept to avoid churn).
+      # The auth token is NOT persisted here — re-auth at the console per rebuild.
       - ${HOME}/.ai-sandbox/profiles/${PROFILE}/gemini-home:/root/.gemini:rw
 
     environment:

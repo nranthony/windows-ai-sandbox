@@ -73,7 +73,9 @@ RUN apt-get update \
  && apt-get clean \
  && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
-# ---------- Node.js 24 + Claude Code + Gemini CLI ---------------------------
+# ---------- Node.js 24 + Claude Code ----------------------------------------
+# (Antigravity CLI `agy` is installed separately below — it's a native binary,
+#  not an npm package.)
 # Upgrade bundled npm first — NodeSource ships an older npm whose vendored
 # deps (tar, cross-spawn, glob, minimatch) accumulate CVEs between publishes.
 # Pulling npm@latest before global installs means claude-code gets extracted
@@ -81,9 +83,22 @@ RUN apt-get update \
 RUN curl -fsSL https://deb.nodesource.com/setup_24.x | bash - \
  && apt-get install -y --no-install-recommends nodejs \
  && npm install -g npm@latest \
- && npm install -g @anthropic-ai/claude-code mongosh@latest @google/gemini-cli@latest \
+ && npm install -g @anthropic-ai/claude-code mongosh@latest pnpm@10 \
  && apt-get clean \
  && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+
+# ---------- Antigravity CLI (agy) — replaces the former Gemini CLI -----------
+# Google's `agy` agentic CLI. Installed to /usr/local/bin via --dir, NOT the
+# installer's default ~/.local/bin (that's a noexec + ephemeral tmpfs at runtime
+# here — see docker-compose.yml — so a binary there can't run or survive a
+# recreate). The installer sha512-verifies the payload against its signed
+# manifest. This build step runs on the host network, bypassing Squid; the
+# RUNTIME auth/API hosts are gated in proxy/allowed_domains.txt under
+# [antigravity]. Sign in interactively at the container console
+# (`scripts/profile.sh <p> auth-antigravity`, or just `agy`) — the auth token is
+# NOT persisted across rebuilds; config lives under /root/.gemini/antigravity-cli/.
+RUN curl -fsSL https://antigravity.google/cli/install.sh | bash -s -- --dir /usr/local/bin \
+ && /usr/local/bin/agy --version
 
 # ---------- uv (Python package manager) --------------------------------------
 # Install system-wide so PATH ordering is irrelevant.
@@ -171,6 +186,8 @@ RUN set -eux; \
 #   /root/.cache              <- ~/.ai-sandbox/profiles/<profile>/cache
 #   /root/.config             <- ~/.ai-sandbox/profiles/<profile>/config
 #   /root/.gemini             <- ~/.ai-sandbox/profiles/<profile>/gemini-home
+#                                (Antigravity CLI `agy` home — config under
+#                                 /root/.gemini/antigravity-cli/; dir name kept)
 ENV HOME=/root \
     SHELL=/usr/bin/zsh \
     PATH="/root/.local/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"

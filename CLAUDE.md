@@ -14,7 +14,7 @@ The two repos implement one threat model on different substrates — keep them a
 Windows OS
   └─ WSL2 Ubuntu 24.04
       └─ rootless Docker (userns=host; container UID 0 ↔ host UID 1000)
-          ├─ windows-ai-sandbox:latest   (shared image: CUDA + claude + gemini + gh + glab + uv + zsh)
+          ├─ windows-ai-sandbox:latest   (shared image: CUDA + claude + agy + gh + glab + uv + zsh)
           └─ per profile:
               ├─ ai-sandbox-<profile>    (agent; /workspace = ~/repo/<profile>/)
               ├─ egress-proxy-<profile>  (Squid; domain allowlist only way out)
@@ -38,7 +38,7 @@ Windows OS
 │   ├── gh/                                      (gh tokens)
 │   ├── glab-cli/                                (glab tokens)
 │   └── git/config                               (via GIT_CONFIG_GLOBAL)
-├── gemini-home/       → /root/.gemini           (Gemini CLI oauth, settings, MCP)
+├── gemini-home/       → /root/.gemini           (Antigravity CLI `agy` home: config/cache under antigravity-cli/; auth re-done per rebuild)
 └── db.env             (optional; postgres/mongo credentials — see config/db.env.template)
 ```
 
@@ -61,7 +61,7 @@ scripts/profile.sh <profile> attach             # zsh into container
 scripts/profile.sh <profile> auth               # claude login (one-time)
 scripts/profile.sh <profile> auth-github        # gh auth login
 scripts/profile.sh <profile> auth-gitlab        # glab auth login
-scripts/profile.sh <profile> auth-gemini        # gemini CLI OAuth login
+scripts/profile.sh <profile> auth-antigravity   # Antigravity (agy) console sign-in
 
 # Day-to-day
 scripts/profile.sh <profile> attach             # get back in
@@ -158,11 +158,11 @@ scripts/trivy-scan.sh image   # CVE scan of windows-ai-sandbox:latest only
 ## Key Files and Configuration
 
 ### Top-level
-- `Dockerfile` — shared image. CUDA 12.6.3 base (pinned by digest). Ships claude + gemini + gh + glab + uv + mongosh + zsh. Node.js 24. Playwright Chromium runtime libs baked in. Gitstatusd pre-installed. `bubblewrap` / `socat` / `openssh-client` deliberately NOT installed (see `sandbox-hardening-package.md` §7).
+- `Dockerfile` — shared image. CUDA 12.6.3 base (pinned by digest). Ships claude + agy (Antigravity CLI, native binary in /usr/local/bin) + gh + glab + uv + mongosh + zsh. Node.js 24. Playwright Chromium runtime libs baked in. Gitstatusd pre-installed. `bubblewrap` / `socat` / `openssh-client` deliberately NOT installed (see `sandbox-hardening-package.md` §7).
 - `docker-compose.yml` — parameterized by `$PROFILE`. `sandbox-internal` (internal:true, IPAM 172.30.0.0/24, DNS sinkhole) + `sandbox-external` bridge. Squid sidecar. Optional postgres/mongo siblings via `COMPOSE_PROFILES`. cap_drop:ALL + seccomp + no-new-privileges, tmpfs noexec. `restart: "no"` (explicit `up` required after host reboot).
-- `justfile` (repo root) — optional convenience front door. Every recipe is a **thin pass-through** to `profile.sh`/`setup.sh` (profile is the first positional arg: `just up <p>` → `scripts/profile.sh <p> up`). NOT canonical and holds NO logic: it must never call `docker compose` directly (that bypasses the `PROFILE`/`COMPOSE_PROJECT_NAME` exports the scripts do, and the compose file's `${PROFILE:?...}` guard). When you add/rename a command in either script, update the matching recipe and re-run `just --list` to confirm it parses. **WSL divergences from macolima's justfile:** no `colima-*` recipes (WSL2 is the VM — no `start.sh`/`stop.sh`); `verify` fronts `profile.sh verify` (tier-1 tripwire), not `setup.sh --verify`; `build` takes no profile arg; extra `auth-gemini`/`audit` recipes. See `docs/sibling-repo-relationship.md`.
+- `justfile` (repo root) — optional convenience front door. Every recipe is a **thin pass-through** to `profile.sh`/`setup.sh` (profile is the first positional arg: `just up <p>` → `scripts/profile.sh <p> up`). NOT canonical and holds NO logic: it must never call `docker compose` directly (that bypasses the `PROFILE`/`COMPOSE_PROJECT_NAME` exports the scripts do, and the compose file's `${PROFILE:?...}` guard). When you add/rename a command in either script, update the matching recipe and re-run `just --list` to confirm it parses. **WSL divergences from macolima's justfile:** no `colima-*` recipes (WSL2 is the VM — no `start.sh`/`stop.sh`); `verify` fronts `profile.sh verify` (tier-1 tripwire), not `setup.sh --verify`; `build` takes no profile arg; extra `auth-antigravity`/`audit`/`api` recipes. See `docs/sibling-repo-relationship.md`.
 - `seccomp.json` — ported verbatim from macolima. `clone3 → ENOSYS`, `unshare(CLONE_NEWUSER)` blocked, full xattr family allowed.
-- `proxy/squid.conf` + `proxy/allowed_domains.txt` — ML-tuned allowlist (Anthropic, Gemini, GitHub, GitLab, PyPI, PyTorch, NVIDIA, Ubuntu apt). Pinned subdomains (no parent wildcards per audit M3). Hot-reload: `docker exec egress-proxy-<p> squid -k reconfigure`.
+- `proxy/squid.conf` + `proxy/allowed_domains.txt` — ML-tuned allowlist (Anthropic, Antigravity/Google, GitHub, GitLab, PyPI, PyTorch, NVIDIA, Ubuntu apt). Pinned subdomains (no parent wildcards per audit M3). Hot-reload: `docker exec egress-proxy-<p> squid -k reconfigure`.
 - `config/.zshrc`, `config/.p10k.zsh` — baked into image at build.
 - `config/claude-settings.json` — **restricts Claude's Bash/Read tools only** (not the shell). `defaultMode: auto`. Denies `pip install`, `uv add`, `curl`, `git push/fetch/config/submodule`, `awk`, `sed`, secrets reads. User shells are unrestricted — install deps at the CLI, then hand off to Claude.
 - `config/db.env.template` — template for postgres/mongo credentials. Copy to profile's `db.env` and fill in.
@@ -171,7 +171,7 @@ scripts/trivy-scan.sh image   # CVE scan of windows-ai-sandbox:latest only
 - `docs/_archive/claude_internal_audit_wsl.md` — manual audit prompt (superseded by tier-2 probes + tier-3 skill; kept for reference).
 
 ### Scripts
-- `scripts/profile.sh` — lifecycle driver. All commands live here (`up`, `down`, `attach`, `auth`, `auth-gemini`, `verify`, `audit`, `rebuild`, `clean`, `wipe`, `db-reset`, `reset-skills`, etc.).
+- `scripts/profile.sh` — lifecycle driver. All commands live here (`up`, `down`, `attach`, `auth`, `auth-antigravity`, `verify`, `audit`, `rebuild`, `clean`, `wipe`, `db-reset`, `api`, `reset-skills`, etc.).
 - `scripts/init-profile-state.sh` — idempotent state bootstrap. Seeds `claude.json='{}'`, `claude-home/settings.json` from template, scrubs VS Code-injected `credential.helper` on every `up`.
 - `scripts/setup.sh` — optional onboarding wrapper (brings up + seeds git user from `.env`).
 - `scripts/verify-sandbox.sh` — tier-1 in-container tripwire. Runs the full hardening check.
@@ -227,7 +227,7 @@ See [`docs/vscode-integration-security.md`](docs/vscode-integration-security.md)
 ## File Structure
 
 ```
-├── Dockerfile                    # Shared image (CUDA + claude + gemini + gh + glab + uv + mongosh + zsh)
+├── Dockerfile                    # Shared image (CUDA + claude + agy + gh + glab + uv + mongosh + zsh)
 ├── docker-compose.yml            # Parameterized by $PROFILE; optional postgres/mongo via COMPOSE_PROFILES
 ├── justfile                      # Optional front door; thin pass-throughs to profile.sh/setup.sh
 ├── seccomp.json                  # Syscall filter
