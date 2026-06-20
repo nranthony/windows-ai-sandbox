@@ -106,7 +106,7 @@ daily-cloudcode-pa.googleapis.com
 # Pinned hosts — no parent wildcards like `.github.com`. If a TCP_DENIED hits
 # a sibling subdomain during dev, add the specific host.
 github.com
-# api.github.com
+api.github.com
 # codeload.github.com
 # objects.githubusercontent.com
 # release-assets.githubusercontent.com

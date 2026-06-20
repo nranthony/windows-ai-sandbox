@@ -62,8 +62,13 @@ cd "$SCRIPT_DIR/.."
 
 # Fallback: if --name/--email not given but .env has GIT_NAME/GIT_EMAIL, use them.
 if [[ -z "$GIT_NAME" || -z "$GIT_EMAIL" ]] && [[ -f .env ]]; then
+  orig_profile="$PROFILE"
+  orig_project="$COMPOSE_PROJECT_NAME"
   # shellcheck disable=SC1091
   set -a; source .env; set +a
+  PROFILE="$orig_profile"
+  COMPOSE_PROJECT_NAME="$orig_project"
+  AGENT="ai-sandbox-$PROFILE"
   GIT_NAME="${GIT_NAME:-}"
   GIT_EMAIL="${GIT_EMAIL:-}"
 fi
@@ -129,6 +134,7 @@ else
   if docker exec "$AGENT" test -s /root/.claude/.credentials.json 2>/dev/null; then
     ok "claude: already authenticated."
   else
+    info "Launching 'claude login'. Once authenticated, if you are dropped into the Claude Code interactive chat prompt, please exit it (type '/exit' or press Ctrl+D) to allow this setup script to continue."
     docker exec -it "$AGENT" claude login || warn "claude login skipped/failed"
   fi
   # gh / glab
