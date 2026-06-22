@@ -46,6 +46,7 @@ RUN apt-get update \
       python3 python3-pip python3-venv \
       ripgrep jq less vim-tiny \
       postgresql-client \
+      tesseract-ocr poppler-utils \
       zsh lsd fontconfig locales lsof \
  && apt-get purge -y openssh-client \
  && if dpkg -l openssh-client 2>/dev/null | awk '/^ii/{found=1} END{exit !found}'; then \

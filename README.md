@@ -16,12 +16,12 @@ cd host_setup && ./setup-rootless-docker-wsl.sh && sudo ./wsl_conf_update.sh
 # Build the shared image
 scripts/profile.sh build
 
-# Bring up a profile (first profile = nranthony, workspace = ~/repo/nranthony/)
-mkdir -p ~/repo/nranthony
-scripts/profile.sh nranthony up
-scripts/profile.sh nranthony auth           # claude login (one-time)
-scripts/profile.sh nranthony auth-github    # optional
-scripts/profile.sh nranthony attach         # zsh into the container
+# Bring up a profile (workspace = ~/repo/<profile>/)
+mkdir -p ~/repo/<profile>
+scripts/profile.sh <profile> up
+scripts/profile.sh <profile> auth           # claude login (one-time)
+scripts/profile.sh <profile> auth-github    # optional
+scripts/profile.sh <profile> attach         # zsh into the container
 ```
 
 Day-to-day: `scripts/profile.sh <profile> {up,down,attach,logs,status,exec,clean}`. See `scripts/profile.sh list` for all profiles.

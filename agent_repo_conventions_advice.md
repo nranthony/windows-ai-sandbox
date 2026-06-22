@@ -19,7 +19,7 @@ Symlinks can cause issues on Windows hosts, IDE agent checkouts, or zip exports.
 * **Sync Script**: Rewrite `scripts/sync-agent-files.sh` to generate these text files instead of creating symlinks.
 
 ### C. Do Not Hardcode File URLs
-* **Recommendation**: Avoid absolute paths like `file:///home/nelly/...` in committed files. Instead, use relative markdown links (e.g., `[dashboard/AGENTS.md](dashboard/AGENTS.md)`). They are fully portable across checkouts and render as clickable links in VS Code, GitHub, Cursor, and Gemini/Antigravity.
+* **Recommendation**: Avoid absolute paths like `file:///home/<username>/...` in committed files. Instead, use relative markdown links (e.g., `[dashboard/AGENTS.md](dashboard/AGENTS.md)`). They are fully portable across checkouts and render as clickable links in VS Code, GitHub, Cursor, and Gemini/Antigravity.
 
 ### D. Version Sandbox Templates Separately
 Currently, the templates injected into the sandboxes live in `config/` (alongside dotfiles, settings, hooks, and skills).
