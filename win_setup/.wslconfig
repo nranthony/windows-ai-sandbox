@@ -1,3 +1,8 @@
 # force traffic to use Windows/3rd party Firewall (e.g. Norton)
 [wsl2]
 networkingMode=mirrored
+# VM memory: default is 50% of host RAM (= 32GB on a 64GB host), which caps all
+# containers combined. Raised to give 3 parallel sandboxes (mem_limit 20g each)
+# real headroom while leaving Windows ~16GB. Apply with `wsl --shutdown`.
+memory=48GB
+swap=16GB

@@ -136,6 +136,11 @@ rm -f /tmp/vscode-ssh-auth-*.sock(N) 2>/dev/null || true
 # Auto-activate default venv if present and no venv is already active
 [[ -z "$VIRTUAL_ENV" && -f "$HOME/.venv/bin/activate" ]] && source "$HOME/.venv/bin/activate"
 
+# gitstatusd sizes its thread pool to visible CPUs (16 host) while the container
+# only has cpus:4 quota — ~32 idle threads per shell, which exhausted pids.max
+# (512) with several VS Code windows open. 4 is ample for prompt git status.
+export GITSTATUS_NUM_THREADS=4
+
 # To customize prompt, run `p10k configure` or edit ~/.p10k.zsh.
 [[ ! -f ~/.p10k.zsh ]] || source ~/.p10k.zsh
 alias ls="lsd -lah --group-dirs first"

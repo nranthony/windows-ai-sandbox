@@ -217,7 +217,7 @@ See [`docs/vscode-integration-security.md`](docs/vscode-integration-security.md)
 | Syscalls | `seccomp=./seccomp.json` (mode 2) — `clone3→ENOSYS`, no user-namespace nesting |
 | Capabilities | `cap_drop: ALL` — no NET_RAW, no SYS_ADMIN, etc. |
 | Privilege escalation | `no-new-privileges:true` |
-| Resources | `pids_limit: 512`, `mem_limit: 8g`, `cpus: 4` |
+| Resources | `pids_limit: 4096`, `mem_limit: 20g` (`memswap_limit: 20g`), `cpus: 4` — sized for multi-window VS Code + LSPs + MCP + Jupyter. Requires WSL VM `memory=48GB` in `win_setup/.wslconfig`. |
 | Filesystem | rootfs rw (non-root userns + cap_drop is the boundary); `/tmp` + `/run` + `/root/.{npm-global,local}` tmpfs with `noexec,nosuid,nodev` |
 | Network | `sandbox-internal` (internal:true, IPAM 172.30.`${SANDBOX_OCTET}`.0/24 — per-profile /24 so concurrent profiles don't collide) + Squid sidecar on `sandbox-external` — allowlist is the only way out |
 | DNS | Sinkholed (`dns: [127.0.0.1]`) + `extra_hosts` for internal names — closes DNS exfil channel |
