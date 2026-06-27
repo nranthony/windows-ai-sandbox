@@ -102,14 +102,73 @@ RUN curl -fsSL https://antigravity.google/cli/install.sh | bash -s -- --dir /usr
  && /usr/local/bin/agy --version
 
 # ---------- uv (Python package manager) --------------------------------------
-# Install system-wide so PATH ordering is irrelevant.
-RUN curl -LsSf https://astral.sh/uv/install.sh | sh \
+# Install system-wide so PATH ordering is irrelevant. INSTALLER_NO_MODIFY_PATH=1
+# stops the installer appending `. "$HOME/.local/bin/env"` to /root/.profile and
+# /root/.bashrc — that shim lives under /root/.local, which is a noexec tmpfs
+# masked empty at runtime (see docker-compose.yml), so the source would always
+# fail with a "No such file" on every login shell. uv is moved onto PATH below,
+# so the profile edit is pointless anyway.
+RUN curl -LsSf https://astral.sh/uv/install.sh | env INSTALLER_NO_MODIFY_PATH=1 sh \
  && mv /root/.local/bin/uv  /usr/local/bin/uv \
  && mv /root/.local/bin/uvx /usr/local/bin/uvx
 
 # Baseline venv used by VS Code's Python default interpreter setting.
 # Users typically create per-repo venvs under /workspace/<repo>/.venv.
 RUN uv venv --python 3.12 /root/.venv
+
+# ---------- PDF generation tooling (WeasyPrint + pandoc) ---------------------
+# Markdown/HTML -> PDF with no LaTeX: pandoc drives WeasyPrint directly via
+# `--pdf-engine=weasyprint`, a complete document path without TeX Live's multi-
+# GB footprint.
+#
+# Native libs: WeasyPrint renders through Pango (since v53 — no GTK/Cairo system
+# dep). libpango-1.0-0 + libcairo2 already come from the Playwright block above;
+# only libpangoft2-1.0-0 (Pango FreeType backend) is missing. pandoc is
+# apt-installed with --no-install-recommends so it does NOT drag texlive in as a
+# Recommends.
+#
+# Fonts: the CUDA base ships almost no families, so without these PDFs render in
+# fallback/tofu glyphs. Curated set chosen for metric compatibility — the open
+# clones match the proprietary originals' character widths, so line breaks and
+# page counts hold (matters for legal/court page limits) without licensing them.
+# NOT using ttf-mscorefonts-installer: it downloads from SourceForge behind an
+# interactive EULA — breaks the noninteractive build and the egress allowlist.
+#   liberation        Times New Roman / Arial / Courier New      (already above)
+#   crosextra-carlito Calibri (modern Word default)
+#   crosextra-caladea Cambria
+#   texgyre           Century Schoolbook / Palatino / Bookman / Times / Helvetica
+#   noto-core         pan-Unicode Latin/Greek/Cyrillic + symbols (anti-tofu)
+#   inter             modern document/UI sans
+#   jetbrains-mono    modern coding mono for code blocks
+#
+# WeasyPrint goes in via `uv tool install`, NOT /root/.venv or /root/.local —
+# the latter is a 256m noexec + ephemeral tmpfs at runtime (docker-compose.yml),
+# the same constraint that put `agy` in /usr/local/bin. So UV_TOOL_DIR pins the
+# isolated tool venv to /opt (persistent, exec-allowed) and UV_TOOL_BIN_DIR puts
+# the `weasyprint` entrypoint on PATH at /usr/local/bin — which is also where
+# pandoc looks for the engine.
+ENV UV_TOOL_DIR=/opt/uv/tools \
+    UV_TOOL_BIN_DIR=/usr/local/bin
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      libpangoft2-1.0-0 \
+      pandoc \
+      fonts-dejavu-core fonts-liberation \
+      fonts-crosextra-carlito fonts-crosextra-caladea fonts-texgyre \
+      fonts-noto-core \
+      fonts-inter fonts-jetbrains-mono \
+ && apt-get clean \
+ && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* \
+ && uv tool install weasyprint \
+ && weasyprint --version \
+ && pandoc --version
+
+# Reference stylesheet for legal/formal documents. Baked at a stable path so
+# any profile/project can use it without copying into each workspace:
+#   weasyprint --stylesheet /usr/local/share/pdf-styles/legal.css in.html out.pdf
+#   pandoc doc.md -o out.pdf --pdf-engine=weasyprint \
+#     --css /usr/local/share/pdf-styles/legal.css
+COPY config/pdf-styles/legal.css /usr/local/share/pdf-styles/legal.css
 
 # ---------- GitHub CLI (gh) --------------------------------------------------
 RUN install -d -m 0755 /etc/apt/keyrings \

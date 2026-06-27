@@ -107,7 +107,7 @@ daily-cloudcode-pa.googleapis.com
 # a sibling subdomain during dev, add the specific host.
 github.com
 api.github.com
-# codeload.github.com
+codeload.github.com
 # objects.githubusercontent.com
 # release-assets.githubusercontent.com
 # raw.githubusercontent.com
@@ -146,6 +146,35 @@ numerai-datasets-us-west-2.s3.us-west-2.amazonaws.com
 numerai-datasets-us-west-2.s3-us-west-2.amazonaws.com
 numerai-datasets.s3.amazonaws.com
 numerai-public-datasets.s3-us-west-2.amazonaws.com
+
+# --- therapod citation_tools / paperbridge [citation-tools] ---
+# Egress for ~/repo/therapod/citation_tools (see its docs/required_domains.md).
+# Read-only academic/citation APIs + search/tracing + preprint servers. Every
+# paperbridge client endpoint is listed, since citation_tools depends on
+# paperbridge and any client may be exercised. Overlaps already covered
+# elsewhere and NOT repeated here: api.anthropic.com [claude], api.openai.com
+# [openai], github.com/codeload.github.com [git], pypi/pythonhosted [pypi].
+#
+# LLM / search / tracing:
+generativelanguage.googleapis.com
+api.tavily.com
+api.smith.langchain.com
+# Citation & literature services:
+eutils.ncbi.nlm.nih.gov
+api.zotero.org
+api.crossref.org
+api.openalex.org
+www.ebi.ac.uk
+api.unpaywall.org
+api.base-search.net
+doi.org
+# Preprint servers (ArXivFamilyClient):
+export.arxiv.org
+arxiv.org
+api.biorxiv.org
+www.biorxiv.org
+www.medrxiv.org
+chemrxiv.org
 
 # --- OS packages — apt-get inside the container [apt] ---
 # archive.ubuntu.com

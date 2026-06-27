@@ -158,7 +158,7 @@ scripts/trivy-scan.sh image   # CVE scan of windows-ai-sandbox:latest only
 ## Key Files and Configuration
 
 ### Top-level
-- `Dockerfile` — shared image. CUDA 12.6.3 base (pinned by digest). Ships claude + agy (Antigravity CLI, native binary in /usr/local/bin) + gh + glab + uv + mongosh + zsh. Node.js 24. Playwright Chromium runtime libs baked in. Gitstatusd pre-installed. `bubblewrap` / `socat` / `openssh-client` deliberately NOT installed (see `sandbox-hardening-package.md` §7).
+- `Dockerfile` — shared image. CUDA 12.6.3 base (pinned by digest). Ships claude + agy (Antigravity CLI, native binary in /usr/local/bin) + gh + glab + uv + mongosh + zsh. Node.js 24. Playwright Chromium runtime libs baked in. Gitstatusd pre-installed. PDF tooling: pandoc + WeasyPrint (`uv tool` at /opt/uv/tools, CLI on /usr/local/bin) — markdown/HTML→PDF via `pandoc --pdf-engine=weasyprint`, no LaTeX. Metric-compatible doc fonts (Carlito/Caladea/TeX Gyre + Inter/JetBrains Mono). Legal/formal reference stylesheet baked at `/usr/local/share/pdf-styles/legal.css` (source `config/pdf-styles/legal.css`). `bubblewrap` / `socat` / `openssh-client` deliberately NOT installed (see `sandbox-hardening-package.md` §7).
 - `docker-compose.yml` — parameterized by `$PROFILE`. `sandbox-internal` (internal:true, IPAM 172.30.0.0/24, DNS sinkhole) + `sandbox-external` bridge. Squid sidecar. Optional postgres/mongo siblings via `COMPOSE_PROFILES`. cap_drop:ALL + seccomp + no-new-privileges, tmpfs noexec. `restart: "no"` (explicit `up` required after host reboot).
 - `justfile` (repo root) — optional convenience front door. Every recipe is a **thin pass-through** to `profile.sh`/`setup.sh` (profile is the first positional arg: `just up <p>` → `scripts/profile.sh <p> up`). NOT canonical and holds NO logic: it must never call `docker compose` directly (that bypasses the `PROFILE`/`COMPOSE_PROJECT_NAME` exports the scripts do, and the compose file's `${PROFILE:?...}` guard). When you add/rename a command in either script, update the matching recipe and re-run `just --list` to confirm it parses. **WSL divergences from macolima's justfile:** no `colima-*` recipes (WSL2 is the VM — no `start.sh`/`stop.sh`); `verify` fronts `profile.sh verify` (tier-1 tripwire), not `setup.sh --verify`; `build` takes no profile arg; extra `auth-antigravity`/`audit`/`api` recipes. See `docs/sibling-repo-relationship.md`.
 - `seccomp.json` — ported verbatim from macolima. `clone3 → ENOSYS`, `unshare(CLONE_NEWUSER)` blocked, full xattr family allowed.
@@ -232,7 +232,7 @@ See [`docs/vscode-integration-security.md`](docs/vscode-integration-security.md)
 ├── justfile                      # Optional front door; thin pass-throughs to profile.sh/setup.sh
 ├── seccomp.json                  # Syscall filter
 ├── .trivyignore.yaml             # Accepted CVEs/misconfigs with expiries
-├── config/                       # Dotfiles + claude-settings.json + db.env.template + hooks + skills
+├── config/                       # Dotfiles + claude-settings.json + db.env.template + hooks + skills + pdf-styles
 ├── proxy/                        # Squid.conf + allowed_domains.txt
 ├── scripts/                      # profile.sh, init-profile-state.sh, with-egress.sh, verify-sandbox.sh, audit/, trivy-scan.sh
 ├── docs/                         # Design notes, permissions model, seccomp/squid internals, debug recipes
