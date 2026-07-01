@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import os
 import subprocess
 
@@ -12,6 +13,8 @@ DOCKER_SOCK = os.environ.get(
 )
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 COMPOSE_FILE = os.path.join(REPO_ROOT, "docker-compose.yml")
+ALLOWLIST_PATH = os.path.join(REPO_ROOT, "proxy", "allowed_domains.txt")
+CONTAINER_ALLOWLIST = "/etc/squid/allowed_domains.txt"
 
 
 class DockerClient:
@@ -46,6 +49,21 @@ class DockerClient:
             return {"profile": profile, "ok": False,
                     "msg": f"{proxy_name} not found"}
 
+        # Detect stale bind mount BEFORE trusting a reconfigure. An external
+        # atomic-replace edit (sed -i, vim, git checkout, an editor's temp+
+        # rename) gives the host file a new inode; the running container stays
+        # pinned to the old one and keeps serving the pre-edit allowlist. The
+        # in-container domain count can't catch this — the stale file is the
+        # old *full* allowlist, so the count looks healthy. Compare a hash of
+        # the host file against the container's copy instead.
+        if self._allowlist_drifted(container):
+            return {"profile": profile, "ok": False,
+                    "msg": "Host allowlist differs from the container's copy "
+                           "(stale bind mount — likely an external edit that "
+                           "swapped the file's inode). Reconfigure would load "
+                           "stale content. Recreate the proxy to resync.",
+                    "needs_recreate": True}
+
         exit_code, _ = container.exec_run("squid -k reconfigure")
         if exit_code != 0:
             return {"profile": profile, "ok": False,
@@ -60,6 +78,24 @@ class DockerClient:
                            "container to resync.",
                     "needs_recreate": True}
         return {"profile": profile, "ok": True, "domains": domains}
+
+    def _allowlist_drifted(self, container) -> bool:
+        """True if the host allowlist and the container's copy differ.
+
+        A byte-for-byte mismatch means the bind mount no longer points at the
+        current host inode. Fails closed: if either side can't be read, treat
+        it as drift so the caller routes to a recreate rather than trusting a
+        stale reconfigure.
+        """
+        try:
+            with open(ALLOWLIST_PATH, "rb") as f:
+                host_hash = hashlib.sha256(f.read()).hexdigest()
+        except OSError:
+            return True
+        exit_code, output = container.exec_run(f"cat {CONTAINER_ALLOWLIST}")
+        if exit_code != 0 or output is None:
+            return True
+        return hashlib.sha256(output).hexdigest() != host_hash
 
     def _count_active_domains(self, container) -> int | None:
         exit_code, output = container.exec_run(
