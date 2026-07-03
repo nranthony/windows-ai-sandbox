@@ -22,6 +22,8 @@
 #   logs            tail container logs
 #   status          docker compose ps for this profile
 #   build           force-rebuild the shared image (all profiles pick it up)
+#   recreate-all    force-recreate EVERY running profile onto the current image
+#                   (no profile arg; down profiles skipped). Use after `build`.
 #   recreate        force-recreate this profile's containers (no image rebuild)
 #   rebuild         build + recreate this profile's containers
 #   reset-settings  overwrite this profile's claude settings.json from
@@ -62,6 +64,8 @@
 #   --claude-version=X.Y.Z
 #                   pin Claude Code to a specific npm version (implies
 #                   --refresh-ai; agy still refreshes to latest).
+#   --recreate-running  (build only) after building, force-recreate every
+#                   running profile onto the new image (runs `recreate-all`).
 # =============================================================================
 set -euo pipefail
 
@@ -334,9 +338,35 @@ if [[ "${1:-}" == "list" ]]; then
   exit 0
 fi
 
+# --- `recreate-all` — force-recreate every RUNNING profile (no profile arg) --
+# Rolls all live profiles onto the current windows-ai-sandbox:latest image.
+# Use after `build` to adopt a new image without a manual per-profile loop.
+# Down profiles are SKIPPED — they pick up the new image on their next `up`.
+# Any extra args (e.g. --expose-dev) are forwarded to each `recreate`.
+if [[ "${1:-}" == "recreate-all" ]]; then
+  running=()
+  while IFS= read -r cname; do
+    case "$cname" in ai-sandbox-*) running+=("${cname#ai-sandbox-}") ;; esac
+  done < <(docker ps --format '{{.Names}}' 2>/dev/null | sort)
+  if (( ${#running[@]} == 0 )); then
+    warn "No running profiles (no ai-sandbox-* containers up). Nothing to recreate."
+    exit 0
+  fi
+  info "Recreating ${#running[@]} running profile(s): ${running[*]}"
+  rc=0
+  for p in "${running[@]}"; do
+    info "── recreate '$p' ──"
+    "$0" "$p" recreate "${@:2}" || { rc=1; warn "recreate failed for '$p' (continuing)"; }
+  done
+  (( rc == 0 )) && ok "recreate-all done (${#running[@]} profile(s))." \
+                || warn "recreate-all finished with errors — see above."
+  exit "$rc"
+fi
+
 # --- global `build` (no profile needed) --------------------------------------
 if [[ "${1:-}" == "build" ]]; then
   build_flags=()
+  recreate_running=0
   for a in "${@:2}"; do
     case "$a" in
       --no-cache|--pull) build_flags+=("$a") ;;
@@ -349,7 +379,9 @@ if [[ "${1:-}" == "build" ]]; then
       --claude-version=*)
         build_flags+=(--build-arg "CLAUDE_VERSION=${a#*=}" \
                       --build-arg "AI_CLI_REFRESH=$(date +%s)") ;;
-      *) fail "build: unknown flag '$a' (valid: --no-cache --pull --refresh-ai --claude-version=X.Y.Z)" ;;
+      # After building, force-recreate every running profile onto the new image.
+      --recreate-running) recreate_running=1 ;;
+      *) fail "build: unknown flag '$a' (valid: --no-cache --pull --refresh-ai --claude-version=X.Y.Z --recreate-running)" ;;
     esac
   done
   info "Building windows-ai-sandbox:latest${build_flags[*]:+ (${build_flags[*]})}"
@@ -357,6 +389,10 @@ if [[ "${1:-}" == "build" ]]; then
   PROFILE=_build docker compose build "${build_flags[@]+"${build_flags[@]}"}" ai-sandbox
   docker image prune -f
   docker builder prune -f --keep-storage=4g
+  if (( recreate_running == 1 )); then
+    info "Rolling running profiles onto the new image (--recreate-running)"
+    exec "$0" recreate-all
+  fi
   exit 0
 fi
 

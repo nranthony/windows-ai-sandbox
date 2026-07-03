@@ -72,6 +72,8 @@ scripts/profile.sh list                         # all profiles + up/down status
 scripts/profile.sh build                        # rebuild shared image (all profiles pick up)
 scripts/profile.sh build --refresh-ai           # fast: bump Claude Code + agy to latest (tail layer only)
 scripts/profile.sh build --claude-version=1.2.3 # pin Claude Code (implies --refresh-ai)
+scripts/profile.sh build --refresh-ai --recreate-running  # bump + roll all running profiles onto it
+scripts/profile.sh recreate-all                 # force-recreate every RUNNING profile onto current image
 scripts/profile.sh <profile> rebuild            # rebuild + recreate this profile
 scripts/profile.sh <profile> rebuild --refresh-ai  # rebuild (bumping AI CLIs) + recreate
 scripts/profile.sh <profile> rebuild --expose-dev  # also layer LAN port publishing

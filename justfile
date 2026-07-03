@@ -48,12 +48,16 @@ down profile:
 recreate profile *args:
     {{profile_sh}} {{profile}} recreate {{args}}
 
+# force-recreate EVERY running profile onto the current image (no profile arg). Use after `build`.
+recreate-all *args:
+    {{profile_sh}} recreate-all {{args}}
+
 # rebuild the image + recreate this profile's containers. Accepts --no-cache / --pull / --expose-dev.
 rebuild profile *args:
     {{profile_sh}} {{profile}} rebuild {{args}}
 
 # force-rebuild the shared image (no profile arg).
-# Accepts --no-cache / --pull / --refresh-ai / --claude-version=X.Y.Z.
+# Accepts --no-cache / --pull / --refresh-ai / --claude-version=X.Y.Z / --recreate-running.
 build *args:
     {{profile_sh}} build {{args}}
 
