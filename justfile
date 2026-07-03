@@ -52,7 +52,8 @@ recreate profile *args:
 rebuild profile *args:
     {{profile_sh}} {{profile}} rebuild {{args}}
 
-# force-rebuild the shared image (no profile arg). Accepts --no-cache / --pull.
+# force-rebuild the shared image (no profile arg).
+# Accepts --no-cache / --pull / --refresh-ai / --claude-version=X.Y.Z.
 build *args:
     {{profile_sh}} build {{args}}
 

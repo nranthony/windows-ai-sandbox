@@ -74,32 +74,18 @@ RUN apt-get update \
  && apt-get clean \
  && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
-# ---------- Node.js 24 + Claude Code ----------------------------------------
-# (Antigravity CLI `agy` is installed separately below — it's a native binary,
-#  not an npm package.)
+# ---------- Node.js 24 + global npm tooling ---------------------------------
+# The AI CLIs (Claude Code + Antigravity `agy`) are installed LAST, in the
+# refresh layer near the end of this file — so bumping them rebuilds only that
+# tail, not this heavy Node/CUDA/uv/font stack. See "AI CLI refresh layer".
 # Upgrade bundled npm first — NodeSource ships an older npm whose vendored
 # deps (tar, cross-spawn, glob, minimatch) accumulate CVEs between publishes.
-# Pulling npm@latest before global installs means claude-code gets extracted
-# by the newer tar, too.
 RUN curl -fsSL https://deb.nodesource.com/setup_24.x | bash - \
  && apt-get install -y --no-install-recommends nodejs \
  && npm install -g npm@latest \
- && npm install -g @anthropic-ai/claude-code mongosh@latest pnpm@10 \
+ && npm install -g mongosh@latest pnpm@10 \
  && apt-get clean \
  && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
-
-# ---------- Antigravity CLI (agy) — replaces the former Gemini CLI -----------
-# Google's `agy` agentic CLI. Installed to /usr/local/bin via --dir, NOT the
-# installer's default ~/.local/bin (that's a noexec + ephemeral tmpfs at runtime
-# here — see docker-compose.yml — so a binary there can't run or survive a
-# recreate). The installer sha512-verifies the payload against its signed
-# manifest. This build step runs on the host network, bypassing Squid; the
-# RUNTIME auth/API hosts are gated in proxy/allowed_domains.txt under
-# [antigravity]. Sign in interactively at the container console
-# (`scripts/profile.sh <p> auth-antigravity`, or just `agy`) — the auth token is
-# NOT persisted across rebuilds; config lives under /root/.gemini/antigravity-cli/.
-RUN curl -fsSL https://antigravity.google/cli/install.sh | bash -s -- --dir /usr/local/bin \
- && /usr/local/bin/agy --version
 
 # ---------- uv (Python package manager) --------------------------------------
 # Install system-wide so PATH ordering is irrelevant. INSTALLER_NO_MODIFY_PATH=1
@@ -237,6 +223,31 @@ RUN set -eux; \
     rm /tmp/gsd.tar.gz; \
     chmod +x "$GS_DIR/usrbin/$file"; \
     test -x "$GS_DIR/usrbin/$file"
+
+# ---------- AI CLI refresh layer (Claude Code + Antigravity agy) -------------
+# Deliberately the LAST build step so bumping either CLI rebuilds only this tail
+# layer, not the Node/CUDA/uv/font/oh-my-zsh layers above. Routine version bumps
+# go from a multi-minute rebuild to a seconds-long tail rebuild:
+#   scripts/profile.sh build --refresh-ai                 # latest of BOTH CLIs
+#   scripts/profile.sh build --claude-version=1.2.3       # pin claude (implies refresh)
+# AI_CLI_REFRESH is a cache-buster token — the build flags above pass a fresh
+# value so this RUN re-executes and pulls upstream. Untouched, it stays cached.
+#
+# claude: npm global. mongosh/pnpm stay in the Node layer above (rarely bumped).
+# agy: native binary to /usr/local/bin via --dir, NOT the installer default
+# ~/.local/bin (that's a noexec + ephemeral tmpfs at runtime — see
+# docker-compose.yml — so a binary there can't run or survive a recreate). The
+# installer sha512-verifies the payload against its signed manifest. This step
+# runs on the host network, bypassing Squid; RUNTIME auth/API hosts are gated in
+# proxy/allowed_domains.txt under [antigravity]. agy auth is NOT persisted across
+# rebuilds — sign in at the container console (`scripts/profile.sh <p>
+# auth-antigravity`, or just `agy`); config lives under /root/.gemini/antigravity-cli/.
+ARG AI_CLI_REFRESH=0
+ARG CLAUDE_VERSION=latest
+RUN npm install -g "@anthropic-ai/claude-code@${CLAUDE_VERSION}" \
+ && curl -fsSL https://antigravity.google/cli/install.sh | bash -s -- --dir /usr/local/bin \
+ && claude --version \
+ && /usr/local/bin/agy --version
 
 # ---------- runtime layout ---------------------------------------------------
 # Expected bind mounts (see docker-compose.yml):

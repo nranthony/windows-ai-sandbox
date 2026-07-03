@@ -56,6 +56,12 @@
 #   --pull          pass --pull to `docker compose build`. Re-checks the base
 #                   image registry for a newer digest (no-op for the pinned
 #                   CUDA digest but future-proof).
+#   --refresh-ai    bump BOTH AI CLIs (Claude Code + Antigravity agy) to latest
+#                   by busting only the tail refresh layer — a fast, targeted
+#                   rebuild that leaves the heavy Node/CUDA/uv/font layers cached.
+#   --claude-version=X.Y.Z
+#                   pin Claude Code to a specific npm version (implies
+#                   --refresh-ai; agy still refreshes to latest).
 # =============================================================================
 set -euo pipefail
 
@@ -286,6 +292,13 @@ parse_flags() {
     case "$a" in
       --expose-dev) expose=1 ;;
       --no-cache|--pull) BUILD_FLAGS+=("$a") ;;
+      # AI-CLI refresh (see the standalone `build` handler for rationale). Only
+      # meaningful for rebuild; up/recreate reject any BUILD_FLAGS below.
+      --refresh-ai)
+        BUILD_FLAGS+=(--build-arg "AI_CLI_REFRESH=$(date +%s)") ;;
+      --claude-version=*)
+        BUILD_FLAGS+=(--build-arg "CLAUDE_VERSION=${a#*=}" \
+                      --build-arg "AI_CLI_REFRESH=$(date +%s)") ;;
       *) remaining+=("$a") ;;
     esac
   done
@@ -327,7 +340,16 @@ if [[ "${1:-}" == "build" ]]; then
   for a in "${@:2}"; do
     case "$a" in
       --no-cache|--pull) build_flags+=("$a") ;;
-      *) fail "build: unknown flag '$a' (valid: --no-cache --pull)" ;;
+      # Bust ONLY the AI-CLI refresh layer (Claude Code + agy) so a version bump
+      # rebuilds just the tail, not the whole image. A changing token forces the
+      # ARG AI_CLI_REFRESH RUN to re-execute and pull upstream.
+      --refresh-ai)
+        build_flags+=(--build-arg "AI_CLI_REFRESH=$(date +%s)") ;;
+      # Pin Claude Code to a specific npm version (implies --refresh-ai).
+      --claude-version=*)
+        build_flags+=(--build-arg "CLAUDE_VERSION=${a#*=}" \
+                      --build-arg "AI_CLI_REFRESH=$(date +%s)") ;;
+      *) fail "build: unknown flag '$a' (valid: --no-cache --pull --refresh-ai --claude-version=X.Y.Z)" ;;
     esac
   done
   info "Building windows-ai-sandbox:latest${build_flags[*]:+ (${build_flags[*]})}"
