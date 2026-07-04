@@ -1,0 +1,19 @@
+# =============================================================================
+# WSL2 GPU overlay — layered on docker-compose.yml by profile.sh when the host
+# is WSL2 with GPU paravirtualization (auto-detected via /dev/dxg; override
+# with SANDBOX_GPU=0|1). Bare-Linux hosts never load this file — /dev/dxg does
+# not exist there and `devices:` on a missing node is a hard compose failure.
+#
+# GPU passthrough is WSL2-native /dev/dxg + the Windows-driver userland at
+# /usr/lib/wsl, NOT `--gpus all` (broken under rootless + NVIDIA Container
+# Toolkit >=1.18 — see docs/index.md "GPU & Docker").
+# =============================================================================
+
+services:
+  ai-sandbox:
+    devices:
+      - /dev/dxg
+    volumes:
+      - /usr/lib/wsl:/usr/lib/wsl:ro
+    environment:
+      - LD_LIBRARY_PATH=/usr/lib/wsl/lib

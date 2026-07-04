@@ -25,9 +25,10 @@ services:
     container_name: ai-sandbox-${PROFILE:?PROFILE env var required — use scripts/profile.sh}
     hostname: ai-sandbox-${PROFILE}
 
-    # GPU passthrough — WSL2-native /dev/dxg, not --gpus all (broken under rootless + toolkit >=1.18).
-    devices:
-      - /dev/dxg
+    # GPU passthrough lives in docker-compose.wsl-gpu.yml — an overlay that
+    # profile.sh layers on automatically when the host is WSL2 with a GPU
+    # (/dev/dxg present; override with SANDBOX_GPU=0|1). This base file must
+    # come up cleanly on bare-Linux hosts with no GPU.
 
     # Hardening — non-negotiable per audit §4.
     security_opt:
@@ -56,9 +57,6 @@ services:
       # The profile's repo parent folder = /workspace. Holds many repos.
       - ${HOME}/repo/${PROFILE}:/workspace:rw
 
-      # WSL2 driver libs (paired with LD_LIBRARY_PATH below).
-      - /usr/lib/wsl:/usr/lib/wsl:ro
-
       # Per-profile persistent state (auth, config, caches) — outlives recreates.
       - ${HOME}/.ai-sandbox/profiles/${PROFILE}/claude-home:/root/.claude:rw
       - ${HOME}/.ai-sandbox/profiles/${PROFILE}/claude.json:/root/.claude.json:rw
@@ -74,7 +72,6 @@ services:
       - ${HOME}/.ai-sandbox/profiles/${PROFILE}/gemini-home:/root/.gemini:rw
 
     environment:
-      - LD_LIBRARY_PATH=/usr/lib/wsl/lib
       - GIT_CONFIG_GLOBAL=/root/.config/git/config
       - SANDBOX_PROFILE=${PROFILE}
       # All outbound HTTP(S) is forced through the Squid sidecar.

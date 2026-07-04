@@ -1,7 +1,9 @@
 # Multi-Substrate Portability — Assessment & Plan
 
 > **Status:** DRAFT for review (Cousin + other agents). Author: Claude (assessment only — no code changed).
-> **Date:** 2026-06-30.
+> **Date:** 2026-06-30. **ADDENDUM 2026-07-04** (bottom of file): validated on a live bare-Ubuntu
+> host; found a 4th coupling site (`run-ephemeral.sh`); concrete overlay + auto-detect design;
+> sequencing vs. the `agent_repo_conventions_advice.md` migration.
 > **Scope:** Can this sandbox stand up cleanly on substrates *other* than "WSL2 + rootless Docker + NVIDIA"?
 > Specifically: (1) **rootless Docker on bare Ubuntu Linux, no NVIDIA**; (2) **standard (rootful) Docker with equivalent security** (closer to a cloud / Linux-workstation deployment).
 > **Decision owner:** repo maintainer (will cross-check + implement later). This doc is the design artifact to argue against before code is touched.
@@ -117,3 +119,94 @@ Rootful-Docker-with-bolt-ons is the *most expensive* way to get back what rootle
 - Actually implementing any of the above (maintainer will cross-check + implement).
 - Windows-side provisioning gaps (covered in the prior from-scratch review).
 - macolima parity — the sibling repo is a separate cross-check; do not blind-copy (see `docs/sibling-repo-relationship.md`).
+
+---
+
+# ADDENDUM (2026-07-04) — Validated on a live bare-Ubuntu host + concrete implementation design
+
+> Scenario 1 is no longer hypothetical: this repo is now checked out on a **bare Ubuntu 24.04.4
+> host** (kernel `6.17.0-35-generic`, `WSL_DISTRO_NAME` unset, no `/dev/dxg`, no `/usr/lib/wsl`,
+> no `nvidia-smi`) with **rootless Docker already installed and running** (`name=rootless` in
+> `docker info`, socket at `/run/user/1000/docker.sock`). `host_setup/` does not need to run here.
+> Everything below was verified against the actual files on 2026-07-04.
+
+## A1. Validation results — §1 evidence table confirmed, one gap found
+
+- The compose coupling is exactly as stated: `devices: - /dev/dxg` (`docker-compose.yml:30`,
+  the sole hard blocker), `/usr/lib/wsl` mount (`:60`), `LD_LIBRARY_PATH=/usr/lib/wsl/lib` (`:77`).
+- `verify-sandbox.sh:129-130` GPU checks are warn-only as stated; the `uid_map == "0 1000 1"`
+  assert passes unchanged on this host's rootless daemon.
+- **GAP (missed by §1):** `scripts/run-ephemeral.sh` is a fourth coupling site — it hard-codes
+  `--device /dev/dxg` (`:66`), `-e LD_LIBRARY_PATH=/usr/lib/wsl/lib` (`:67`), and
+  `-v /usr/lib/wsl:/usr/lib/wsl:ro` (`:76`) in its raw `docker run`. `--device` on a missing
+  node is a hard fail, so fixing compose alone still leaves ephemeral containers broken.
+
+## A2. Implementation design (resolves open questions §5.1, §5.2)
+
+**Mechanism: compose overlay + auto-detect, riding existing plumbing.** `profile.sh` already has
+a `COMPOSE_FILE_ARGS` array with an overlay precedent (`--expose-dev` →
+`docker-compose.<profile>.expose-dev.yml`, see `profile.sh:315`, applied at `up`/`recreate`/
+`rebuild`/`db-reset`). So:
+
+1. Move the three GPU lines out of `docker-compose.yml` into a new `docker-compose.wsl-gpu.yml`
+   overlay (service `ai-sandbox`: `devices`, the `/usr/lib/wsl` volume, `LD_LIBRARY_PATH`).
+2. In `profile.sh`, auto-detect and append: `[[ -e /dev/dxg ]]` → add
+   `-f docker-compose.wsl-gpu.yml` to `COMPOSE_FILE_ARGS`. `/dev/dxg` is a precise signal —
+   that node exists only under WSL2 with GPU paravirtualization; no false positives on bare
+   Linux. Provide `SANDBOX_GPU=0|1` as an explicit override in both directions.
+3. Same guard in `run-ephemeral.sh` around its three hard-coded lines (build the
+   device/env/volume args conditionally into the `docker run` argv).
+4. `host_setup/setup-rootless-docker-wsl.sh`: gate the NVIDIA container-toolkit install +
+   `nvidia-ctk` config (~15 lines) behind the same detection (the D-Bus block already
+   self-guards on `$WSL_DISTRO_NAME`).
+5. `verify-sandbox.sh`: report dxg/wsl checks as **"N/A (non-WSL host)"** instead of `warn`
+   when off-WSL, and add the §4 recommendation: **hard-fail on uid_map `0 0`** so rootful
+   Docker can never silently pass the rest of the suite. (Answers §5.4: hard-fail.)
+6. **Decision on §5.2 (second base image): NO for now.** Keep the CUDA base everywhere —
+   it runs fine without a GPU, and one shared image preserves the "one image, many profiles"
+   model. Costs disk + CVE surface only; revisit if image size becomes a problem.
+
+Effort: a few hours. No security-model change; the WSL machine detects `/dev/dxg` and behaves
+exactly as today. Update `justfile` comments + `CLAUDE.md` GPU notes as part of the same change.
+
+## A3. Interaction with the agent-repo-conventions migration (`agent_repo_conventions_advice.md`)
+
+The AGENTS.md/skills restructuring (root advice doc, peer-reviewed 2026-06) is planned but not
+started (no `AGENTS.md`, no `.agents/`, CLAUDE.md still monolithic). The two work streams
+interact; sequence and adjust as follows:
+
+1. **Land portability FIRST, then the conventions migration.**
+   - The conventions' own "Verification Protocol" mandates `profile.sh <p> verify` + `audit`
+     after any security-sensitive change — which cannot run on this host until `up` works,
+     i.e. until portability lands. Portability is hours; conventions is a multi-file
+     restructuring.
+   - Conventions migration step 6 (`config/` → `sandbox_templates/`) rewrites paths inside
+     `profile.sh` / `init-profile-state.sh` — the same files portability touches. Serializing
+     avoids conflicting edits and keeps each diff reviewable under the sensitive-files protocol.
+2. **Write the new agent docs substrate-neutral from day one.** The advice's drafts are
+   WSL-flavored ("WSL2 host", "host WSL2 rootless Docker daemon" in `dashboard/AGENTS.md`,
+   "WSL2 virtual machine boundary" in ARCHITECTURE.md). Since bare Ubuntu is now a first-class
+   substrate, AGENTS.md/ARCHITECTURE.md should present **two arms** (WSL2+GPU / bare-Linux
+   rootless, auto-detected via `/dev/dxg`) rather than a WSL-shaped happy path. This absorbs
+   §4 recommendations #5 (`deployment-substrates.md`) and #6 (substrate-branched NEW-DEVICE
+   checklist) into the conventions deliverables instead of standalone docs — write them once,
+   in the new structure.
+3. **Extend the AGENTS.md "Security-Sensitive Files" list** with the artifacts portability
+   introduces/reveals: `docker-compose.wsl-gpu.yml` (an overlay edit can reintroduce devices/
+   mounts without touching the base compose) and `scripts/run-ephemeral.sh` (raw `docker run`
+   — it must mirror compose hardening by hand).
+4. **`container_testing/AGENTS.md` draft needs a no-GPU caveat:** on bare-Ubuntu-no-GPU hosts,
+   `torch.cuda.is_available()` → `False` is the *expected* result, not a failure.
+5. **CLAUDE.md → AGENTS.md move is a chance to fix staleness:** the current file-structure
+   section omits `dashboard/`, and the GPU "Important Notes" ("NOT `--gpus all`", `/dev/dxg`
+   passthrough) must be rewritten as WSL-arm-conditional. The repo name `windows-ai-sandbox`
+   becomes a partial misnomer — note it in ARCHITECTURE.md; renaming is out of scope.
+6. **Housekeeping tie-in:** `REPO-SCAN_in-transit_audit-and-housekeeping.md` quick-win #3
+   flags root-level doc sprawl; once AGENTS.md exists, `agent_repo_conventions_advice.md` is
+   superseded and should move to `docs/_archive/`.
+
+## A4. Still-open items (carried from §5)
+
+- §5.3 Podman-rootless as first-class target — unchanged, undecided.
+- §5.5 headless auth path (`claude login` device-code flow on non-desktop hosts) — unchanged;
+  not blocking this host (has a browser).
