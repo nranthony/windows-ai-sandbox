@@ -22,7 +22,7 @@ it; two need manual action from **Windows**.
 | `win_setup/.wslconfig` | `memory=48GB`, `swap=16GB` (VM was defaulting to 32GB = 50% of host) |
 | `docker-compose.yml` | `pids_limit: 512→4096`, `mem_limit: 8g→20g`, `memswap_limit: 8g→20g` |
 | `sandbox_templates/common/.zshrc` | `export GITSTATUS_NUM_THREADS=4` |
-| `CLAUDE.md` | Resources row updated to match |
+| `ARCHITECTURE.md` | Resources row updated to match |
 
 ---
 
@@ -103,7 +103,7 @@ Optimize-VHD -Path "<path-to-distro>\ext4.vhdx" -Mode Full
 The repo lives inside the WSL filesystem and is gone after an unregister. After
 reinstalling the distro:
 1. Restore `~/repo/sandbox/windows-ai-sandbox` from git / your backup.
-2. Re-run `host_setup/` (rootless Docker, `wsl_conf_update.sh`) per `CLAUDE.md`.
+2. Re-run `host_setup/` (rootless Docker, `wsl_conf_update.sh`) per `AGENTS.md` / host_setup guides.
 3. Then follow STEP A → B → C above.
 Keep a copy of this file on `C:\` so it survives.
 

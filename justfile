@@ -1,6 +1,6 @@
 # justfile — discoverable front door over scripts/profile.sh + scripts/setup.sh
 # =============================================================================
-# CONVENIENCE LAYER ONLY. The bash scripts remain canonical (see CLAUDE.md).
+# CONVENIENCE LAYER ONLY. The bash scripts remain canonical (see AGENTS.md).
 # Every recipe is a thin pass-through — it must NOT call `docker compose`
 # directly. profile.sh/setup.sh export COMPOSE_PROJECT_NAME and PROFILE before
 # invoking compose, and the compose file's `${PROFILE:?...}` guard fails fast

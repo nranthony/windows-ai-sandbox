@@ -2,7 +2,9 @@
 
 ## Architecture & Security
 
-- [CLAUDE.md](../CLAUDE.md) — primary reference for architecture, file layout, security posture, and all common tasks
+- [AGENTS.md](../AGENTS.md) — agent conventions: golden rules, security-sensitive files, verification protocol (CLAUDE.md is a generated pointer to it)
+- [ARCHITECTURE.md](../ARCHITECTURE.md) — system map: substrates, network model, state layout, security posture, repo map
+- [.agents/skills/](../.agents/skills/) — operational guides: profile lifecycle, audit tiers, squid allowlist
 - [Sandbox design notes](sandbox-design-notes.md) — why rootfs is rw, bwrap is disabled, container runs as root, git config is denied
 - [Permissions model](permissions-model.md) — deny/allow posture, two-phase workflow, WebFetch exfil risk, hook self-protection
 - [VS Code integration security](vscode-integration-security.md) — SSH agent forwarding, gitconfig leaks, credential helper injection, orphaned root shells
@@ -33,7 +35,7 @@
 
 ## GPU & Docker
 
-- [CLAUDE.md](../CLAUDE.md#important-notes) (Important Notes) — NVIDIA Container Toolkit 1.18+ breakage on rootless Docker; why we pin 1.17.8-1
+- [ARCHITECTURE.md](../ARCHITECTURE.md) (Substrate-specific notes) — NVIDIA Container Toolkit 1.18+ breakage on rootless Docker; why we pin 1.17.8-1; wsl-gpu overlay
 - [sandbox-design-notes.md](sandbox-design-notes.md) — why container runs as root under rootless Docker (UID 0 = host UID 1000)
 - [docker-bench-security-report.md](../reports/docker-bench-security-report.md) — Docker Bench for Security v1.6.0 results
 
@@ -72,3 +74,4 @@ Superseded or exploratory documents in [`_archive/`](_archive/):
 - [PODMAN_MIGRATION_PLAN_critique.md](_archive/PODMAN_MIGRATION_PLAN_critique.md) — analysis of why migration isn't worth it now (security delta ~0.5/10, WSL2 GPU blocker, idmapped mounts as future alternative)
 - [gpt_suggestions_todo.md](_archive/gpt_suggestions_todo.md) — early-stage suggestions list
 - [claude_internal_audit_wsl.md](_archive/claude_internal_audit_wsl.md) — manual audit prompt, superseded by tier-2 probes + tier-3 skill
+- [agent_repo_conventions_advice.md](_archive/agent_repo_conventions_advice.md) — agent-native repo conventions proposal, implemented 2026-07-04 (AGENTS.md, .agents/skills/, sandbox_templates/)

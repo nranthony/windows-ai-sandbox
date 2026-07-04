@@ -5,7 +5,7 @@ Stdlib only. Self-targeted reads of /proc and a single `find` for SUID.
 windows-ai-sandbox: container runs as ROOT (UID 0) under rootless Docker
 userns=host. Container UID 0 maps to host UID 1000 via the userns map, so
 in-container `id` returns 0 but the host kernel sees an unprivileged user.
-This is the documented invariant — see CLAUDE.md."""
+This is the documented invariant — see ARCHITECTURE.md (Security posture)."""
 import os
 import stat
 import subprocess

@@ -11,7 +11,7 @@ adaptations.
 |---|---|---|---|
 | 1 | `scripts/verify-sandbox.sh` | every `up` | ~3s, exit code |
 | 2 | `scripts/audit/audit.sh` (this dir) | on demand | ~10s, JSON |
-| 3 | agent reads JSON + CLAUDE.md, writes report.md | on demand | ~5k tokens |
+| 3 | agent reads JSON + staged AGENTS.md/ARCHITECTURE.md, writes report.md | on demand | ~5k tokens |
 
 Tier 1 is the fast tripwire — minimum viable invariants, breaks on the
 common drift patterns. Tier 2 is the comprehensive structured probe.
@@ -71,7 +71,7 @@ Each probe's `run()` returns a list of finding dicts:
 | Verdict | Meaning | What the agent does |
 |---|---|---|
 | `OK` | invariant holds | summarize, don't enumerate |
-| `DRIFT` | documented invariant doesn't hold | cross-reference CLAUDE.md, decide real vs. tripwire bug, propose minimum-diff fix |
+| `DRIFT` | documented invariant doesn't hold | cross-reference the staged AGENTS.md/ARCHITECTURE.md, decide real vs. tripwire bug, propose minimum-diff fix |
 | `WEAK` | known weak spot | reference upstream TODO; not new drift |
 | `UNKNOWN` | probe couldn't disambiguate | follow up with one targeted /tmp probe |
 | `N/A` | optional component absent (e.g. DB sibling not running) | note, don't elevate |
