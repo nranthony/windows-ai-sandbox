@@ -46,6 +46,26 @@ docker network inspect "$NETWORK" >/dev/null 2>&1 \
   || { echo "Network $NETWORK missing — bring the stack up first:
   scripts/profile.sh $PROFILE up" >&2; exit 1; }
 
+# GPU passthrough — same substrate detection as profile.sh add_gpu_overlay
+# (compose side: docker-compose.wsl-gpu.yml). /dev/dxg exists only on WSL2
+# with GPU paravirtualization; --device on a missing node is a hard docker
+# failure, so bare-Linux hosts must skip these args. SANDBOX_GPU=0|1 overrides.
+GPU_ARGS=()
+gpu_on=0
+case "${SANDBOX_GPU:-auto}" in
+  0|false|no)  ;;
+  1|true|yes)  gpu_on=1 ;;
+  auto)        [[ -e /dev/dxg ]] && gpu_on=1 ;;
+  *) echo "SANDBOX_GPU='${SANDBOX_GPU}' invalid (use 0, 1, or auto)" >&2; exit 1 ;;
+esac
+if (( gpu_on )); then
+  GPU_ARGS+=(
+    --device /dev/dxg
+    -e LD_LIBRARY_PATH=/usr/lib/wsl/lib
+    -v /usr/lib/wsl:/usr/lib/wsl:ro
+  )
+fi
+
 # Container runs as root (UID 0) under rootless Docker userns=host —
 # matches docker-compose.yml. tmpfs default ownership is root:root, no
 # explicit uid= needed (vs macolima which has agent UID 1000).
@@ -63,8 +83,7 @@ docker run --rm -it \
   --memory 8g --memory-swap 8g \
   --cpus 4 \
   --network "$NETWORK" \
-  --device /dev/dxg \
-  -e LD_LIBRARY_PATH=/usr/lib/wsl/lib \
+  "${GPU_ARGS[@]+"${GPU_ARGS[@]}"}" \
   -e HTTP_PROXY=http://egress-proxy:3128 \
   -e HTTPS_PROXY=http://egress-proxy:3128 \
   -e http_proxy=http://egress-proxy:3128 \
@@ -73,7 +92,6 @@ docker run --rm -it \
   -e GIT_CONFIG_GLOBAL=/root/.config/git/config \
   -e SANDBOX_PROFILE="$PROFILE" \
   -v "$REPO_PATH":/workspace:rw \
-  -v /usr/lib/wsl:/usr/lib/wsl:ro \
   -v "$STATE/claude-home":/root/.claude:rw \
   -v "$STATE/claude.json":/root/.claude.json:rw \
   -v "$STATE/cache":/root/.cache:rw \
