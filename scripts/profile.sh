@@ -310,10 +310,13 @@ add_overlay() {
 # Bare-Linux hosts skip the overlay and the same compose base comes up
 # GPU-less. Override auto-detection with SANDBOX_GPU=1 (force) or 0 (suppress).
 add_gpu_overlay() {
+  # NOTE: explicit `return 0` — a bare `return` propagates the failed [[ ]]
+  # test's status 1, and this function is called as a top-level statement
+  # under `set -e`, which would abort every command on GPU-less hosts.
   case "${SANDBOX_GPU:-auto}" in
-    0|false|no)  return ;;
+    0|false|no)  return 0 ;;
     1|true|yes)  ;;
-    auto)        [[ -e /dev/dxg ]] || return ;;
+    auto)        [[ -e /dev/dxg ]] || return 0 ;;
     *) fail "SANDBOX_GPU='${SANDBOX_GPU}' invalid (use 0, 1, or auto)" ;;
   esac
   add_overlay "docker-compose.wsl-gpu.yml"
