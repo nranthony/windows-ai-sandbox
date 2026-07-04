@@ -1,9 +1,12 @@
 # Multi-Substrate Portability — Assessment & Plan
 
-> **Status:** DRAFT for review (Cousin + other agents). Author: Claude (assessment only — no code changed).
-> **Date:** 2026-06-30. **ADDENDUM 2026-07-04** (bottom of file): validated on a live bare-Ubuntu
-> host; found a 4th coupling site (`run-ephemeral.sh`); concrete overlay + auto-detect design;
-> sequencing vs. the `agent_repo_conventions_advice.md` migration.
+> **Status:** IMPLEMENTED 2026-07-04 (branch `portability-and-agent-conventions`) — §A2 design
+> landed as written: `docker-compose.wsl-gpu.yml` overlay + `/dev/dxg` auto-detect (`SANDBOX_GPU`
+> override) in `profile.sh`/`run-ephemeral.sh`, NVIDIA gating in host setup, substrate-aware
+> verifier (uid_map `0 0` hard-fails; GPU checks N/A off-WSL). §A3 conventions migration also
+> landed (AGENTS.md / ARCHITECTURE.md / .agents/skills/ / sandbox_templates/). Kept for the
+> rootful analysis (§3) and still-open items (§A4).
+> Original: DRAFT 2026-06-30, assessment only. **ADDENDUM 2026-07-04** at bottom of file.
 > **Scope:** Can this sandbox stand up cleanly on substrates *other* than "WSL2 + rootless Docker + NVIDIA"?
 > Specifically: (1) **rootless Docker on bare Ubuntu Linux, no NVIDIA**; (2) **standard (rootful) Docker with equivalent security** (closer to a cloud / Linux-workstation deployment).
 > **Decision owner:** repo maintainer (will cross-check + implement later). This doc is the design artifact to argue against before code is touched.

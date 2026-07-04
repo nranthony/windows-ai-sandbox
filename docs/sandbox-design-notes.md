@@ -1,6 +1,6 @@
 # Sandbox design notes
 
-Background on architectural choices that look surprising in the code but exist for a specific reason. Editing-time invariants live in `CLAUDE.md`; this is the "why."
+Background on architectural choices that look surprising in the code but exist for a specific reason. Editing-time invariants live in `AGENTS.md` / `ARCHITECTURE.md`; this is the "why."
 
 ## Container runs as root — by design
 

@@ -1,6 +1,6 @@
 # Debug recipes
 
-Routine commands for operating a profile. Non-obvious gotchas live in `../CLAUDE.md`.
+Routine commands for operating a profile. Non-obvious gotchas live in `../AGENTS.md` and `../ARCHITECTURE.md`.
 
 ```bash
 # Force recreate (covers compose/seccomp/mount changes)

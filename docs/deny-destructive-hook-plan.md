@@ -1,7 +1,7 @@
 # `deny-destructive` PreToolUse hook
 
 Ported from macolima. Source-of-truth for current invariants is
-`../CLAUDE.md` → "Security Posture" / Permissions row. This file is the
+`../ARCHITECTURE.md` → "Security posture" / Agent tools row. This file is the
 design-and-maintenance record for the `PreToolUse` hook that closes a class
 of deny-list bypasses the prefix matcher cannot see.
 
@@ -52,7 +52,7 @@ Consequences:
   Image rebuild restores the canonical hook on every up — drift is
   ephemeral.
 
-This is the same trade the rest of this repo accepts (see CLAUDE.md note
+This is the same trade the rest of this repo accepts (see ARCHITECTURE.md note
 on why we don't flip to non-root inside the container under `userns=host`
 — it would break workspace bind-mount writes via subuid remapping).
 

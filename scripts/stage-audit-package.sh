@@ -40,9 +40,13 @@ fi
 rm -rf "$dest"
 mkdir -p "$dest/proxy" "$dest/scripts" "$dest/config" "$dest/skills/audit-sandbox"
 
-cp "$SANDBOX_DIR/CLAUDE.md"                       "$dest/CLAUDE.md"
+# AGENTS.md + ARCHITECTURE.md replaced the old monolithic CLAUDE.md (which is
+# now a generated pointer) — the tier-3 skill cross-references these two.
+cp "$SANDBOX_DIR/AGENTS.md"                       "$dest/AGENTS.md"
+cp "$SANDBOX_DIR/ARCHITECTURE.md"                 "$dest/ARCHITECTURE.md"
 cp "$SANDBOX_DIR/Dockerfile"                      "$dest/Dockerfile"
 cp "$SANDBOX_DIR/docker-compose.yml"              "$dest/docker-compose.yml"
+cp "$SANDBOX_DIR/docker-compose.wsl-gpu.yml"      "$dest/docker-compose.wsl-gpu.yml"
 cp "$SANDBOX_DIR/seccomp.json"                    "$dest/seccomp.json"
 cp "$SANDBOX_DIR/proxy/allowed_domains.txt"       "$dest/proxy/allowed_domains.txt"
 cp "$SANDBOX_DIR/proxy/squid.conf"                "$dest/proxy/squid.conf"

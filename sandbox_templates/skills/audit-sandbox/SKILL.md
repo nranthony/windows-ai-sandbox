@@ -1,6 +1,6 @@
 ---
 name: audit-sandbox
-description: Judgment layer over a pre-run sandbox audit. Reads the tier-2 JSON (produced host-side by `profile.sh <p> audit`), cross-references findings against the staged CLAUDE.md, and writes a markdown report under ~/.claude/audits/. Use when the user asks to "audit the sandbox", "review audit results", "check sandbox isolation", or after a known config change.
+description: Judgment layer over a pre-run sandbox audit. Reads the tier-2 JSON (produced host-side by `profile.sh <p> audit`), cross-references findings against the staged AGENTS.md + ARCHITECTURE.md, and writes a markdown report under ~/.claude/audits/. Use when the user asks to "audit the sandbox", "review audit results", "check sandbox isolation", or after a known config change.
 ---
 
 # audit-sandbox — tier-3 judgment over structured audit JSON
@@ -12,7 +12,7 @@ You are the judgment layer in a three-tier audit system:
 - **Tier 2** — `audit.sh` + Python probes: ~80 deterministic checks, emits one
   JSON document. Run host-side by `profile.sh <p> audit`, which saves the JSON
   to `/root/.claude/audits/<stamp>-<profile>-audit.json`.
-- **Tier 3** (you) — read the JSON, cross-reference CLAUDE.md, distinguish real
+- **Tier 3** (you) — read the JSON, cross-reference the staged AGENTS.md/ARCHITECTURE.md, distinguish real
   drift from tripwire artifacts, write a report with minimum-diff fixes.
 
 Both tier 1 and tier 2 are run from the **host** before you are invoked. You do
@@ -21,7 +21,7 @@ not run them. Your job is judgment over the results.
 ## Steps
 
 1. **Prerequisite check.** Confirm both of these exist:
-   - `/workspace/temp_audit_package/CLAUDE.md` — the staged sandbox config
+   - `/workspace/temp_audit_package/AGENTS.md` (+ `ARCHITECTURE.md` beside it) — the staged sandbox config
      snapshot. This is the authoritative reference for invariants.
    - At least one JSON file matching `/root/.claude/audits/*-audit.json`.
 
@@ -40,8 +40,8 @@ not run them. Your job is judgment over the results.
 3. **Find the latest audit JSON.** List `/root/.claude/audits/*-audit.json`,
    pick the most recent by filename timestamp. Read it.
 
-4. **Read the staged CLAUDE.md.** Focus on "Security Posture", "Important
-   Notes", and any section relevant to DRIFT/UNKNOWN findings in the JSON.
+4. **Read the staged ARCHITECTURE.md** ("Security posture", "Substrate-specific
+   notes") **and AGENTS.md** (security-sensitive files), plus any section relevant to DRIFT/UNKNOWN findings.
    The staged copy is the snapshot the probes ran against.
 
 5. **Write the report.** Save to:
@@ -54,7 +54,7 @@ not run them. Your job is judgment over the results.
      seccomp_runtime, fs, network, proxy, settings, env).
    - For OK sections: one-line summary, don't enumerate individual findings.
    - For every non-OK finding: render judgment — is this real drift, a
-     tripwire artifact, or a known weak spot? Cross-reference CLAUDE.md.
+     tripwire artifact, or a known weak spot? Cross-reference AGENTS.md/ARCHITECTURE.md.
    - End with a "Recommended hardening" section: tight, specific diffs
      (file path + minimum change) for any real drift. If no real drift,
      say so.
