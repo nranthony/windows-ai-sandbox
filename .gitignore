@@ -8,6 +8,11 @@ data/
 **.pyc
 **/**.pyc
 
+# Agent-native local configurations (per-machine overrides, never committed)
+AGENTS.local.md
+**/AGENTS.local.md
+.claude/settings.local.json
+
 # OS generated files
 .DS_Store
 .DS_Store?
