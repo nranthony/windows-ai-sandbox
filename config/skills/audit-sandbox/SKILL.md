@@ -96,4 +96,7 @@ as acknowledged, not as action items:
 - **`identity.uid` / `identity.gid` → 0**: this is correct. uid_map line 1
   must read `0 1000 1` (container UID 0 = host UID 1000). If it reads
   anything else, THAT is drift.
-- **`fs.dev_inventory` includes `/dev/dxg`**: expected (WSL2 GPU device).
+- **`fs.dev_inventory` includes `/dev/dxg`**: expected on WSL2 hosts (GPU
+  device, layered by the wsl-gpu compose overlay). On bare-Linux hosts
+  `/dev/dxg` is absent and `fs.wsl_driver_shim` reports `N/A` — both are
+  correct there, not drift.

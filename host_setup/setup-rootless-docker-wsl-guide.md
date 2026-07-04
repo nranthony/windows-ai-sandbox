@@ -30,9 +30,9 @@ The first `apt-get` block pulls in:
 | `curl` | Fetches GPG keys and remote scripts. |
 | Docker packages (`docker-ce`, `docker-ce-cli`, `containerd.io`, `docker-compose-plugin`) | Core containers runtime & CLI. |
 
-GPU users also add the **NVIDIA Container Toolkit** repository and package so that `--gpus all` is honoured from inside WSL.
+GPU hosts also add the **NVIDIA Container Toolkit** repository and package so that `--gpus all` is honoured from inside WSL.
 
-> **Tip for newcomers** – the NVIDIA toolkit is harmless on non‑GPU systems. You can skip it if you prefer, but re‑adding it later means re‑running parts of this script.
+> **Note** – the script auto-detects the GPU (`/dev/dxg` on WSL2, or `nvidia-smi` on bare Linux) and skips every NVIDIA step on hosts without one. Force either way with `SETUP_GPU=1` / `SETUP_GPU=0`.
 
 ---
 
