@@ -173,15 +173,20 @@ def run():
         })
 
     # /usr/lib/wsl — driver shim for CUDA passthrough (informational).
+    # Substrate-aware: the shim arrives via the wsl-gpu compose overlay, which
+    # profile.sh only layers when /dev/dxg exists. No dxg + no shim = bare-Linux
+    # arm, N/A. dxg without the shim = overlay drift, WEAK.
     wsl_lib = os.path.isdir("/usr/lib/wsl/lib")
+    has_dxg = os.path.exists("/dev/dxg")
     out.append({
         "section": "fs",
         "name": "wsl_driver_shim",
-        "verdict": "OK" if wsl_lib else "WEAK",
+        "verdict": "OK" if wsl_lib else ("WEAK" if has_dxg else "N/A"),
         "details": {
             "path": "/usr/lib/wsl/lib",
             "present": wsl_lib,
-            "rationale": "required for CUDA via /dev/dxg; absence breaks GPU but not security",
+            "dxg_present": has_dxg,
+            "rationale": "required for CUDA via /dev/dxg; absence breaks GPU but not security; N/A when the host has no /dev/dxg (bare Linux — wsl-gpu overlay not layered)",
         },
     })
 

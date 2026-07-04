@@ -37,7 +37,7 @@ Day-to-day: `scripts/profile.sh <profile> {up,down,attach,logs,status,exec,clean
 | Runtime hardening | `cap_drop: ALL`, `seccomp=./seccomp.json`, `no-new-privileges`, tmpfs noexec, `pids_limit:512`, `mem_limit:8g` |
 | Network | `sandbox-internal` (internal:true) + Squid sidecar on `sandbox-external`; allowlist is the only way out |
 | User | root-in-container (UID 0) — remaps to host UID 1000 under rootless Docker userns=host |
-| GPU | `/dev/dxg` + `/usr/lib/wsl` bind + `LD_LIBRARY_PATH=/usr/lib/wsl/lib` (WSL2-native, not `--gpus all`) |
+| GPU | WSL2 hosts only: `docker-compose.wsl-gpu.yml` overlay (`/dev/dxg` + `/usr/lib/wsl` bind + `LD_LIBRARY_PATH`, not `--gpus all`), auto-layered by `profile.sh` when `/dev/dxg` exists. Bare-Linux hosts come up GPU-less on the same base compose |
 | Persistent state | `~/.ai-sandbox/profiles/<profile>/` — outlives container recreates |
 
 **Not installed, by design** (see `sandbox-hardening-package.md` §7): `bubblewrap`, `socat`, `openssh-client`. These are the tools that would weaponize container escape or VS Code agent-forwarding leaks. See `scripts/verify-sandbox.sh` for the full tripwire.
