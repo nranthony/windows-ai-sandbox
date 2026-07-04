@@ -149,12 +149,9 @@ RUN apt-get update \
  && weasyprint --version \
  && pandoc --version
 
-# Reference stylesheet for legal/formal documents. Baked at a stable path so
-# any profile/project can use it without copying into each workspace:
-#   weasyprint --stylesheet /usr/local/share/pdf-styles/legal.css in.html out.pdf
-#   pandoc doc.md -o out.pdf --pdf-engine=weasyprint \
-#     --css /usr/local/share/pdf-styles/legal.css
-COPY sandbox_templates/common/pdf-styles/legal.css /usr/local/share/pdf-styles/legal.css
+# (The legal.css reference stylesheet is COPYed in the late-bound assets
+# section near the end of this file — nothing here consumes it, and keeping
+# it out of this layer chain lets stylesheet edits rebuild only the tail.)
 
 # ---------- GitHub CLI (gh) --------------------------------------------------
 RUN install -d -m 0755 /etc/apt/keyrings \
@@ -182,18 +179,10 @@ RUN ARCH="$(dpkg --print-architecture)" \
 
 # ---------- zsh + oh-my-zsh + powerlevel10k + plugins -----------------------
 # Dotfiles come in via `sandbox_templates/common/`. Fonts are a host-terminal concern, not baked.
+# .zshrc must be COPYed BEFORE the oh-my-zsh install below (--keep-zshrc reads
+# it); .p10k.zsh and the deny-destructive hook feed nothing in the clone layers,
+# so they live in the late-bound assets section near the end of the file.
 COPY sandbox_templates/common/.zshrc    /root/.zshrc
-COPY sandbox_templates/common/.p10k.zsh /root/.p10k.zsh
-
-# ---------- deny-destructive PreToolUse hook --------------------------------
-# Closes the deny-list bypass class where permissions.deny's prefix matcher
-# cannot see destructive flags (find -delete, dd of=) or path targets (Edit
-# to /usr/local/lib/claude-hooks/). See docs/deny-destructive-hook-plan.md.
-# Baked into the image so it survives container recreates; rebuild restores
-# the canonical script on every up. Not using COPY --chmod= to stay portable
-# across non-BuildKit builders.
-COPY sandbox_templates/claude/hooks/deny-destructive.sh /usr/local/lib/claude-hooks/deny-destructive.sh
-RUN chmod 0755 /usr/local/lib/claude-hooks/deny-destructive.sh
 
 ENV RUNZSH=no CHSH=no
 RUN sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --unattended --keep-zshrc \
@@ -223,6 +212,28 @@ RUN set -eux; \
     rm /tmp/gsd.tar.gz; \
     chmod +x "$GS_DIR/usrbin/$file"; \
     test -x "$GS_DIR/usrbin/$file"
+
+# ---------- late-bound assets (cache-friendly tail) --------------------------
+# Dependency-free files deliberately placed BELOW the oh-my-zsh/gitstatusd
+# layers: editing the prompt config, a stylesheet, or the hook re-runs only
+# this cheap tail (+ AI CLI layer), not the git clones and downloads above.
+COPY sandbox_templates/common/.p10k.zsh /root/.p10k.zsh
+
+# Reference stylesheet for legal/formal documents. Baked at a stable path so
+# any profile/project can use it without copying into each workspace:
+#   weasyprint --stylesheet /usr/local/share/pdf-styles/legal.css in.html out.pdf
+#   pandoc doc.md -o out.pdf --pdf-engine=weasyprint \
+#     --css /usr/local/share/pdf-styles/legal.css
+COPY sandbox_templates/common/pdf-styles/legal.css /usr/local/share/pdf-styles/legal.css
+
+# deny-destructive PreToolUse hook — closes the deny-list bypass class where
+# permissions.deny's prefix matcher cannot see destructive flags (find
+# -delete, dd of=) or path targets (Edit to /usr/local/lib/claude-hooks/).
+# See docs/deny-destructive-hook-plan.md. Baked into the image so it survives
+# container recreates; rebuild restores the canonical script on every up.
+# Not using COPY --chmod= to stay portable across non-BuildKit builders.
+COPY sandbox_templates/claude/hooks/deny-destructive.sh /usr/local/lib/claude-hooks/deny-destructive.sh
+RUN chmod 0755 /usr/local/lib/claude-hooks/deny-destructive.sh
 
 # ---------- AI CLI refresh layer (Claude Code + Antigravity agy) -------------
 # Deliberately the LAST build step so bumping either CLI rebuilds only this tail

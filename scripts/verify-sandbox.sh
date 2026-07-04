@@ -135,12 +135,20 @@ command -v uv     >/dev/null && pass "uv present"         || fail "uv missing"
 
 # --- GPU passthrough sanity -------------------------------------------------
 # GPU is a WSL2-overlay concern (docker-compose.wsl-gpu.yml). Both artifacts
-# present = overlay active; both absent = bare-Linux/SANDBOX_GPU=0 arm (N/A,
-# not a warning); one without the other = overlay drift worth flagging.
+# present = overlay active. Both absent: disambiguate via SANDBOX_HOST_GPU
+# (substrate metadata the base compose passes through from profile.sh) —
+# host had /dev/dxg but the container has neither artifact means the overlay
+# silently failed to layer (SANDBOX_GPU=0 left set, or compose run outside
+# profile.sh): WARN, the drift the old per-artifact warns used to catch.
+# Genuinely GPU-less host = N/A, not a warning. Partial = overlay drift.
 if [[ -e /dev/dxg && -d /usr/lib/wsl/lib ]]; then
   pass "GPU passthrough active (/dev/dxg + /usr/lib/wsl/lib — WSL2 overlay)"
 elif [[ ! -e /dev/dxg && ! -d /usr/lib/wsl/lib ]]; then
-  note "GPU passthrough not layered (bare-Linux host or SANDBOX_GPU=0)"
+  if [[ "${SANDBOX_HOST_GPU:-0}" == "1" ]]; then
+    warn "host exposes /dev/dxg but container has no GPU passthrough — wsl-gpu overlay not layered (SANDBOX_GPU=0 set? compose run without profile.sh?)"
+  else
+    note "GPU passthrough not layered (bare-Linux host)"
+  fi
 else
   warn "GPU passthrough partial: /dev/dxg $([[ -e /dev/dxg ]] && echo present || echo missing), /usr/lib/wsl/lib $([[ -d /usr/lib/wsl/lib ]] && echo present || echo missing) — wsl-gpu overlay drift?"
 fi

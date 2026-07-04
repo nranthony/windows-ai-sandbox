@@ -6,19 +6,23 @@ echo "--- Starting Rootless Docker Setup (WSL2 or bare Linux) ---"
 # -----------------------------------------------------------------------------
 # --- GPU detection ---
 # -----------------------------------------------------------------------------
-# NVIDIA container-toolkit steps only apply when the host has an NVIDIA
-# driver: WSL2 GPU paravirtualization (/dev/dxg) or a native Linux driver
-# (nvidia-smi on PATH). Hosts with neither skip every NVIDIA section below —
+# NVIDIA container-toolkit steps only apply on WSL2 with GPU paravirtualization
+# (/dev/dxg) — the SAME signal and SAME knob (SANDBOX_GPU) the runtime scripts
+# use (profile.sh add_gpu_overlay, run-ephemeral.sh), so one variable governs
+# GPU everywhere. Deliberately NOT keyed on nvidia-smi: the sandbox has no
+# native-Linux GPU path (the only overlay is WSL's /dev/dxg + /usr/lib/wsl),
+# so installing the toolkit on a bare NVIDIA host would advertise support the
+# runtime never delivers. Hosts without /dev/dxg skip every NVIDIA section —
 # the rest of this script (rootless Docker, daemon.json, kickstart, firewall,
-# audit rules) is substrate-agnostic. Override detection with SETUP_GPU=1|0.
-case "${SETUP_GPU:-auto}" in
+# audit rules) is substrate-agnostic. Override with SANDBOX_GPU=1|0.
+case "${SANDBOX_GPU:-auto}" in
   1|true|yes)  GPU=1 ;;
   0|false|no)  GPU=0 ;;
-  auto) if [ -e /dev/dxg ] || command -v nvidia-smi >/dev/null 2>&1; then GPU=1; else GPU=0; fi ;;
-  *) echo "SETUP_GPU='${SETUP_GPU}' invalid (use 0, 1, or auto)" >&2; exit 1 ;;
+  auto) if [ -e /dev/dxg ]; then GPU=1; else GPU=0; fi ;;
+  *) echo "SANDBOX_GPU='${SANDBOX_GPU}' invalid (use 0, 1, or auto)" >&2; exit 1 ;;
 esac
-[ "$GPU" = 1 ] && echo "--- GPU detected (or forced): NVIDIA toolkit steps ENABLED" \
-               || echo "--- No GPU detected: NVIDIA toolkit steps SKIPPED (SETUP_GPU=1 to force)"
+[ "$GPU" = 1 ] && echo "--- WSL2 GPU detected (or forced): NVIDIA toolkit steps ENABLED" \
+               || echo "--- No WSL2 GPU: NVIDIA toolkit steps SKIPPED (SANDBOX_GPU=1 to force)"
 
 sudo apt-get update
 

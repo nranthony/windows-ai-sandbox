@@ -34,7 +34,7 @@ Day-to-day: `scripts/profile.sh <profile> {up,down,attach,logs,status,exec,clean
 |---|---|
 | Base image | NVIDIA CUDA 12.6.3 on Ubuntu 24.04 (digest-pinned) |
 | Tools baked in | Claude Code, GitHub CLI (`gh`), GitLab CLI (`glab`), `uv`, zsh + oh-my-zsh + powerlevel10k |
-| Runtime hardening | `cap_drop: ALL`, `seccomp=./seccomp.json`, `no-new-privileges`, tmpfs noexec, `pids_limit:512`, `mem_limit:8g` |
+| Runtime hardening | `cap_drop: ALL`, `seccomp=./seccomp.json`, `no-new-privileges`, tmpfs noexec, resource limits (see `docker-compose.yml` / [ARCHITECTURE.md](ARCHITECTURE.md) — compose is the source of truth) |
 | Network | `sandbox-internal` (internal:true) + Squid sidecar on `sandbox-external`; allowlist is the only way out |
 | User | root-in-container (UID 0) — remaps to host UID 1000 under rootless Docker userns=host |
 | GPU | WSL2 hosts only: `docker-compose.wsl-gpu.yml` overlay (`/dev/dxg` + `/usr/lib/wsl` bind + `LD_LIBRARY_PATH`, not `--gpus all`), auto-layered by `profile.sh` when `/dev/dxg` exists. Bare-Linux hosts come up GPU-less on the same base compose |

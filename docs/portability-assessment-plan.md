@@ -174,9 +174,9 @@ exactly as today. Update `justfile` comments + `CLAUDE.md` GPU notes as part of 
 
 ## A3. Interaction with the agent-repo-conventions migration (`agent_repo_conventions_advice.md`)
 
-The AGENTS.md/skills restructuring (root advice doc, peer-reviewed 2026-06) is planned but not
-started (no `AGENTS.md`, no `.agents/`, CLAUDE.md still monolithic). The two work streams
-interact; sequence and adjust as follows:
+The AGENTS.md/skills restructuring (root advice doc, peer-reviewed 2026-06) interacts with the
+portability work. At assessment time it was not yet started; both landed together on
+2026-07-04 in the sequence below (kept for the rationale):
 
 1. **Land portability FIRST, then the conventions migration.**
    - The conventions' own "Verification Protocol" mandates `profile.sh <p> verify` + `audit`

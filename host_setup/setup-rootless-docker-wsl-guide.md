@@ -32,7 +32,7 @@ The first `apt-get` block pulls in:
 
 GPU hosts also add the **NVIDIA Container Toolkit** repository and package so that `--gpus all` is honoured from inside WSL.
 
-> **Note** – the script auto-detects the GPU (`/dev/dxg` on WSL2, or `nvidia-smi` on bare Linux) and skips every NVIDIA step on hosts without one. Force either way with `SETUP_GPU=1` / `SETUP_GPU=0`.
+> **Note** – the script auto-detects WSL2 GPU paravirtualization (`/dev/dxg`) and skips every NVIDIA step on hosts without it — the same `SANDBOX_GPU=0|1|auto` knob the runtime scripts use. Bare-Linux NVIDIA hosts also skip: the sandbox's only GPU path is WSL's `/dev/dxg` overlay, so the toolkit would be dead weight there.
 
 ---
 
