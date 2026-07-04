@@ -154,7 +154,7 @@ RUN apt-get update \
 #   weasyprint --stylesheet /usr/local/share/pdf-styles/legal.css in.html out.pdf
 #   pandoc doc.md -o out.pdf --pdf-engine=weasyprint \
 #     --css /usr/local/share/pdf-styles/legal.css
-COPY config/pdf-styles/legal.css /usr/local/share/pdf-styles/legal.css
+COPY sandbox_templates/common/pdf-styles/legal.css /usr/local/share/pdf-styles/legal.css
 
 # ---------- GitHub CLI (gh) --------------------------------------------------
 RUN install -d -m 0755 /etc/apt/keyrings \
@@ -181,9 +181,9 @@ RUN ARCH="$(dpkg --print-architecture)" \
  && glab --version
 
 # ---------- zsh + oh-my-zsh + powerlevel10k + plugins -----------------------
-# Dotfiles come in via `config/`. Fonts are a host-terminal concern, not baked.
-COPY config/.zshrc    /root/.zshrc
-COPY config/.p10k.zsh /root/.p10k.zsh
+# Dotfiles come in via `sandbox_templates/common/`. Fonts are a host-terminal concern, not baked.
+COPY sandbox_templates/common/.zshrc    /root/.zshrc
+COPY sandbox_templates/common/.p10k.zsh /root/.p10k.zsh
 
 # ---------- deny-destructive PreToolUse hook --------------------------------
 # Closes the deny-list bypass class where permissions.deny's prefix matcher
@@ -192,7 +192,7 @@ COPY config/.p10k.zsh /root/.p10k.zsh
 # Baked into the image so it survives container recreates; rebuild restores
 # the canonical script on every up. Not using COPY --chmod= to stay portable
 # across non-BuildKit builders.
-COPY config/hooks/deny-destructive.sh /usr/local/lib/claude-hooks/deny-destructive.sh
+COPY sandbox_templates/claude/hooks/deny-destructive.sh /usr/local/lib/claude-hooks/deny-destructive.sh
 RUN chmod 0755 /usr/local/lib/claude-hooks/deny-destructive.sh
 
 ENV RUNZSH=no CHSH=no

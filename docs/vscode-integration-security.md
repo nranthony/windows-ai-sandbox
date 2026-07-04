@@ -57,7 +57,7 @@ socket — the socket itself is the bypass. The container's network identity is
 sandboxed; its SSH identity is the host user's.
 
 **Fix:** The primary defense is **in-container**, since attach reads no
-`remoteEnv` to empty the socket: `config/.zshrc` runs `unset SSH_AUTH_SOCK` on
+`remoteEnv` to empty the socket: `sandbox_templates/common/.zshrc` runs `unset SSH_AUTH_SOCK` on
 every shell and the Dockerfile purges `openssh-client` (no `ssh` client to use a
 forwarded socket). The host setting `remote.SSH.enableAgentForwarding: false`
 only governs the Remote-SSH extension, not Dev Containers' attach injection —

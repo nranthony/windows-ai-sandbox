@@ -21,13 +21,13 @@ Three load-bearing consequences:
    - `bubblewrap` only supported the in-process sandbox (now disabled).
    - `socat` was a raw-TCP exfil channel bypassing the HTTP-only Squid egress.
    - `openssh-client` (`ssh`/`scp`/`sftp`/`ssh-agent`/...) is the tool surface that weaponizes VS Code's `SSH_AUTH_SOCK` forwarding if it ever reappears. gh/glab use HTTPS tokens; git remotes are HTTPS; agent-mode denies `git push|clone|fetch`.
-3. **`config/claude-settings.json`** is the per-profile settings template. `ensure_state()` copies it into `profiles/<p>/claude-home/settings.json` on first `up` (only if absent — existing profiles keep customizations).
+3. **`sandbox_templates/claude/claude-settings.json`** is the per-profile settings template. `ensure_state()` copies it into `profiles/<p>/claude-home/settings.json` on first `up` (only if absent — existing profiles keep customizations).
 
 Do **not** "re-harden" by re-enabling `sandbox.enabled` or re-adding `bubblewrap`/`socat`/`openssh-client`.
 
-## Per-profile Claude Code skills are seeded from `config/skills/`
+## Per-profile Claude Code skills are seeded from `sandbox_templates/skills/`
 
-Skills live at `config/skills/<name>/SKILL.md` and are seeded into each profile's `claude-home/skills/<name>/` by `ensure_state()` on first `up` — copy only if absent, so user customisations survive subsequent `up`s. To force-refresh from template: `scripts/profile.sh <p> reset-skills`.
+Skills live at `sandbox_templates/skills/<name>/SKILL.md` and are seeded into each profile's `claude-home/skills/<name>/` by `ensure_state()` on first `up` — copy only if absent, so user customisations survive subsequent `up`s. To force-refresh from template: `scripts/profile.sh <p> reset-skills`.
 
 ## Commit identity: `git config` is denied — seed `user.*` host-side
 

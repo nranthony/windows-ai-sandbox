@@ -48,13 +48,13 @@ cp "$SANDBOX_DIR/proxy/allowed_domains.txt"       "$dest/proxy/allowed_domains.t
 cp "$SANDBOX_DIR/proxy/squid.conf"                "$dest/proxy/squid.conf"
 cp "$SANDBOX_DIR/scripts/verify-sandbox.sh"       "$dest/scripts/verify-sandbox.sh"
 cp "$SANDBOX_DIR/scripts/profile.sh"              "$dest/scripts/profile.sh"
-cp "$SANDBOX_DIR/config/claude-settings.json"     "$dest/config/claude-settings.json"
+cp "$SANDBOX_DIR/sandbox_templates/claude/claude-settings.json"     "$dest/config/claude-settings.json"
 
 # Structured audit package (audit.sh + aggregate.py + probes/*) — keep tree.
 cp -R "$SANDBOX_DIR/scripts/audit"                "$dest/scripts/audit"
 
 # Tier-3 skill — agent-side judgment instructions over the audit JSON.
-cp "$SANDBOX_DIR/config/skills/audit-sandbox/SKILL.md" "$dest/skills/audit-sandbox/SKILL.md"
+cp "$SANDBOX_DIR/sandbox_templates/skills/audit-sandbox/SKILL.md" "$dest/skills/audit-sandbox/SKILL.md"
 chmod -R a-w "$dest"
 # Restore write on directories so the agent can write /tmp-style artifacts
 # (audit.sh writes nothing into the staged tree, but in case probes evolve).

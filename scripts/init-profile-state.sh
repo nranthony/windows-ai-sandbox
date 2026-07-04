@@ -36,7 +36,7 @@ chmod 644 "$BASE/claude.json"
 # profile doesn't have one yet. Only runs on first `up` — use `profile.sh
 # <p> reset-settings` to re-seed after the template changes.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SEED="$SCRIPT_DIR/config/claude-settings.json"
+SEED="$SCRIPT_DIR/sandbox_templates/claude/claude-settings.json"
 DEST="$BASE/claude-home/settings.json"
 if [[ ! -f "$DEST" ]] && [[ -f "$SEED" ]]; then
   cp "$SEED" "$DEST"

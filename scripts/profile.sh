@@ -27,8 +27,8 @@
 #   recreate        force-recreate this profile's containers (no image rebuild)
 #   rebuild         build + recreate this profile's containers
 #   reset-settings  overwrite this profile's claude settings.json from
-#                   config/claude-settings.json (backs up the old one)
-#   reset-skills    overwrite this profile's claude skills from config/skills/
+#                   sandbox_templates/claude/claude-settings.json (backs up the old one)
+#   reset-skills    overwrite this profile's claude skills from sandbox_templates/skills/
 #                   (backs up old skill dirs)
 #   db-reset        wipe the postgres data volume and bring postgres back up
 #                   with a fresh initdb. Flags: --yes (skip confirmation).
@@ -128,13 +128,13 @@ ensure_state() {
     printf '{}\n' > "$p/claude.json"
   fi
   mkdir -p "$p/config/git"
-  cp "$SCRIPT_DIR/config/db.env.template" "$p/db.env.example"
-  if [[ ! -f "$p/claude-home/settings.json" ]] && [[ -f "$SCRIPT_DIR/config/claude-settings.json" ]]; then
-    cp "$SCRIPT_DIR/config/claude-settings.json" "$p/claude-home/settings.json"
+  cp "$SCRIPT_DIR/sandbox_templates/common/db.env.template" "$p/db.env.example"
+  if [[ ! -f "$p/claude-home/settings.json" ]] && [[ -f "$SCRIPT_DIR/sandbox_templates/claude/claude-settings.json" ]]; then
+    cp "$SCRIPT_DIR/sandbox_templates/claude/claude-settings.json" "$p/claude-home/settings.json"
   fi
-  if [[ -d "$SCRIPT_DIR/config/skills" ]]; then
+  if [[ -d "$SCRIPT_DIR/sandbox_templates/skills" ]]; then
     mkdir -p "$p/claude-home/skills"
-    for skill_src in "$SCRIPT_DIR/config/skills"/*/; do
+    for skill_src in "$SCRIPT_DIR/sandbox_templates/skills"/*/; do
       [[ -d "$skill_src" ]] || continue
       name="$(basename "$skill_src")"
       if [[ ! -d "$p/claude-home/skills/$name" ]]; then
@@ -635,7 +635,7 @@ case "$CMD" in
     ;;
 
   reset-settings)
-    src="$SCRIPT_DIR/config/claude-settings.json"
+    src="$SCRIPT_DIR/sandbox_templates/claude/claude-settings.json"
     dst="$PROFILES_ROOT/$PROFILE/claude-home/settings.json"
     [[ -f "$src" ]] || fail "template missing: $src"
     mkdir -p "$(dirname "$dst")"
@@ -649,7 +649,7 @@ case "$CMD" in
     ;;
 
   reset-skills)
-    src_dir="$SCRIPT_DIR/config/skills"
+    src_dir="$SCRIPT_DIR/sandbox_templates/skills"
     dst_dir="$PROFILES_ROOT/$PROFILE/claude-home/skills"
     [[ -d "$src_dir" ]] || fail "no skills templates: $src_dir"
     mkdir -p "$dst_dir"
@@ -767,7 +767,7 @@ case "$CMD" in
     echo "    docker compose down --remove-orphans  ($([[ $all_vols == 1 ]] && echo '+ ALL named volumes' || echo '+ DB volumes preserved'))"
     echo "    rm -rf $p/*  (everything except the PRESERVE list above)"
     echo "  AFTER:"
-    echo "    re-seed claude settings.json + skills from config/ (via ensure_state)"
+    echo "    re-seed claude settings.json + skills from sandbox_templates/ (via ensure_state)"
     echo "    next step: scripts/profile.sh $PROFILE up"
 
     if [[ "$dry" == "1" ]]; then
@@ -835,7 +835,7 @@ case "$CMD" in
     ok "restored auth artefacts into fresh $p"
 
     ensure_state
-    ok "re-seeded settings + skills from config/"
+    ok "re-seeded settings + skills from sandbox_templates/"
     ok "wipe done for '$PROFILE'. Next: scripts/profile.sh $PROFILE up"
     ;;
 

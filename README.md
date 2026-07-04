@@ -132,7 +132,7 @@ Profile is the first positional arg to every per-profile recipe (`list` and `bui
 - `claude`, `gh`, `glab`, `uv`, `python3`, `node` pre-installed.
 - `/workspace` = `~/repo/<profile>/` (many repos).
 - `/root/.venv` (Python 3.12) — VS Code's default interpreter for smoke tests.
-- Claude's `Bash` tool is restricted by `config/claude-settings.json` (pip/uv/git push/curl/ssh denied). The interactive zsh is NOT restricted — install deps yourself during planning, then hand off to the agent.
+- Claude's `Bash` tool is restricted by `sandbox_templates/claude/claude-settings.json` (pip/uv/git push/curl/ssh denied). The interactive zsh is NOT restricted — install deps yourself during planning, then hand off to the agent.
 
 ---
 

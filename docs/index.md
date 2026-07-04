@@ -18,13 +18,13 @@
 |---|---|---|
 | 1 | [`scripts/verify-sandbox.sh`](../scripts/verify-sandbox.sh) | Fast tripwire (~57 pass/fail/warn outcomes across ~28 checks) |
 | 2 | [`scripts/audit/`](../scripts/audit/) | ~80 structured probes, JSON output ([README](../scripts/audit/README.md)) |
-| 3 | [`config/skills/audit-sandbox/SKILL.md`](../config/skills/audit-sandbox/SKILL.md) | Agent-side judgment over tier-2 JSON (staged into container by `profile.sh audit`) |
+| 3 | [`sandbox_templates/skills/audit-sandbox/SKILL.md`](../sandbox_templates/skills/audit-sandbox/SKILL.md) | Agent-side judgment over tier-2 JSON (staged into container by `profile.sh audit`) |
 
 ## Agent Tool Controls
 
-- [config/claude-settings.json](../config/claude-settings.json) — Bash/Read deny lists (curl, git push, pip install, secrets reads, etc.)
+- [sandbox_templates/claude/claude-settings.json](../sandbox_templates/claude/claude-settings.json) — Bash/Read deny lists (curl, git push, pip install, secrets reads, etc.)
 - [deny-destructive hook](deny-destructive-hook-plan.md) — PreToolUse hook blocking destructive commands (find -delete, dd of=, etc.)
-- [config/hooks/deny-destructive.sh](../config/hooks/deny-destructive.sh) — hook implementation
+- [sandbox_templates/claude/hooks/deny-destructive.sh](../sandbox_templates/claude/hooks/deny-destructive.sh) — hook implementation
 
 ## Proxy & Network
 
@@ -62,7 +62,7 @@ Guides in [`host_setup/`](../host_setup/):
 
 - [Debug recipes](debug-recipes.md) — routine commands for operating a profile
 - [Local wheels](local-wheels.md) — per-profile `dist/` convention for local `.whl` files
-- [config/db.env.template](../config/db.env.template) — database credentials template for postgres/mongo sibling containers
+- [sandbox_templates/common/db.env.template](../sandbox_templates/common/db.env.template) — database credentials template for postgres/mongo sibling containers
 
 ## Archive
 
