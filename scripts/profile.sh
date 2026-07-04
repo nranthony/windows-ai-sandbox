@@ -51,6 +51,12 @@
 #                   a browser to reach a dev server inside the container.
 #                   UNSAFE: may drop the `internal: true` network isolation.
 #
+# Environment:
+#   SANDBOX_GPU     GPU overlay control (default: auto). `auto` layers
+#                   docker-compose.wsl-gpu.yml when /dev/dxg exists (WSL2 with
+#                   GPU paravirtualization); bare-Linux hosts come up GPU-less.
+#                   Set 1 to force the overlay, 0 to suppress it.
+#
 # Optional flags (accepted by build / rebuild):
 #   --no-cache      pass --no-cache to `docker compose build`. Forces every
 #                   Dockerfile layer to re-run; pulls latest claude-code / npm
@@ -288,6 +294,32 @@ ensure_octet_free() {
 }
 
 # ---------------------------------------------------------------------------
+# Compose overlays — base file + conditional layers
+# ---------------------------------------------------------------------------
+# Once ANY `-f` is passed, docker compose stops auto-loading docker-compose.yml,
+# so every overlay must be layered ON TOP of an explicit base. add_overlay
+# seeds the base file on first use; callers only name the layer.
+add_overlay() {
+  (( ${#COMPOSE_FILE_ARGS[@]} > 0 )) || COMPOSE_FILE_ARGS+=(-f docker-compose.yml)
+  COMPOSE_FILE_ARGS+=(-f "$1")
+}
+
+# GPU/substrate detection. WSL2 with GPU paravirtualization exposes /dev/dxg;
+# that node never exists on bare Linux, so its presence is a precise signal
+# for layering the WSL GPU overlay (devices + /usr/lib/wsl + LD_LIBRARY_PATH).
+# Bare-Linux hosts skip the overlay and the same compose base comes up
+# GPU-less. Override auto-detection with SANDBOX_GPU=1 (force) or 0 (suppress).
+add_gpu_overlay() {
+  case "${SANDBOX_GPU:-auto}" in
+    0|false|no)  return ;;
+    1|true|yes)  ;;
+    auto)        [[ -e /dev/dxg ]] || return ;;
+    *) fail "SANDBOX_GPU='${SANDBOX_GPU}' invalid (use 0, 1, or auto)" ;;
+  esac
+  add_overlay "docker-compose.wsl-gpu.yml"
+}
+
+# ---------------------------------------------------------------------------
 # parse_flags — strip --expose-dev from "$@", populate COMPOSE_FILE_ARGS
 # ---------------------------------------------------------------------------
 parse_flags() {
@@ -312,7 +344,7 @@ parse_flags() {
     [[ -f "$override" ]] || fail "--expose-dev: override not found: $override
        Create the override at the repo root (a YAML file adding a
        'ports:' block under ai-sandbox), then rerun."
-    COMPOSE_FILE_ARGS+=(-f "docker-compose.$PROFILE.expose-dev.yml")
+    add_overlay "docker-compose.$PROFILE.expose-dev.yml"
     warn "UNSAFE: --expose-dev — layering $override (publishes ports to LAN)"
   fi
 }
@@ -414,6 +446,10 @@ AGENT="ai-sandbox-$PROFILE"
 # call below. Cheap (file read after first assignment); up-family commands
 # additionally run ensure_octet_free before creating the network.
 ensure_subnet_octet
+
+# Layer the WSL2 GPU overlay when the substrate has one (see add_gpu_overlay).
+# Runs before parse_flags so --expose-dev stacks on top of it.
+add_gpu_overlay
 
 cd "$SCRIPT_DIR"
 
