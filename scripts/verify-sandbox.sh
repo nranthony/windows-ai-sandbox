@@ -19,6 +19,9 @@ PASS=0; FAIL=0; WARN=0
 pass() { printf '\033[0;32m[PASS]\033[0m %s\n' "$*"; ((++PASS)); }
 fail() { printf '\033[0;31m[FAIL]\033[0m %s\n' "$*"; ((++FAIL)); }
 warn() { printf '\033[1;33m[WARN]\033[0m %s\n' "$*"; ((++WARN)); }
+# Checks that don't apply on this substrate (e.g. GPU on bare Linux) — printed
+# for visibility, counted in no bucket so tallies stay comparable across hosts.
+note() { printf '\033[0;36m[ N/A]\033[0m %s\n' "$*"; }
 
 # --- identity ----------------------------------------------------------------
 # Root-in-container is intentional here (rootless Docker userns=host maps
@@ -34,6 +37,11 @@ UID_IN=$(id -u)
 UID0_MAP=$(awk 'NR==1{$1=$1; print}' /proc/self/uid_map 2>/dev/null)
 if [[ "$UID0_MAP" == "0 1000 1" ]]; then
   pass "uid_map: container UID 0 = host UID 1000 (rootless)"
+elif [[ "$UID0_MAP" == "0 0 "* ]]; then
+  # Container root IS host root — rootful Docker with no userns remap. The
+  # headline boundary (escape lands as an unprivileged host user) is gone;
+  # this must never silently pass the rest of the suite. Hard fail.
+  fail "uid_map: container UID 0 = host UID 0 (ROOTFUL Docker, no userns remap — sandbox boundary absent; use rootless Docker)"
 else
   warn "uid_map line 1 unexpected: '$UID0_MAP' (full map: $(tr '\n' '|' < /proc/self/uid_map))"
 fi
@@ -126,8 +134,16 @@ command -v glab   >/dev/null && pass "glab CLI present"   || fail "glab CLI miss
 command -v uv     >/dev/null && pass "uv present"         || fail "uv missing"
 
 # --- GPU passthrough sanity -------------------------------------------------
-[[ -e /dev/dxg ]]             && pass "/dev/dxg present (WSL2 GPU device)" || warn "/dev/dxg missing"
-[[ -d /usr/lib/wsl/lib ]]     && pass "/usr/lib/wsl/lib mounted"            || warn "/usr/lib/wsl/lib missing"
+# GPU is a WSL2-overlay concern (docker-compose.wsl-gpu.yml). Both artifacts
+# present = overlay active; both absent = bare-Linux/SANDBOX_GPU=0 arm (N/A,
+# not a warning); one without the other = overlay drift worth flagging.
+if [[ -e /dev/dxg && -d /usr/lib/wsl/lib ]]; then
+  pass "GPU passthrough active (/dev/dxg + /usr/lib/wsl/lib — WSL2 overlay)"
+elif [[ ! -e /dev/dxg && ! -d /usr/lib/wsl/lib ]]; then
+  note "GPU passthrough not layered (bare-Linux host or SANDBOX_GPU=0)"
+else
+  warn "GPU passthrough partial: /dev/dxg $([[ -e /dev/dxg ]] && echo present || echo missing), /usr/lib/wsl/lib $([[ -d /usr/lib/wsl/lib ]] && echo present || echo missing) — wsl-gpu overlay drift?"
+fi
 
 # --- host gitconfig NOT leaked (audit Finding B) ----------------------------
 if [[ -f /root/.gitconfig ]]; then
