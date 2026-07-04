@@ -32,15 +32,16 @@ not code-vs-code.
 
 ## Quick wins already found (Phase 0 — high confidence)
 
-1. **Committed Python bytecode** — 9 `scripts/audit/**/__pycache__/*.pyc` tracked despite
-   `.gitignore` having `**.pyc` (gitignore doesn't untrack already-committed files).
-   Fix: `git rm -r --cached scripts/audit/**/__pycache__` (verify glob in zsh).
+1. ~~**Committed Python bytecode**~~ — DONE 2026-07-04 (portability-and-agent-conventions
+   branch): all tracked `__pycache__/*.pyc` untracked; `git ls-files | grep .pyc` is empty.
 2. **Version inconsistency** — those `.pyc` are `cpython-314` (Python 3.14) but CLAUDE.md
    states default venv is **Python 3.12**. Resolve: which interpreter actually runs the
    audit probes? Bytecode may just be stale (another reason to untrack it).
-3. **Root-level doc sprawl** — `numerai-setup.md`, `agent_repo_conventions_advice.md`,
-   `SECURITY_ASSESSMENT.md`, `sandbox-hardening-package.md` at top level while `docs/`
-   (with `index.md`) exists. Decide canonical home; move the rest under `docs/`.
+3. **Root-level doc sprawl** — `numerai-setup.md`, `SECURITY_ASSESSMENT.md`,
+   `sandbox-hardening-package.md` at top level while `docs/` (with `index.md`) exists.
+   Decide canonical home; move the rest under `docs/`.
+   (`agent_repo_conventions_advice.md`: DONE 2026-07-04 — implemented and archived to
+   `docs/_archive/`.)
 4. **Two parallel archive zones** — `archived_script_ref/` and `docs/_archive/`
    (incl. `gpt_suggestions_todo.md`, `PODMAN_MIGRATION_PLAN_*`). Keep but fence off so a
    scan doesn't treat them as current.

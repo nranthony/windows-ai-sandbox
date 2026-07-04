@@ -47,6 +47,10 @@ These files carry the sandbox's guarantees:
 - `proxy/squid.conf` + `proxy/allowed_domains.txt`
 - `sandbox_templates/claude/claude-settings.json` + `sandbox_templates/claude/hooks/`
 - `scripts/profile.sh`, `scripts/init-profile-state.sh`, `scripts/verify-sandbox.sh`
+  (the credential.helper scrub both run on every `up` is a load-bearing defense
+  against VS Code injecting host-reaching git credential helpers — audit
+  Finding B/C in `docs/vscode-integration-security.md`; never remove it as
+  "redundant")
 - `scripts/run-ephemeral.sh` (raw `docker run` — mirrors compose hardening by hand)
 
 Any change to them requires:

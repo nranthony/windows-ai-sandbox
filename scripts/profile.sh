@@ -310,12 +310,22 @@ add_overlay() {
 # Bare-Linux hosts skip the overlay and the same compose base comes up
 # GPU-less. Override auto-detection with SANDBOX_GPU=1 (force) or 0 (suppress).
 add_gpu_overlay() {
+  # SANDBOX_HOST_GPU is substrate metadata, independent of the SANDBOX_GPU
+  # knob: the base compose passes it into the container so verify-sandbox.sh
+  # can tell "correctly GPU-less (bare Linux)" apart from "WSL host whose GPU
+  # overlay silently failed to layer" — a drift signal that would otherwise
+  # be invisible from inside the container.
+  export SANDBOX_HOST_GPU=0
+  if [[ -e /dev/dxg ]]; then SANDBOX_HOST_GPU=1; fi
   # NOTE: explicit `return 0` — a bare `return` propagates the failed [[ ]]
   # test's status 1, and this function is called as a top-level statement
   # under `set -e`, which would abort every command on GPU-less hosts.
   case "${SANDBOX_GPU:-auto}" in
-    0|false|no)  return 0 ;;
-    1|true|yes)  ;;
+    0|false|no)
+      [[ "$SANDBOX_HOST_GPU" == "1" ]] && warn "SANDBOX_GPU=0: host has /dev/dxg but the GPU overlay is suppressed — container will be GPU-less"
+      return 0 ;;
+    1|true|yes)
+      [[ -e /dev/dxg ]] || warn "SANDBOX_GPU=1 forced but /dev/dxg does not exist on this host — 'up' will fail on the device mapping (the overlay is WSL2-only)" ;;
     auto)        [[ -e /dev/dxg ]] || return 0 ;;
     *) fail "SANDBOX_GPU='${SANDBOX_GPU}' invalid (use 0, 1, or auto)" ;;
   esac

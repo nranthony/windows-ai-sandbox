@@ -52,10 +52,13 @@ docker network inspect "$NETWORK" >/dev/null 2>&1 \
 # failure, so bare-Linux hosts must skip these args. SANDBOX_GPU=0|1 overrides.
 GPU_ARGS=()
 gpu_on=0
+HOST_GPU=0
+if [[ -e /dev/dxg ]]; then HOST_GPU=1; fi
 case "${SANDBOX_GPU:-auto}" in
   0|false|no)  ;;
-  1|true|yes)  gpu_on=1 ;;
-  auto)        [[ -e /dev/dxg ]] && gpu_on=1 ;;
+  1|true|yes)  gpu_on=1
+               [[ "$HOST_GPU" == "1" ]] || echo "WARN: SANDBOX_GPU=1 forced but /dev/dxg does not exist — docker run will fail on the device mapping (WSL2-only)" >&2 ;;
+  auto)        gpu_on=$HOST_GPU ;;
   *) echo "SANDBOX_GPU='${SANDBOX_GPU}' invalid (use 0, 1, or auto)" >&2; exit 1 ;;
 esac
 if (( gpu_on )); then
@@ -91,6 +94,7 @@ docker run --rm -it \
   -e NO_PROXY=localhost,127.0.0.1,egress-proxy \
   -e GIT_CONFIG_GLOBAL=/root/.config/git/config \
   -e SANDBOX_PROFILE="$PROFILE" \
+  -e SANDBOX_HOST_GPU="$HOST_GPU" \
   -v "$REPO_PATH":/workspace:rw \
   -v "$STATE/claude-home":/root/.claude:rw \
   -v "$STATE/claude.json":/root/.claude.json:rw \

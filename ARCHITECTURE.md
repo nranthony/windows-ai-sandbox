@@ -75,7 +75,7 @@ See `sandbox-hardening-package.md` §4 and `docs/compose-network-ipam.md`.
 | Filesystem | rootfs rw (non-root userns + cap_drop is the boundary); `/tmp` + `/run` + `/root/.{npm-global,local}` tmpfs `noexec,nosuid,nodev` |
 | Network | internal-only agent net + Squid allowlist sidecar (see above) |
 | DNS | sinkholed + `extra_hosts` |
-| Agent tools | `sandbox_templates/claude/claude-settings.json` denies `curl/wget/ssh/scp/socat/nc`, `git push/clone/fetch/config/submodule`, `awk/sed`, `pip install`, `uv add`, secrets reads; `deny-destructive.sh` PreToolUse hook closes the bypass class |
+| Agent tools | `sandbox_templates/claude/claude-settings.json` deny-lists Claude's Bash/Read tools (network clients, git write ops, package installs, secrets reads — **the JSON file is the authoritative list**, don't trust prose mirrors); `deny-destructive.sh` PreToolUse hook closes the bypass class |
 | GPU (WSL only) | `docker-compose.wsl-gpu.yml` overlay — `/dev/dxg` + `/usr/lib/wsl`; auto-layered on detection |
 | Restart policy | `restart: "no"` — explicit `up` after host reboot (prevents silent config-drift recovery) |
 

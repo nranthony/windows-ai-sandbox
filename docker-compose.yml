@@ -74,6 +74,11 @@ services:
     environment:
       - GIT_CONFIG_GLOBAL=/root/.config/git/config
       - SANDBOX_PROFILE=${PROFILE}
+      # Substrate metadata, NOT GPU wiring (which lives only in the wsl-gpu
+      # overlay): profile.sh exports 1 when the host has /dev/dxg, so
+      # verify-sandbox.sh can flag a WSL host whose overlay failed to layer
+      # instead of reporting a reassuring N/A. Defaults 0 off profile.sh.
+      - SANDBOX_HOST_GPU=${SANDBOX_HOST_GPU:-0}
       # All outbound HTTP(S) is forced through the Squid sidecar.
       - HTTP_PROXY=http://egress-proxy:3128
       - HTTPS_PROXY=http://egress-proxy:3128
@@ -118,7 +123,7 @@ services:
   # Data lives in a named volume (ai-sandbox-<profile>_postgres-data) managed
   # by Docker inside the WSL2 ext4 rootfs. Back up anything important with
   # `pg_dump` to /workspace. Credentials come from
-  # profiles/<profile>/db.env (template: config/db.env.template). File is
+  # profiles/<profile>/db.env (template: sandbox_templates/common/db.env.template). File is
   # optional — without POSTGRES_PASSWORD the image refuses to start, which is
   # the behavior we want.
   postgres:
