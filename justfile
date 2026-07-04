@@ -127,11 +127,11 @@ wipe profile *args:
 db-reset profile *args:
     {{profile_sh}} {{profile}} db-reset {{args}}
 
-# overwrite this profile's claude settings.json from config/ (backs up old)
+# overwrite this profile's claude settings.json from sandbox_templates/claude/ (backs up old)
 reset-settings profile:
     {{profile_sh}} {{profile}} reset-settings
 
-# overwrite this profile's claude skills from config/skills/ (backs up old)
+# overwrite this profile's claude skills from sandbox_templates/skills/ (backs up old)
 reset-skills profile:
     {{profile_sh}} {{profile}} reset-skills
 

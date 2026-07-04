@@ -14,11 +14,11 @@ image rebuild + per-profile settings refresh.
 What exists in this repo:
 
 ```
-config/hooks/
+sandbox_templates/claude/hooks/
   deny-destructive.sh           # POSIX sh + jq, 10 rules, fail-open trap
   deny-destructive.test.sh      # 35-assertion host-side harness, all green
 Dockerfile                      # COPY + chmod 0755 to /usr/local/lib/claude-hooks/
-config/claude-settings.json     # top-level "hooks" block (Bash + Edit|Write|MultiEdit)
+sandbox_templates/claude/claude-settings.json     # top-level "hooks" block (Bash + Edit|Write|MultiEdit)
 scripts/verify-sandbox.sh       # tripwire: file invariants + behavioural deny probe
 ```
 
@@ -123,10 +123,10 @@ the warn→block promotion review). Return `{}`, exit 0.
 
 Every new destructive primitive needs **all three**:
 
-1. New rule in `config/hooks/deny-destructive.sh`.
+1. New rule in `sandbox_templates/claude/hooks/deny-destructive.sh`.
 2. New positive + negative assertions in
-   `config/hooks/deny-destructive.test.sh`. Run on host pre-commit
-   (`bash config/hooks/deny-destructive.test.sh`) — must stay green.
+   `sandbox_templates/claude/hooks/deny-destructive.test.sh`. Run on host pre-commit
+   (`bash sandbox_templates/claude/hooks/deny-destructive.test.sh`) — must stay green.
 3. If the rule adds a new path constant, an extension to the
    `verify-sandbox.sh` probe so the new constant is asserted at runtime.
 

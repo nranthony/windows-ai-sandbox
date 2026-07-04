@@ -14,7 +14,7 @@ mechanical fixes.
 
 Security-critical **infrastructure** repo. 100 tracked files, ~34% markdown (33 `.md`).
 Source of truth is **config, not code**: `seccomp.json`, `proxy/squid.conf` +
-`allowed_domains.txt`, `docker-compose.yml`, `Dockerfile`, `config/claude-settings.json`.
+`allowed_domains.txt`, `docker-compose.yml`, `Dockerfile`, `sandbox_templates/claude/claude-settings.json`.
 Tightly coupled to sibling repo **macolima** (referenced in 13 markdown files).
 
 => Highest-stakes drift is **doc-claims-vs-actual-config** and **this-repo-vs-sibling**,
@@ -44,7 +44,7 @@ not code-vs-code.
 4. **Two parallel archive zones** — `archived_script_ref/` and `docs/_archive/`
    (incl. `gpt_suggestions_todo.md`, `PODMAN_MIGRATION_PLAN_*`). Keep but fence off so a
    scan doesn't treat them as current.
-5. **Secret check** — `config/db.env.template` is the only secret-shaped tracked file;
+5. **Secret check** — `sandbox_templates/common/db.env.template` is the only secret-shaped tracked file;
    confirm it's a pure template (no real values). `.env` is gitignored (good).
 
 ## Staleness signal (already observed)

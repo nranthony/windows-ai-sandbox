@@ -21,7 +21,7 @@ it; two need manual action from **Windows**.
 |---|---|
 | `win_setup/.wslconfig` | `memory=48GB`, `swap=16GB` (VM was defaulting to 32GB = 50% of host) |
 | `docker-compose.yml` | `pids_limit: 512→4096`, `mem_limit: 8g→20g`, `memswap_limit: 8g→20g` |
-| `config/.zshrc` | `export GITSTATUS_NUM_THREADS=4` |
+| `sandbox_templates/common/.zshrc` | `export GITSTATUS_NUM_THREADS=4` |
 | `CLAUDE.md` | Resources row updated to match |
 
 ---

@@ -39,7 +39,7 @@ Windows OS
 │   ├── glab-cli/                                (glab tokens)
 │   └── git/config                               (via GIT_CONFIG_GLOBAL)
 ├── gemini-home/       → /root/.gemini           (Antigravity CLI `agy` home: config/cache under antigravity-cli/; auth re-done per rebuild)
-└── db.env             (optional; postgres/mongo credentials — see config/db.env.template)
+└── db.env             (optional; postgres/mongo credentials — see sandbox_templates/common/db.env.template)
 ```
 
 ## Common Development Tasks
@@ -82,7 +82,7 @@ scripts/profile.sh <profile> rebuild --expose-dev  # also layer LAN port publish
 scripts/profile.sh <profile> clean              # prune rotating state (paste-cache, backups)
 scripts/profile.sh <profile> clean --deep       # also drop MCP logs + settings.json backups
 scripts/profile.sh <profile> reset-settings     # re-seed claude settings.json from template
-scripts/profile.sh <profile> reset-skills       # re-seed skills from config/skills/
+scripts/profile.sh <profile> reset-skills       # re-seed skills from sandbox_templates/skills/
 scripts/profile.sh <profile> wipe               # blank-slate profile, keep auth
 scripts/profile.sh <profile> wipe --dry-run     # show what would be wiped
 scripts/profile.sh <profile> wipe --all-volumes # also drop DB named volumes
@@ -163,15 +163,15 @@ scripts/trivy-scan.sh image   # CVE scan of windows-ai-sandbox:latest only
 ## Key Files and Configuration
 
 ### Top-level
-- `Dockerfile` — shared image. CUDA 12.6.3 base (pinned by digest). Ships claude + agy (Antigravity CLI, native binary in /usr/local/bin) + gh + glab + uv + mongosh + zsh. Node.js 24. **Both AI CLIs (claude + agy) install in the LAST layer** ("AI CLI refresh layer") so a version bump rebuilds only the tail — trigger with `build --refresh-ai` / `build --claude-version=X.Y.Z` (cache-busted via `ARG AI_CLI_REFRESH`), no `--no-cache` needed. Playwright Chromium runtime libs baked in. Gitstatusd pre-installed. PDF tooling: pandoc + WeasyPrint (`uv tool` at /opt/uv/tools, CLI on /usr/local/bin) — markdown/HTML→PDF via `pandoc --pdf-engine=weasyprint`, no LaTeX. Metric-compatible doc fonts (Carlito/Caladea/TeX Gyre + Inter/JetBrains Mono). Legal/formal reference stylesheet baked at `/usr/local/share/pdf-styles/legal.css` (source `config/pdf-styles/legal.css`). `bubblewrap` / `socat` / `openssh-client` deliberately NOT installed (see `sandbox-hardening-package.md` §7).
+- `Dockerfile` — shared image. CUDA 12.6.3 base (pinned by digest). Ships claude + agy (Antigravity CLI, native binary in /usr/local/bin) + gh + glab + uv + mongosh + zsh. Node.js 24. **Both AI CLIs (claude + agy) install in the LAST layer** ("AI CLI refresh layer") so a version bump rebuilds only the tail — trigger with `build --refresh-ai` / `build --claude-version=X.Y.Z` (cache-busted via `ARG AI_CLI_REFRESH`), no `--no-cache` needed. Playwright Chromium runtime libs baked in. Gitstatusd pre-installed. PDF tooling: pandoc + WeasyPrint (`uv tool` at /opt/uv/tools, CLI on /usr/local/bin) — markdown/HTML→PDF via `pandoc --pdf-engine=weasyprint`, no LaTeX. Metric-compatible doc fonts (Carlito/Caladea/TeX Gyre + Inter/JetBrains Mono). Legal/formal reference stylesheet baked at `/usr/local/share/pdf-styles/legal.css` (source `sandbox_templates/common/pdf-styles/legal.css`). `bubblewrap` / `socat` / `openssh-client` deliberately NOT installed (see `sandbox-hardening-package.md` §7).
 - `docker-compose.yml` — parameterized by `$PROFILE`. `sandbox-internal` (internal:true, IPAM 172.30.0.0/24, DNS sinkhole) + `sandbox-external` bridge. Squid sidecar. Optional postgres/mongo siblings via `COMPOSE_PROFILES`. cap_drop:ALL + seccomp + no-new-privileges, tmpfs noexec. `restart: "no"` (explicit `up` required after host reboot). Substrate-neutral: contains NO GPU/WSL wiring — must come up cleanly on bare Linux.
 - `docker-compose.wsl-gpu.yml` — WSL2 GPU overlay (`/dev/dxg`, `/usr/lib/wsl` mount, `LD_LIBRARY_PATH`). Layered automatically by `profile.sh` when `/dev/dxg` exists; `SANDBOX_GPU=0|1` overrides. **Security-sensitive**: overlay edits can add devices/mounts without touching the base compose.
 - `justfile` (repo root) — optional convenience front door. Every recipe is a **thin pass-through** to `profile.sh`/`setup.sh` (profile is the first positional arg: `just up <p>` → `scripts/profile.sh <p> up`). NOT canonical and holds NO logic: it must never call `docker compose` directly (that bypasses the `PROFILE`/`COMPOSE_PROJECT_NAME` exports the scripts do, and the compose file's `${PROFILE:?...}` guard). When you add/rename a command in either script, update the matching recipe and re-run `just --list` to confirm it parses. **WSL divergences from macolima's justfile:** no `colima-*` recipes (WSL2 is the VM — no `start.sh`/`stop.sh`); `verify` fronts `profile.sh verify` (tier-1 tripwire), not `setup.sh --verify`; `build` takes no profile arg; extra `auth-antigravity`/`audit`/`api` recipes. See `docs/sibling-repo-relationship.md`.
 - `seccomp.json` — ported verbatim from macolima. `clone3 → ENOSYS`, `unshare(CLONE_NEWUSER)` blocked, full xattr family allowed.
 - `proxy/squid.conf` + `proxy/allowed_domains.txt` — ML-tuned allowlist (Anthropic, Antigravity/Google, GitHub, GitLab, PyPI, PyTorch, NVIDIA, Ubuntu apt). Pinned subdomains (no parent wildcards per audit M3). Hot-reload: `docker exec egress-proxy-<p> squid -k reconfigure`.
-- `config/.zshrc`, `config/.p10k.zsh` — baked into image at build.
-- `config/claude-settings.json` — **restricts Claude's Bash/Read tools only** (not the shell). `defaultMode: auto`. Denies `pip install`, `uv add`, `curl`, `git push/fetch/config/submodule`, `awk`, `sed`, secrets reads. User shells are unrestricted — install deps at the CLI, then hand off to Claude.
-- `config/db.env.template` — template for postgres/mongo credentials. Copy to profile's `db.env` and fill in.
+- `sandbox_templates/common/.zshrc`, `sandbox_templates/common/.p10k.zsh` — baked into image at build.
+- `sandbox_templates/claude/claude-settings.json` — **restricts Claude's Bash/Read tools only** (not the shell). `defaultMode: auto`. Denies `pip install`, `uv add`, `curl`, `git push/fetch/config/submodule`, `awk`, `sed`, secrets reads. User shells are unrestricted — install deps at the CLI, then hand off to Claude.
+- `sandbox_templates/common/db.env.template` — template for postgres/mongo credentials. Copy to profile's `db.env` and fill in.
 - `.trivyignore.yaml` — CVE/misconfig accepts. Each entry has `expired_at` so it re-surfaces on re-scan.
 - `sandbox-hardening-package.md` — ported audit doc; keep in sync with macolima.
 - `docs/_archive/claude_internal_audit_wsl.md` — manual audit prompt (superseded by tier-2 probes + tier-3 skill; kept for reference).
@@ -186,8 +186,8 @@ scripts/trivy-scan.sh image   # CVE scan of windows-ai-sandbox:latest only
 - `scripts/with-egress.sh` — temporarily widen the allowlist for one command (uncomments `[tag]` blocks in `proxy/allowed_domains.txt`, hot-reloads Squid via `squid -k reconfigure`, restores verbatim on exit). flock-serialised + drift sentinel.
 - `scripts/run-ephemeral.sh` — spawn a disposable `--rm` container attached to the running profile's `sandbox-internal` network. Same hardening as the persistent agent; everything outside bind mounts is discarded on exit.
 - `scripts/trivy-scan.sh` — host-side image/config/secret scan. Requires trivy installed.
-- `config/hooks/deny-destructive.sh` — PreToolUse hook closing the deny-list bypass class (find -delete, dd of=, etc.). See `docs/deny-destructive-hook-plan.md`.
-- `config/skills/audit-sandbox/SKILL.md` — tier-3 agent-side skill for judgment over the audit JSON.
+- `sandbox_templates/claude/hooks/deny-destructive.sh` — PreToolUse hook closing the deny-list bypass class (find -delete, dd of=, etc.). See `docs/deny-destructive-hook-plan.md`.
+- `sandbox_templates/skills/audit-sandbox/SKILL.md` — tier-3 agent-side skill for judgment over the audit JSON.
 
 ### Dev Container Integration
 VS Code attaches to the **already-running** profile container — there is no
@@ -238,7 +238,7 @@ See [`docs/vscode-integration-security.md`](docs/vscode-integration-security.md)
 ├── justfile                      # Optional front door; thin pass-throughs to profile.sh/setup.sh
 ├── seccomp.json                  # Syscall filter
 ├── .trivyignore.yaml             # Accepted CVEs/misconfigs with expiries
-├── config/                       # Dotfiles + claude-settings.json + db.env.template + hooks + skills + pdf-styles
+├── sandbox_templates/            # Assets injected into sandboxes: common/ (dotfiles, db.env.template, pdf-styles), claude/ (claude-settings.json, hooks), skills/
 ├── proxy/                        # Squid.conf + allowed_domains.txt
 ├── scripts/                      # profile.sh, init-profile-state.sh, with-egress.sh, verify-sandbox.sh, audit/, trivy-scan.sh
 ├── docs/                         # Design notes, permissions model, seccomp/squid internals, debug recipes

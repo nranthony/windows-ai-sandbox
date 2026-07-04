@@ -172,4 +172,4 @@ committed transactions — fine for a dev control plane.
 
 - `therapod/pipeline/CLAUDE.md` § "Where to find Postgres — by execution context"
 - `therapod/pipeline/docs/dev_runbook.md` — backfill + verify + API inspection
-- `config/db.env.template` — the credential template this `db.env` was based on
+- `sandbox_templates/common/db.env.template` — the credential template this `db.env` was based on
