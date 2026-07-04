@@ -1,19 +1,39 @@
 #!/bin/bash
 set -e # Exit immediately if a command exits with a non-zero status.
 
-echo "--- Starting Rootless Docker Setup for WSL ---"
+echo "--- Starting Rootless Docker Setup (WSL2 or bare Linux) ---"
+
+# -----------------------------------------------------------------------------
+# --- GPU detection ---
+# -----------------------------------------------------------------------------
+# NVIDIA container-toolkit steps only apply when the host has an NVIDIA
+# driver: WSL2 GPU paravirtualization (/dev/dxg) or a native Linux driver
+# (nvidia-smi on PATH). Hosts with neither skip every NVIDIA section below —
+# the rest of this script (rootless Docker, daemon.json, kickstart, firewall,
+# audit rules) is substrate-agnostic. Override detection with SETUP_GPU=1|0.
+case "${SETUP_GPU:-auto}" in
+  1|true|yes)  GPU=1 ;;
+  0|false|no)  GPU=0 ;;
+  auto) if [ -e /dev/dxg ] || command -v nvidia-smi >/dev/null 2>&1; then GPU=1; else GPU=0; fi ;;
+  *) echo "SETUP_GPU='${SETUP_GPU}' invalid (use 0, 1, or auto)" >&2; exit 1 ;;
+esac
+[ "$GPU" = 1 ] && echo "--- GPU detected (or forced): NVIDIA toolkit steps ENABLED" \
+               || echo "--- No GPU detected: NVIDIA toolkit steps SKIPPED (SETUP_GPU=1 to force)"
+
 sudo apt-get update
 
-# -----------------------------------------------------------------------------  
+# -----------------------------------------------------------------------------
 # --- Install Prerequisites ---
-# -----------------------------------------------------------------------------  
+# -----------------------------------------------------------------------------
 echo "--- Installing Docker Engine, Nvidia Container Toolkit, and prerequisits... ---"
 
 # --- Nvidia ---
+if [ "$GPU" = 1 ]; then
 curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | sudo gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg \
   && curl -s -L https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list | \
     sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' | \
     sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list
+fi
 # Add Docker's official GPG key
 sudo install -m 0755 -d /etc/apt/keyrings
 curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
@@ -32,13 +52,15 @@ sudo apt-get install -y ca-certificates jq curl gnupg uidmap dbus-user-session a
 sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
 # Disable the rootful Docker daemon
 sudo systemctl disable --now docker.service docker.socket || true
-# Install Nvidia Toolkit packages
-export NVIDIA_CONTAINER_TOOLKIT_VERSION=1.17.8-1
+# Install Nvidia Toolkit packages (GPU hosts only)
+if [ "$GPU" = 1 ]; then
+  export NVIDIA_CONTAINER_TOOLKIT_VERSION=1.17.8-1
   sudo apt-get install -y \
       nvidia-container-toolkit=${NVIDIA_CONTAINER_TOOLKIT_VERSION} \
       nvidia-container-toolkit-base=${NVIDIA_CONTAINER_TOOLKIT_VERSION} \
       libnvidia-container-tools=${NVIDIA_CONTAINER_TOOLKIT_VERSION} \
       libnvidia-container1=${NVIDIA_CONTAINER_TOOLKIT_VERSION}
+fi
 
 # -----------------------------------------------------------------------------  
 # --- Configure System for Persistence and Automation ---
@@ -183,18 +205,20 @@ else
   echo "Kickstart script already exists. Skipping."
 fi
 
-# -----------------------------------------------------------------------------  
-# Configure NVIDIA runtime for *rootless* Docker  
 # -----------------------------------------------------------------------------
-echo "# ----- Configuring NVIDIA runtime for rootless Docker -----"
-sudo nvidia-ctk runtime configure \
-      --runtime=docker \
-      --config=/etc/docker/daemon.json \
-      --nvidia-set-as-default \
-      --enable-cdi
+# Configure NVIDIA runtime for *rootless* Docker (GPU hosts only)
+# -----------------------------------------------------------------------------
+if [ "$GPU" = 1 ]; then
+  echo "# ----- Configuring NVIDIA runtime for rootless Docker -----"
+  sudo nvidia-ctk runtime configure \
+        --runtime=docker \
+        --config=/etc/docker/daemon.json \
+        --nvidia-set-as-default \
+        --enable-cdi
 
-echo "# ----- Disabling cgroup ops that rootless Docker cannot perform -----"
-sudo nvidia-ctk config --set nvidia-container-cli.no-cgroups --in-place
+  echo "# ----- Disabling cgroup ops that rootless Docker cannot perform -----"
+  sudo nvidia-ctk config --set nvidia-container-cli.no-cgroups --in-place
+fi
 
 # -----------------------------------------------------------------------------  
 # --- Restart Docker in the now-healthy session ---
@@ -239,11 +263,15 @@ docker version
 # --- Smoke test Nvidia Container Toolki in test conatainer ---
 # -----------------------------------------------------------------------------  
 
-echo "# ----- Smoke-testing with nvidia-smi in a container -----"
-if docker run --rm --gpus all nvidia/cuda:12.9.0-base-ubuntu24.04 nvidia-smi >/dev/null 2>&1; then
-    echo "✅  NVIDIA runtime is active inside rootless Docker."
+if [ "$GPU" = 1 ]; then
+  echo "# ----- Smoke-testing with nvidia-smi in a container -----"
+  if docker run --rm --gpus all nvidia/cuda:12.9.0-base-ubuntu24.04 nvidia-smi >/dev/null 2>&1; then
+      echo "✅  NVIDIA runtime is active inside rootless Docker."
+  else
+      echo "❌  GPU test failed.  See 'journalctl --user -u docker -n 50'." >&2
+  fi
 else
-    echo "❌  GPU test failed.  See 'journalctl --user -u docker -n 50'." >&2
+  echo "# ----- Skipping NVIDIA smoke test (no GPU on this host) -----"
 fi
 
 # -----------------------------------------------------------------------------  
