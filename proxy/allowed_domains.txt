@@ -94,6 +94,10 @@ www.googleapis.com
 # console sign-in (2026-06-19):
 cloudcode-pa.googleapis.com
 daily-cloudcode-pa.googleapis.com
+# Code Assist sign-in/eligibility companions (tier-2 probe REQUIRED_DOMAINS —
+# audit reported DRIFT while these were absent, 2026-07-04):
+codeassist.google.com
+developers.google.com
 # Candidates also embedded in the `agy` binary — uncomment if startup/auth/run
 # hits a TCP_DENIED (verify against Squid access.log on first authed run; kept
 # commented to keep egress tight):
