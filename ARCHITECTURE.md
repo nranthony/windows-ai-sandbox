@@ -95,7 +95,7 @@ Deliberately NOT installed in the image: `bubblewrap`, `socat`,
 ├── .trivyignore.yaml             # Accepted CVEs/misconfigs with expiries
 ├── .agents/skills/               # Host-agent operational guides
 ├── sandbox_templates/            # Assets injected into sandboxes
-│   ├── common/                   #   dotfiles, db.env.template, pdf-styles/, agent-notices/
+│   ├── common/                   #   dotfiles, db.env.template, pdf-styles/
 │   ├── claude/                   #   claude-settings.json, hooks/ (deny-destructive)
 │   └── skills/                   #   sandbox-side skills (audit-sandbox tier-3)
 ├── proxy/                        # squid.conf + allowed_domains.txt (egress allowlist)
