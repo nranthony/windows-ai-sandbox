@@ -30,6 +30,11 @@
 #                   sandbox_templates/claude/claude-settings.json (backs up the old one)
 #   reset-skills    overwrite this profile's claude skills from sandbox_templates/skills/
 #                   (backs up old skill dirs)
+#   db <SUB>        set this profile's DEFAULT DB sibling(s) so a plain `up`
+#                   brings them up with no COMPOSE_PROFILES prefix (persisted in
+#                   the profile's compose-profiles file, mirroring subnet-octet).
+#                   SUB: enable <postgres|mongo|all> | disable | status.
+#                   Does not touch running containers — run up/recreate to apply.
 #   db-reset        wipe the postgres data volume and bring postgres back up
 #                   with a fresh initdb. Flags: --yes (skip confirmation).
 #   clean           prune rotating state (old .claude.json backups, paste-cache,
@@ -293,6 +298,20 @@ ensure_octet_free() {
   export SANDBOX_OCTET="$want"
 }
 
+# Persistent per-profile DB selection. Mirrors subnet-octet: one small file under
+# the profile's state dir, read on every command and exported before any compose
+# call, so `up`/`recreate`/`rebuild` bring the chosen DB sibling(s) up WITHOUT a
+# COMPOSE_PROFILES prefix (closes the "plain up starts no Postgres" footgun).
+# An explicit COMPOSE_PROFILES in the environment always wins as a one-shot
+# override and is NOT persisted — set the durable default with `db enable`.
+ensure_compose_profiles() {
+  local f="$PROFILES_ROOT/$PROFILE/compose-profiles" want
+  if [[ -n "${COMPOSE_PROFILES+x}" ]]; then return; fi   # env override — respect, don't touch the file
+  if [[ -f "$f" ]] && read -r want < "$f" && [[ -n "$want" ]]; then
+    export COMPOSE_PROFILES="$want"
+  fi
+}
+
 # ---------------------------------------------------------------------------
 # Compose overlays — base file + conditional layers
 # ---------------------------------------------------------------------------
@@ -459,6 +478,10 @@ AGENT="ai-sandbox-$PROFILE"
 # call below. Cheap (file read after first assignment); up-family commands
 # additionally run ensure_octet_free before creating the network.
 ensure_subnet_octet
+
+# Export this profile's persisted DB selection (COMPOSE_PROFILES) for every
+# compose call below, unless the caller set it explicitly. Cheap file read.
+ensure_compose_profiles
 
 # Layer the WSL2 GPU overlay when the substrate has one (see add_gpu_overlay).
 # Runs before parse_flags so --expose-dev stacks on top of it.
@@ -681,6 +704,51 @@ case "$CMD" in
     ok "all skills reset. Restart claude inside the container to pick up."
     ;;
 
+  db)
+    # Manage this profile's DEFAULT DB siblings. Writes the persisted
+    # compose-profiles file (mirroring subnet-octet) that ensure_compose_profiles
+    # reads into COMPOSE_PROFILES on every command — so once enabled, a plain
+    # `up` brings the DB up with no env-var prefix. Does not touch running
+    # containers; run `up`/`recreate` afterwards to apply.
+    f="$PROFILES_ROOT/$PROFILE/compose-profiles"
+    sub="${1:-status}"
+    case "$sub" in
+      enable)
+        case "${2:-}" in
+          postgres) sel=db-postgres ;;
+          mongo)    sel=db-mongo ;;
+          all)      sel=db-all ;;
+          "")       fail "db enable: which? (postgres | mongo | all)" ;;
+          *)        fail "db enable: unknown target '${2}' (valid: postgres | mongo | all)" ;;
+        esac
+        mkdir -p "$PROFILES_ROOT/$PROFILE"
+        printf '%s\n' "$sel" > "$f"
+        ok "profile '$PROFILE' default DB set to '$sel'"
+        info "apply it now:  scripts/profile.sh $PROFILE up   (or recreate, if already up)"
+        ;;
+      disable)
+        if [[ -f "$f" ]]; then
+          rm -f "$f"
+          ok "profile '$PROFILE' DB default cleared — 'up' now brings agent + proxy only"
+          info "stop a running DB sibling with:  scripts/profile.sh $PROFILE recreate"
+        else
+          info "profile '$PROFILE' had no DB default set (nothing to clear)"
+        fi
+        ;;
+      status)
+        if [[ -n "${COMPOSE_PROFILES+x}" ]]; then
+          info "COMPOSE_PROFILES='${COMPOSE_PROFILES}' set in environment (one-shot override; not persisted)"
+        fi
+        if [[ -f "$f" ]] && read -r cur < "$f" && [[ -n "$cur" ]]; then
+          ok "profile '$PROFILE' default DB: $cur"
+        else
+          info "profile '$PROFILE' has no default DB (plain 'up' = agent + proxy only)"
+        fi
+        ;;
+      *) fail "db: unknown subcommand '$sub' (valid: enable <postgres|mongo|all> | disable | status)" ;;
+    esac
+    ;;
+
   db-reset)
     PG_CONTAINER="postgres-$PROFILE"
     PG_VOLUME="${COMPOSE_PROJECT_NAME}_postgres-data"
@@ -741,7 +809,12 @@ case "$CMD" in
     echo "    -c 'CREATE DATABASE <name> OWNER agent;'"
     echo ""
     info "Then force-recreate the agent if you changed DSNs in db.env:"
-    echo "  COMPOSE_PROFILES=db-postgres scripts/profile.sh $PROFILE recreate"
+    if [[ "${COMPOSE_PROFILES:-}" == db-* ]]; then
+      echo "  scripts/profile.sh $PROFILE recreate   (db default already set for this profile)"
+    else
+      echo "  COMPOSE_PROFILES=db-postgres scripts/profile.sh $PROFILE recreate"
+      echo "  (make it the default so plain 'up' includes Postgres:  scripts/profile.sh $PROFILE db enable postgres)"
+    fi
     ;;
 
   wipe)

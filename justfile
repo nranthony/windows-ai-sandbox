@@ -123,6 +123,11 @@ clean profile *args:
 wipe profile *args:
     {{profile_sh}} {{profile}} wipe {{args}}
 
+# set this profile's default DB sibling(s) so plain `up` includes them.
+# SUB: enable <postgres|mongo|all> | disable | status
+db profile *args:
+    {{profile_sh}} {{profile}} db {{args}}
+
 # wipe the postgres data volume + fresh initdb. Accepts --yes.
 db-reset profile *args:
     {{profile_sh}} {{profile}} db-reset {{args}}

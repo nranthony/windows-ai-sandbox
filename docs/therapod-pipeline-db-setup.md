@@ -160,10 +160,13 @@ committed transactions — fine for a dev control plane.
 
 ## Make it permanent (optional repo changes)
 
-1. **Default `db-postgres` on for therapod.** Add a per-profile
-   `compose-profiles` file (mirroring `subnet-octet`) and have `profile.sh`
-   default `COMPOSE_PROFILES` from it, so the DB sibling comes up on every `up`
-   without the env-var prefix.
+1. **Default `db-postgres` on for therapod.** ✅ DONE. `profile.sh` now keeps a
+   per-profile `compose-profiles` file (mirroring `subnet-octet`) that
+   `ensure_compose_profiles` reads into `COMPOSE_PROFILES` on every command, so
+   the DB sibling comes up on every `up` without the env-var prefix. Set it with
+   `scripts/profile.sh <p> db enable postgres` (`disable`/`status` round it out;
+   an explicit `COMPOSE_PROFILES=` in the env still wins as a one-shot override).
+   Already enabled for `therapod`.
 2. **API as a managed process** instead of a backgrounded `nohup` — a small
    in-container supervisor or a compose overlay service on `sandbox-internal`,
    if auto-restart is wanted.
