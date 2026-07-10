@@ -61,4 +61,25 @@ if [[ -f "$BASE/config/git/config" ]] && \
     && mv "$BASE/config/git/config.scrubbed" "$BASE/config/git/config"
 fi
 
+# Git identity: seed AND enforce a noreply address on every run. This file is
+# the container's GIT_CONFIG_GLOBAL, so it governs every repo under
+# /workspace — commits authored in the sandbox must never carry a personal
+# email. GIT_USER_NAME/GIT_USER_EMAIL override the defaults, but an override
+# email that is not a users.noreply.github.com address is refused (that is
+# the whole guarantee). Mirrors ensure_state in profile.sh.
+GIT_ID_NAME="${GIT_USER_NAME:-nranthony}"
+GIT_ID_EMAIL="${GIT_USER_EMAIL:-16306836+nranthony@users.noreply.github.com}"
+if [[ "$GIT_ID_EMAIL" != *@users.noreply.github.com ]]; then
+  echo "warning: GIT_USER_EMAIL '$GIT_ID_EMAIL' is not a users.noreply.github.com address — using default noreply identity" >&2
+  GIT_ID_NAME="nranthony"
+  GIT_ID_EMAIL="16306836+nranthony@users.noreply.github.com"
+fi
+CUR_EMAIL=""
+[[ -f "$BASE/config/git/config" ]] && \
+  CUR_EMAIL="$(git config --file "$BASE/config/git/config" user.email 2>/dev/null || true)"
+if [[ "$CUR_EMAIL" != *@users.noreply.github.com ]]; then
+  git config --file "$BASE/config/git/config" user.name  "$GIT_ID_NAME"
+  git config --file "$BASE/config/git/config" user.email "$GIT_ID_EMAIL"
+fi
+
 echo "profile state ready: $BASE"

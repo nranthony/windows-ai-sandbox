@@ -198,6 +198,20 @@ else
   pass "no host-reaching credential.helper (resolved across system/global/local + global-file belt)"
 fi
 
+# --- git identity is a noreply address (no personal email in commits) -------
+# ensure_state seeds/enforces [user] in the GIT_CONFIG_GLOBAL file on every
+# `up`; this tripwire catches drift (hand edits, tool rewrites, VS Code
+# copyGitConfig) that would stamp a personal email onto commits authored
+# inside the sandbox. Resolved config, so any layer that wins is checked.
+id_email="$(git config user.email 2>/dev/null || true)"
+if [[ "$id_email" == *@users.noreply.github.com ]]; then
+  pass "git user.email is a noreply address ($id_email)"
+elif [[ -z "$id_email" ]]; then
+  fail "git user.email unset — identity seed missing (rerun 'profile.sh <p> up')"
+else
+  fail "git user.email '$id_email' is not a users.noreply.github.com address — personal email would leak into commits"
+fi
+
 echo ""
 echo "== $PASS passed | $FAIL failed | $WARN warnings =="
 [[ $FAIL -eq 0 ]]

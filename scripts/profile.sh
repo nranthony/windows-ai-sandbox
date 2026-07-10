@@ -156,16 +156,27 @@ ensure_state() {
     ' "$p/config/git/config" > "$p/config/git/config.scrubbed" \
       && mv "$p/config/git/config.scrubbed" "$p/config/git/config"
   fi
-  if [[ -n "${GIT_USER_NAME:-}" ]] && [[ -n "${GIT_USER_EMAIL:-}" ]]; then
-    if [[ ! -f "$p/config/git/config" ]] || \
-       ! grep -qE '^\[user\]' "$p/config/git/config"; then
-      {
-        printf '[user]\n\tname = %s\n\temail = %s\n' \
-          "$GIT_USER_NAME" "$GIT_USER_EMAIL"
-        [[ -f "$p/config/git/config" ]] && cat "$p/config/git/config"
-      } > "$p/config/git/config.new" \
-        && mv "$p/config/git/config.new" "$p/config/git/config"
-    fi
+  # Git identity: seed AND enforce a noreply address on every up. This file is
+  # the container's GIT_CONFIG_GLOBAL, so it governs every repo under
+  # /workspace — commits authored in the sandbox must never carry a personal
+  # email. GIT_USER_NAME/GIT_USER_EMAIL override the defaults, but an override
+  # email that is not a users.noreply.github.com address is refused (that is
+  # the whole guarantee). Mirrors init-profile-state.sh.
+  local git_id_name="${GIT_USER_NAME:-nranthony}"
+  local git_id_email="${GIT_USER_EMAIL:-16306836+nranthony@users.noreply.github.com}"
+  if [[ "$git_id_email" != *@users.noreply.github.com ]]; then
+    warn "GIT_USER_EMAIL '$git_id_email' is not a users.noreply.github.com address — using default noreply identity"
+    git_id_name="nranthony"
+    git_id_email="16306836+nranthony@users.noreply.github.com"
+  fi
+  local cur_email=""
+  [[ -f "$p/config/git/config" ]] && \
+    cur_email="$(git config --file "$p/config/git/config" user.email 2>/dev/null || true)"
+  if [[ "$cur_email" != *@users.noreply.github.com ]]; then
+    [[ -n "$cur_email" ]] && \
+      warn "replacing non-noreply git user.email '$cur_email' with '$git_id_email'"
+    git config --file "$p/config/git/config" user.name  "$git_id_name"
+    git config --file "$p/config/git/config" user.email "$git_id_email"
   fi
   if [[ -f "$p/db.env" ]]; then
     chmod 600 "$p/db.env" 2>/dev/null || warn "could not chmod 600 $p/db.env"

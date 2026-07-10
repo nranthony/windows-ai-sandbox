@@ -35,7 +35,7 @@ The agent's deny list blocks `git config` because that subcommand can rewrite `c
 
 Two legitimate paths to attribute commits correctly:
 
-1. **Persistent (preferred):** set `GIT_USER_NAME` / `GIT_USER_EMAIL` env vars in your host shell rc. `ensure_state()` auto-seeds `[user] name=…  email=…` into the profile's `config/git/config` on first `up` if the `[user]` section is missing.
+1. **Persistent (default):** `ensure_state()` seeds `[user] name=nranthony  email=16306836+nranthony@users.noreply.github.com` into the profile's `config/git/config` and re-enforces it on **every** `up`: any `user.email` that is not a `users.noreply.github.com` address (i.e. a personal email) is overwritten. `GIT_USER_NAME` / `GIT_USER_EMAIL` host env vars override the defaults, but a non-noreply override email is refused. `verify-sandbox.sh` fails tier 1 if the resolved in-container `user.email` is ever non-noreply.
 2. **Per-commit env-var fallback:** `GIT_AUTHOR_NAME=… GIT_AUTHOR_EMAIL=… GIT_COMMITTER_NAME=… GIT_COMMITTER_EMAIL=… git commit …`. Sets identity on the single commit object only; no config file write.
 
 ## gh/glab and the proxy
