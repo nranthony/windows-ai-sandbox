@@ -46,12 +46,13 @@ api.claude.com
 platform.claude.com
 claude.ai
 
-# --- ClickUp MCP [clickup] ---
+# --- ClickUp MCP/API [clickup] ---
 # Remote MCP server (mcp.clickup.com) driven through Claude, plus the OAuth
 # authorize (app.clickup.com) + token-exchange (api.clickup.com) hosts the
 # sign-in flow redirects through. Pinned subdomains only — no `.clickup.com`
 # wildcard (M3). If sign-in or a tool call hits a TCP_DENIED on a sibling
 # host, check Squid access.log and add the specific host here.
+t90141364643.p.clickup-attachments.com
 mcp.clickup.com
 app.clickup.com
 api.clickup.com
@@ -189,6 +190,14 @@ api.biorxiv.org
 www.biorxiv.org
 www.medrxiv.org
 chemrxiv.org
+
+# --- Google Fonts [google-fonts] ---
+# Web-dev font pulls. fonts.googleapis.com serves the CSS API
+# (@import/link href); fonts.gstatic.com serves the woff2 font files the
+# CSS references. These two hosts cover the whole fetch path. Pinned —
+# never wildcard `.googleapis.com` or `.gstatic.com` (M3).
+fonts.googleapis.com
+fonts.gstatic.com
 
 # --- OS packages — apt-get inside the container [apt] ---
 # archive.ubuntu.com
