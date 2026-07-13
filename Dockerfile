@@ -255,7 +255,7 @@ RUN chmod 0755 /usr/local/lib/claude-hooks/deny-destructive.sh
 # auth-antigravity`, or just `agy`); config lives under /root/.gemini/antigravity-cli/.
 ARG AI_CLI_REFRESH=0
 ARG CLAUDE_VERSION=latest
-RUN npm install -g "@anthropic-ai/claude-code@${CLAUDE_VERSION}" \
+RUN npm install -g --allow-scripts=@anthropic-ai/claude-code "@anthropic-ai/claude-code@${CLAUDE_VERSION}" \
  && curl -fsSL https://antigravity.google/cli/install.sh | bash -s -- --dir /usr/local/bin \
  && claude --version \
  && /usr/local/bin/agy --version
