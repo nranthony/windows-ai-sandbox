@@ -41,6 +41,28 @@ but no-ops (already open).
 3. Verify: from inside the agent, the new host resolves through the proxy and
    `https://example.com` is still blocked (`scripts/profile.sh <p> verify`).
 
+## Recreating the proxy (network wedge)
+
+A stale bind mount (external edit swapped the allowlist file's inode) needs a
+full **recreate**, not just `squid -k reconfigure` — only a fresh container
+re-binds the mount to the current inode. Always recreate via
+`scripts/profile.sh <p> up` (force-remove first if it is already running:
+`docker rm -f egress-proxy-<p> && scripts/profile.sh <p> up`).
+
+Do **NOT** recreate the proxy with a raw, service-scoped
+`docker compose up -d --force-recreate egress-proxy` from a shell that lacks
+the profile env. Without `SANDBOX_OCTET`, compose computes the wrong expected
+subnet (`172.30.0.x` vs the live `172.30.<octet>.0/24`), decides
+`sandbox-internal` is stale, and tries to remove it — which fails because the
+running sandbox pins an endpoint, leaving the proxy **half-attached**
+(`sandbox-external` only). Every later recreate then errors with
+`is not connected to the network` / `network has active endpoints`.
+
+`profile.sh` is immune (it exports `SANDBOX_OCTET` via `ensure_octet_free`), so
+both `up` and `recreate` are safe. Recovery from a wedged proxy:
+`docker rm -f egress-proxy-<p> && scripts/profile.sh <p> up`. The dashboard's
+`recreate_proxy` routes through `profile.sh` for exactly this reason.
+
 ## Debugging denials
 
 Squid access log (tmpfs, inside the proxy container):
