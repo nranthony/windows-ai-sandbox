@@ -26,6 +26,8 @@ ENV DEBIAN_FRONTEND=noninteractive \
 # tini: PID 1 signal handling.
 # build-essential + python3-venv: native builds for ML wheels.
 # ripgrep/jq/less/vim-tiny: agent + interactive ergonomics.
+# just (command runner) is NOT here — noble ships only 1.21.0, too old for
+# recipe attributes like [doc(...)]; baked from upstream below instead.
 # NOT installed (deliberate, see sandbox-hardening-package.md §7):
 #   - bubblewrap:     Claude Code's in-process sandbox needs unprivileged user
 #                     namespaces, which our seccomp profile correctly blocks.
@@ -234,6 +236,90 @@ COPY sandbox_templates/common/pdf-styles/legal.css /usr/local/share/pdf-styles/l
 # Not using COPY --chmod= to stay portable across non-BuildKit builders.
 COPY sandbox_templates/claude/hooks/deny-destructive.sh /usr/local/lib/claude-hooks/deny-destructive.sh
 RUN chmod 0755 /usr/local/lib/claude-hooks/deny-destructive.sh
+
+# ---------- just (command runner) -------------------------------------------
+# Agents run per-repo justfile recipes in /workspace (settings already allow
+# `Bash(just:*)`). Ubuntu noble ships only just 1.21.0 — too old for recipe
+# attributes like [doc(...)] (added upstream in 1.27.0) — so we bake a pinned
+# upstream prebuilt binary, checksum-verified against the release SHA256SUMS
+# (the just.systems installer does NOT verify). Static musl binary, arch-aware
+# amd64/arm64. No runtime egress — a local task runner fetches nothing; the
+# download runs at build time on the host network, bypassing Squid. Bump = edit
+# JUST_VERSION (re-pull + re-verify). Same sha256-pin + arch-aware idiom as the
+# gitstatusd/glab blocks.
+#
+# The binary lands in /usr/local/libexec and a thin wrapper takes its place on
+# PATH: just runs a shebang recipe (`#!/usr/bin/env bash` ...) by writing the
+# script to $TMPDIR and EXEC'ing it, but this sandbox mounts /tmp noexec (audit
+# Finding G), so a default shebang recipe dies with EACCES ("Permission denied
+# (os error 13)"). The wrapper points TMPDIR at a dedicated exec-allowed rootfs
+# dir (/var/lib/just-tmp, 0700 root-owned) for just ONLY — global /tmp stays
+# noexec + tmpfs-fast for npm/uv/builds; a global TMPDIR override would weaken
+# Finding G and slow every build. A private 0700 dir (vs world-writable
+# /var/tmp) removes any shared-tmp race and reads intentionally in an audit.
+# Override with $JUST_TMPDIR. just removes its per-run tempdir, so nothing
+# accumulates. verify-sandbox.sh asserts a shebang recipe runs.
+ARG JUST_VERSION=1.56.0
+RUN ARCH="$(dpkg --print-architecture)" \
+ && case "$ARCH" in \
+      amd64) TARGET="x86_64-unknown-linux-musl" ;; \
+      arm64) TARGET="aarch64-unknown-linux-musl" ;; \
+      *) echo "unsupported arch: $ARCH" >&2; exit 1 ;; \
+    esac \
+ && ARCHIVE="just-${JUST_VERSION}-${TARGET}.tar.gz" \
+ && BASE="https://github.com/casey/just/releases/download/${JUST_VERSION}" \
+ && curl -fsSL -o /tmp/just.tar.gz "${BASE}/${ARCHIVE}" \
+ && curl -fsSL -o /tmp/SHA256SUMS  "${BASE}/SHA256SUMS" \
+ && EXPECTED="$(awk -v f="$ARCHIVE" '$2==f{print $1}' /tmp/SHA256SUMS)" \
+ && [ -n "$EXPECTED" ] || { echo "no SHA256SUMS entry for $ARCHIVE" >&2; exit 1; } \
+ && echo "${EXPECTED}  /tmp/just.tar.gz" | sha256sum -c - \
+ && mkdir -p /usr/local/libexec /var/lib/just-tmp \
+ && chmod 0700 /var/lib/just-tmp \
+ && tar -xzf /tmp/just.tar.gz -C /usr/local/libexec just \
+ && printf '%s\n' \
+      '#!/bin/sh' \
+      '# /tmp is noexec here; just execs shebang recipes from $TMPDIR. Point' \
+      '# just (only) at a private exec-allowed dir so shebang recipes run. See Dockerfile.' \
+      'TMPDIR="${JUST_TMPDIR:-/var/lib/just-tmp}"; export TMPDIR' \
+      'exec /usr/local/libexec/just "$@"' \
+      > /usr/local/bin/just \
+ && chmod 0755 /usr/local/bin/just \
+ && rm -f /tmp/just.tar.gz /tmp/SHA256SUMS \
+ && just --version
+
+# ---------- beads (bd) — per-repo execution ledger --------------------------
+# Git-backed, dependency-graph issue tracker (gastownhall/beads; Go + embedded
+# Dolt). Adopted per docs/adr ADR-0005 + BEADS_ADOPTION_PLAN — this sandbox is
+# the runtime for the project_zenbu pilot. Baked because container-global
+# installs live on the ephemeral rootfs: a hand-run `bd` install vanishes on
+# recreate (only /workspace + ~/.ai-sandbox mounts persist), so this is the
+# only durable path — same reasoning that puts claude/agy/glab in the image.
+# Embedded Dolt is in-process: no separate `dolt` binary, no sql-server host
+# for the pilot.
+#
+# Canonical upstream install.sh: auto-targets /usr/local/bin (writable as root
+# — the exec-allowed, persistent path; NOT ~/.local, a noexec+ephemeral tmpfs
+# at runtime), and REFUSES to install unless the release archive's SHA256
+# matches the signed checksums.txt. Runs at BUILD time with full caps (host
+# network, bypassing Squid) — so no build-time allowlist entry is needed and
+# the tar-extract chown succeeds. RUNTIME `bd` is local; the only network op is
+# `bd dolt push/pull` -> github.com (already always-on).
+#
+# UPGRADE = rebuild this layer. In-container `bd upgrade` / install.sh CANNOT
+# run under the runtime hardening: cap_drop ALL strips CAP_CHOWN, so tar-
+# extracting the release archive dies on "Cannot change ownership ... Operation
+# not permitted", and a /usr/local/bin write wouldn't survive recreate anyway.
+# (Verified: the BAKED bd + embedded Dolt run cleanly under seccomp + cap_drop
+# ALL + no-new-privileges — init/create/ready --json all pass.) The
+# [beads-install] allowlist block only widens egress; it does not lift that cap
+# limit — see proxy/allowed_domains.txt.
+#
+# Deliberately ABOVE the AI-CLI refresh tail: `--refresh-ai` must NOT silently
+# bump bd (young storage engine — upgrades are a backup+doctor step per the
+# plan). Editing this line re-pulls latest; that + the conventions-repo
+# VERSION.md is the pin of record.
+RUN curl -fsSL https://raw.githubusercontent.com/gastownhall/beads/main/scripts/install.sh | bash \
+ && bd version
 
 # ---------- AI CLI refresh layer (Claude Code + Antigravity agy) -------------
 # Deliberately the LAST build step so bumping either CLI rebuilds only this tail

@@ -24,7 +24,7 @@ Per profile (both substrates):
 
 ```
 rootless Docker (userns: container UID 0 ↔ host UID 1000)
-  ├─ windows-ai-sandbox:latest   (shared image: CUDA + claude + agy + gh + glab + uv + zsh)
+  ├─ windows-ai-sandbox:latest   (shared image: CUDA + claude + agy + bd + gh + glab + just + uv + zsh)
   └─ per profile:
       ├─ ai-sandbox-<profile>    (agent; /workspace = ~/repo/<profile>/)
       ├─ egress-proxy-<profile>  (Squid; domain allowlist is the only way out)
@@ -58,6 +58,7 @@ See `sandbox-hardening-package.md` §4 and `docs/compose-network-ipam.md`.
 ├── cache/             → /root/.cache            (npm, uv, pip caches)
 ├── config/            → /root/.config           (gh/, glab-cli/, git/config)
 ├── gemini-home/       → /root/.gemini           (Antigravity CLI `agy` home)
+├── kaggle/            → /root/.kaggle           (kaggle.json, chmod 600; optional — egress gated by [kaggle] allowlist)
 ├── subnet-octet       (this profile's 172.30.<octet>.0/24 allocation)
 └── db.env             (optional; postgres/mongo credentials — see
                         sandbox_templates/common/db.env.template)

@@ -132,6 +132,22 @@ command -v claude >/dev/null && pass "claude CLI present" || fail "claude CLI mi
 command -v gh     >/dev/null && pass "gh CLI present"     || fail "gh CLI missing"
 command -v glab   >/dev/null && pass "glab CLI present"   || fail "glab CLI missing"
 command -v uv     >/dev/null && pass "uv present"         || fail "uv missing"
+command -v just   >/dev/null && pass "just present"       || fail "just missing"
+command -v bd     >/dev/null && pass "bd (beads) present" || fail "bd (beads) missing"
+
+# just shebang recipes must run despite /tmp being noexec: just writes the
+# recipe script to $TMPDIR then execs it, so the baked /usr/local/bin/just
+# wrapper repoints TMPDIR at an exec-allowed dir. Regression guard for that fix.
+if command -v just >/dev/null; then
+  JT=$(mktemp -d)
+  printf '%s\n' 'r:' '    #!/usr/bin/env bash' '    echo shebang_ok' > "$JT/justfile"
+  if [[ "$(cd "$JT" && just r 2>/dev/null)" == "shebang_ok" ]]; then
+    pass "just shebang recipe executes (noexec /tmp worked around)"
+  else
+    fail "just shebang recipe blocked — /tmp noexec + missing tempdir wrapper (os error 13)?"
+  fi
+  rm -rf "$JT"
+fi
 
 # --- GPU passthrough sanity -------------------------------------------------
 # GPU is a WSL2-overlay concern (docker-compose.wsl-gpu.yml). Both artifacts

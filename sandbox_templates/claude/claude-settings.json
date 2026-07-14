@@ -71,6 +71,7 @@
       "Bash(uv run:*)",
       "Bash(make:*)",
       "Bash(just:*)",
+      "Bash(bd:*)",
       "Bash(jq:*)"
     ],
     "deny": [
@@ -91,6 +92,9 @@
       "Bash(git pull:*)",
       "Bash(git submodule:*)",
       "Bash(git config:*)",
+      "Bash(bd dolt:*)",
+      "Bash(bd init:*)",
+      "Bash(bd setup:*)",
       "Bash(gh:*)",
       "Bash(glab:*)",
       "Bash(npm install:*)",

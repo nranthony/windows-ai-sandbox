@@ -24,7 +24,8 @@ mkdir -p \
   "$BASE/config/gh" \
   "$BASE/config/glab-cli" \
   "$BASE/config/git" \
-  "$BASE/gemini-home"
+  "$BASE/gemini-home" \
+  "$BASE/kaggle"
 
 # Single-file bind mount target — must exist on host, non-empty JSON.
 if [[ ! -s "$BASE/claude.json" ]]; then

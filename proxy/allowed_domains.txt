@@ -162,6 +162,20 @@ numerai-datasets-us-west-2.s3-us-west-2.amazonaws.com
 numerai-datasets.s3.amazonaws.com
 numerai-public-datasets.s3-us-west-2.amazonaws.com
 
+# --- Kaggle CLI [kaggle] ---
+# `kaggle` package (pip-installed, already covered by [pypi]) talks to the
+# REST API at https://www.kaggle.com/api/v1/... for competitions
+# list/download/submit. Competition data files are served from GCS behind
+# that API — storage.googleapis.com is broad (all public GCS buckets); if
+# this becomes a recurring workload, consider narrowing to the specific
+# bucket subdomain seen in Squid access.log instead of the parent host.
+# Needs ~/.kaggle/kaggle.json (or KAGGLE_USERNAME/KAGGLE_KEY) for auth and
+# the competition's rules accepted on kaggle.com — neither is an egress
+# concern, both are on you.
+www.kaggle.com
+kaggle.com
+storage.googleapis.com
+
 # --- therapod citation_tools / paperbridge [citation-tools] ---
 # Egress for ~/repo/therapod/citation_tools (see its docs/required_domains.md).
 # Read-only academic/citation APIs + search/tracing + preprint servers. Every
@@ -239,6 +253,21 @@ fonts.gstatic.com
 # antigravity.google
 # antigravity-cli-auto-updater-974169037036.us-central1.run.app
 # storage.googleapis.com
+
+# # --- Beads bd asset hosts [beads-install] ---
+# # GitHub release-asset + raw-script hosts that bd's installer/upgrader touch
+# # (gastownhall/beads). Named by ADR-0005 and kept here for grep — BUT the real
+# # upgrade path is an image rebuild, NOT in-container `bd upgrade`: extracting
+# # the release tarball needs CAP_CHOWN, which cap_drop ALL removes, so
+# # in-container install.sh dies on `tar: Cannot change ownership`, and a
+# # /usr/local/bin write wouldn't survive recreate regardless. Opening egress
+# # does NOT lift that cap limit. Normal agent use needs none of these — runtime
+# # bd is local (embedded Dolt) and `bd dolt push/pull` uses github.com (already
+# # always-on). Left gated only for manual fetches / a future `bd doctor` that
+# # pulls over HTTPS. See docs ADR-0005 and the Dockerfile beads block.
+# objects.githubusercontent.com
+# release-assets.githubusercontent.com
+# raw.githubusercontent.com
 
 
 # =============================================================================

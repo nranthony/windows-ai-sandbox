@@ -128,7 +128,7 @@ prune_logs() {
 # ---------------------------------------------------------------------------
 ensure_state() {
   local p="$PROFILES_ROOT/$PROFILE"
-  mkdir -p "$p/claude-home" "$p/cache" "$p/config" "$p/gemini-home"
+  mkdir -p "$p/claude-home" "$p/cache" "$p/config" "$p/gemini-home" "$p/kaggle"
   if [[ ! -s "$p/claude.json" ]]; then
     printf '{}\n' > "$p/claude.json"
   fi

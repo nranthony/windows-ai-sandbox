@@ -70,6 +70,15 @@ services:
       # is still named gemini-home (former Gemini CLI mount; kept to avoid churn).
       # The auth token is NOT persisted here — re-auth at the console per rebuild.
       - ${HOME}/.ai-sandbox/profiles/${PROFILE}/gemini-home:/root/.gemini:rw
+      # Per-profile Kaggle CLI credential. The `kaggle` CLI reads
+      # ~/.kaggle/kaggle.json by default (or KAGGLE_USERNAME/KAGGLE_KEY env);
+      # this mount persists the key across recreates like the other auth dirs.
+      # Its 600 perms carry through the bind mount — the CLI refuses a
+      # group/world-readable key. Egress to Kaggle is already gated by the
+      # [kaggle] block in allowed_domains.txt, so this mount adds NO network
+      # reach. Optional: ensure_state creates the host dir empty, so profiles
+      # without a key still come up cleanly.
+      - ${HOME}/.ai-sandbox/profiles/${PROFILE}/kaggle:/root/.kaggle:rw
 
     environment:
       - GIT_CONFIG_GLOBAL=/root/.config/git/config
