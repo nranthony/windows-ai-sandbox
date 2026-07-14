@@ -12,7 +12,7 @@ DOCKER_SOCK = os.environ.get(
     f"unix:///run/user/{os.getuid()}/docker.sock",
 )
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
-COMPOSE_FILE = os.path.join(REPO_ROOT, "docker-compose.yml")
+PROFILE_SCRIPT = os.path.join(REPO_ROOT, "scripts", "profile.sh")
 ALLOWLIST_PATH = os.path.join(REPO_ROOT, "proxy", "allowed_domains.txt")
 CONTAINER_ALLOWLIST = "/etc/squid/allowed_domains.txt"
 
@@ -112,15 +112,40 @@ class DockerClient:
             return None
 
     def recreate_proxy(self, profile: str) -> dict:
+        # Recreate ONLY the proxy container, without disturbing the shared
+        # project networks. This MUST go through scripts/profile.sh, not a raw
+        # `docker compose` call, for two reasons:
+        #
+        #   1. Network wedge. A service-scoped `up --force-recreate
+        #      egress-proxy` makes compose try to recreate sandbox-internal
+        #      too; the still-running sandbox container pins an endpoint on it,
+        #      the network removal fails mid-run, and the proxy is left
+        #      half-attached (sandbox-external only) — a wedged state that
+        #      blocks every later recreate.
+        #   2. Missing profile env. Even a plain `up` from this process recreates
+        #      the networks, because it lacks the SANDBOX_OCTET / compose-profiles
+        #      / overlay env that profile.sh exports. Without SANDBOX_OCTET,
+        #      compose computes a different expected subnet than the live
+        #      172.30.<octet>.0/24 network, decides it is stale, and tears it
+        #      down — same wedge as (1). profile.sh owns that env (golden rule 1).
+        #
+        # So: force-remove the proxy, then `profile.sh <profile> up`. profile.sh
+        # runs a plain `up -d`, sees a matching network (correct octet), and
+        # creates just the missing proxy on both networks, re-binding the
+        # allowlist mount to the current host inode (the point of the resync).
         try:
-            env = os.environ.copy()
-            env["PROFILE"] = profile
-            env["COMPOSE_PROJECT_NAME"] = f"ai-sandbox-{profile}"
+            # Ignore failure: the container may already be absent.
             subprocess.run(
-                ["docker", "compose", "-f", COMPOSE_FILE,
-                 "up", "-d", "--force-recreate", "egress-proxy"],
-                env=env, capture_output=True, text=True, check=True,
+                ["docker", "rm", "-f", f"egress-proxy-{profile}"],
+                capture_output=True, text=True,
             )
-            return {"ok": True}
-        except subprocess.CalledProcessError as e:
-            return {"ok": False, "msg": e.stderr or str(e)}
+            r = subprocess.run(
+                [PROFILE_SCRIPT, profile, "up"],
+                capture_output=True, text=True,
+            )
+            if r.returncode == 0:
+                return {"ok": True}
+            return {"ok": False,
+                    "msg": (r.stderr or r.stdout or "profile.sh up failed")}
+        except OSError as e:
+            return {"ok": False, "msg": str(e)}
