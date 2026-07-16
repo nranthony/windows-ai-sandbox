@@ -85,6 +85,10 @@ api profile *args:
 list:
     {{profile_sh}} list
 
+# cross-profile health: flag any profile whose agent/proxy/DB aren't all up together (no profile arg)
+health:
+    {{profile_sh}} health
+
 # ---- auth (profile.sh) ------------------------------------------------------
 
 # `claude login` inside the container (one-time per profile)
@@ -139,6 +143,16 @@ reset-settings profile:
 # overwrite this profile's claude skills from sandbox_templates/skills/ (backs up old)
 reset-skills profile:
     {{profile_sh}} {{profile}} reset-skills
+
+# ---- control dashboard (host-side Streamlit) --------------------------------
+
+# launch the ops dashboard (activate .venv, run streamlit on 127.0.0.1:8501)
+dashboard *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd {{justfile_directory()}}/dashboard
+    source .venv/bin/activate
+    streamlit run src/app.py {{args}}
 
 # ---- one-shot onboarding / lifecycle flags (setup.sh) -----------------------
 
