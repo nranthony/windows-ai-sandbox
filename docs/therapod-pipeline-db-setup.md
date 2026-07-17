@@ -171,6 +171,52 @@ committed transactions — fine for a dev control plane.
    in-container supervisor or a compose overlay service on `sandbox-internal`,
    if auto-restart is wanted.
 
+## TODO — cross-repo backup / reset sync ⚠️ (unresolved — pick up next time)
+
+**Problem.** DB backup/reset logic is split across two repos and neither knows
+about the other. The wipe half lives here; the backup/restore half lives in the
+pipeline repo. An agent working either side today can destroy data the other
+side could have saved.
+
+**What each side owns today:**
+
+- **Here (windows-ai-sandbox).** The therapod DB lives on the named volume
+  `ai-sandbox-therapod_postgres-data`. Ordinary `down` / `up` / rebuild preserve
+  it (see the note above and the top-level backup discussion). Only
+  `scripts/profile.sh therapod db-reset` and `wipe --all-volumes` destroy it —
+  and **neither takes a backup first, nor prints a restore recipe.** This doc
+  (Step 5 / top-level) still says "pg_dump to /workspace" by hand.
+- **Pipeline repo.** Already ships **environment-aware** tooling that does the
+  right thing *from inside the agent*: `scripts/backup_postgres.sh` /
+  `scripts/restore_postgres.sh` detect **sandbox mode** off `PIPELINE_PG_DSN`
+  (which this profile injects via `db.env`) and dump/restore straight over the
+  DSN. Output lands in `/workspace/pipeline/backups/` → `~/repo/therapod/pipeline/backups`
+  on the host — a **bind mount that survives a volume wipe.** The script even
+  has a `psql`-COPY fallback for the pg_dump-client-vs-`postgres:18`-server skew.
+
+**Agreement to reach (do this next time we touch DB lifecycle):**
+
+1. **One backup path, not two.** Make this doc (Step 5 + the restart section)
+   point at the pipeline repo's `backup_postgres.sh` (sandbox mode) instead of a
+   hand-rolled `pg_dump`. Stop duplicating the contract.
+2. **`db-reset` should be backup-aware.** Decide whether
+   `scripts/profile.sh <p> db-reset` / `wipe --all-volumes` should (a) refuse
+   unless a recent backup exists, (b) offer to run `backup_postgres.sh` first,
+   or at minimum (c) print the `restore_postgres.sh` + `alembic upgrade head`
+   recovery recipe on the way out. The restore half is in the other repo, so the
+   message must name it explicitly.
+3. **Cross-link the reset docs.** The pipeline repo's `docs/host_reset.md`
+   documents only the macOS-host `docker compose down -v` reset; it omits this
+   sandbox named-volume path (`profile.sh db-reset`). Link both directions so
+   whichever repo an agent lands in surfaces the other.
+4. **Keep the version-skew fallback alive.** Any bump of the pinned `postgres:18`
+   digest here must be checked against the pipeline script's client/server
+   guard, or the COPY fallback silently becomes the only working path.
+
+> **Matching flag in the pipeline repo:** `therapod/pipeline/docs/dev_tooling_followups.md`
+> §"Cross-repo DB backup/reset sync (windows-ai-sandbox)", plus a pointer in
+> `therapod/pipeline/docs/host_reset.md`. Keep the two in step.
+
 ## See also
 
 - `therapod/pipeline/CLAUDE.md` § "Where to find Postgres — by execution context"
