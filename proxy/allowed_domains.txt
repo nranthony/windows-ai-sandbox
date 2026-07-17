@@ -174,6 +174,7 @@ numerai-public-datasets.s3-us-west-2.amazonaws.com
 # concern, both are on you.
 www.kaggle.com
 kaggle.com
+api.kaggle.com
 storage.googleapis.com
 
 # --- therapod citation_tools / paperbridge [citation-tools] ---
@@ -212,6 +213,31 @@ chemrxiv.org
 # never wildcard `.googleapis.com` or `.gstatic.com` (M3).
 fonts.googleapis.com
 fonts.gstatic.com
+
+# --- Blender docs / code / dev [blender] ---
+# Python API + reference manual (docs.blender.org/api/current) is the primary
+# target. projects.blender.org is Gitea (code/issues/PRs) — USER-controllable
+# content, so pinned, never `.blender.org` wildcard (M3). developer.blender.org
+# now hosts the developer handbook/release notes (post-Phabricator, Feb 2023).
+docs.blender.org
+projects.blender.org
+developer.blender.org
+code.blender.org
+devtalk.blender.org
+extensions.blender.org
+www.blender.org
+blender.org
+# Release binaries + offline-docs zips — uncomment if pulling builds/docs:
+# download.blender.org
+# Git-over-SSH clone domain (moved off projects.blender.org) — uncomment if
+# cloning via SSH rather than HTTPS:
+# git.blender.org
+
+# --- Blender community Q&A / forums [blender-community] ---
+# UGC forums — highest-value for bpy scripting help (Stack Exchange) but noisy.
+# Kept commented; open when you're driving research, recomment for agent runs.
+# blender.stackexchange.com
+# blenderartists.org
 
 # --- OS packages — apt-get inside the container [apt] ---
 # archive.ubuntu.com
