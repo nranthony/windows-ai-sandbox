@@ -43,6 +43,16 @@ if [[ ! -f "$DEST" ]] && [[ -f "$SEED" ]]; then
   cp "$SEED" "$DEST"
 fi
 
+# Seed a secrets.env.example (API keys for the webfetch broker etc.) and lock
+# down any real secrets.env to 600. secrets.env itself is optional and injected
+# as required:false — profiles without keys still come up. Mirrors ensure_state.
+SECRETS_TEMPLATE="$SCRIPT_DIR/sandbox_templates/common/secrets.env.template"
+[[ -f "$SECRETS_TEMPLATE" ]] && cp "$SECRETS_TEMPLATE" "$BASE/secrets.env.example"
+if [[ -f "$BASE/secrets.env" ]]; then
+  chmod 600 "$BASE/secrets.env" 2>/dev/null || \
+    echo "warning: could not chmod 600 $BASE/secrets.env" >&2
+fi
+
 # Defensive credential-helper scrub — audit Finding C, layer 2.
 # VS Code Dev Containers can inject a host-routed git credential.helper into
 # .config/git/config (via VSCODE_GIT_IPC_HANDLE + a node shim in

@@ -117,6 +117,13 @@ services:
       # without DBs still come up cleanly.
       - path: ${HOME}/.ai-sandbox/profiles/${PROFILE}/db.env
         required: false
+      # Optional API keys for the web-read broker (webfetch) and any other
+      # allowlisted service the agent drives — e.g. TAVILY_API_KEY. Keys are
+      # read here at container CREATE only (recreate the agent after editing),
+      # kept chmod 600, and never passed on argv. required: false so profiles
+      # without keys still come up. See docs/web-read-broker.md.
+      - path: ${HOME}/.ai-sandbox/profiles/${PROFILE}/secrets.env
+        required: false
 
     depends_on:
       - egress-proxy

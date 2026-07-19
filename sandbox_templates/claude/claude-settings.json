@@ -72,7 +72,8 @@
       "Bash(make:*)",
       "Bash(just:*)",
       "Bash(bd:*)",
-      "Bash(jq:*)"
+      "Bash(jq:*)",
+      "Bash(webfetch:*)"
     ],
     "deny": [
       "Bash(curl:*)",

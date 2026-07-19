@@ -187,6 +187,9 @@ storage.googleapis.com
 #
 # LLM / search / tracing:
 generativelanguage.googleapis.com
+# api.tavily.com is dual-purpose: citation_tools search AND the `webfetch`
+# web-read broker (docs/web-read-broker.md). Keep it — the broker lets the
+# agent read arbitrary pages WITHOUT adding their domains here.
 api.tavily.com
 api.smith.langchain.com
 # Citation & literature services:

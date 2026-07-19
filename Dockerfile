@@ -237,6 +237,18 @@ COPY sandbox_templates/common/pdf-styles/legal.css /usr/local/share/pdf-styles/l
 COPY sandbox_templates/claude/hooks/deny-destructive.sh /usr/local/lib/claude-hooks/deny-destructive.sh
 RUN chmod 0755 /usr/local/lib/claude-hooks/deny-destructive.sh
 
+# webfetch — web-read broker for the restricted agent. curl/wget are denied and
+# the real WebFetch tool is not allow-listed, so the agent reads the web ONLY
+# through a hosted reader API (default Tavily, already in allowed_domains.txt).
+# The remote service performs the arbitrary-URL egress from its own infra; the
+# sandbox's egress surface never grows. stdlib-only, so it needs no pip layer;
+# urllib routes through the Squid proxy via HTTPS_PROXY. Keys come from the
+# per-profile secrets.env env_file (never argv). See docs/web-read-broker.md.
+# Baked into the image so it survives recreates and lives on exec'able fs
+# (the /root tmpfs mounts are noexec). Same no-COPY --chmod portability note.
+COPY sandbox_templates/bin/webfetch /usr/local/bin/webfetch
+RUN chmod 0755 /usr/local/bin/webfetch
+
 # ---------- just (command runner) -------------------------------------------
 # Agents run per-repo justfile recipes in /workspace (settings already allow
 # `Bash(just:*)`). Ubuntu noble ships only just 1.21.0 — too old for recipe

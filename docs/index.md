@@ -32,6 +32,7 @@
 
 - [Squid internals](squid-internals.md) — cap model, tmpfs ownership, port restrictions, hot reload
 - [Compose network IPAM](compose-network-ipam.md) — why `down` is needed for IPAM changes, DNS lockdown explained
+- [Web-read broker (`webfetch`)](web-read-broker.md) — how the agent reads arbitrary pages through an allowlisted reader API (Tavily/Jina/Firecrawl) without widening egress
 
 ## GPU & Docker
 
@@ -59,6 +60,7 @@ Guides in [`host_setup/`](../host_setup/):
 - [`scripts/with-egress.sh`](../scripts/with-egress.sh) — temporarily widen Squid allowlist for installs
 - [`scripts/run-ephemeral.sh`](../scripts/run-ephemeral.sh) — disposable one-shot containers
 - [`scripts/init-profile-state.sh`](../scripts/init-profile-state.sh) — idempotent state bootstrap per profile
+- [`scripts/sync-agent-notice.sh`](../scripts/sync-agent-notice.sh) — inject/refresh the managed sandbox-notice block into repo `AGENTS.md` / global `CLAUDE.md` (source: `sandbox_templates/common/agent-notice.md`)
 
 ## Operational
 

@@ -138,6 +138,7 @@ ensure_state() {
   fi
   mkdir -p "$p/config/git"
   cp "$SCRIPT_DIR/sandbox_templates/common/db.env.template" "$p/db.env.example"
+  cp "$SCRIPT_DIR/sandbox_templates/common/secrets.env.template" "$p/secrets.env.example"
   if [[ ! -f "$p/claude-home/settings.json" ]] && [[ -f "$SCRIPT_DIR/sandbox_templates/claude/claude-settings.json" ]]; then
     cp "$SCRIPT_DIR/sandbox_templates/claude/claude-settings.json" "$p/claude-home/settings.json"
   fi
@@ -150,6 +151,14 @@ ensure_state() {
         cp -R "$skill_src" "$p/claude-home/skills/$name"
       fi
     done
+  fi
+  # Refresh the managed sandbox-notice in the agent's GLOBAL memory
+  # (~/.claude/CLAUDE.md, auto-loaded every session) so Claude Code agents see
+  # the capabilities/prohibitions even in a workspace repo whose AGENTS.md
+  # hasn't been synced yet. Rewrites only the marked block, idempotently.
+  if [[ -f "$SCRIPT_DIR/scripts/sync-agent-notice.sh" ]]; then
+    bash "$SCRIPT_DIR/scripts/sync-agent-notice.sh" "$p/claude-home/CLAUDE.md" >/dev/null \
+      || warn "could not sync sandbox-notice into $p/claude-home/CLAUDE.md"
   fi
   if [[ -f "$p/config/git/config" ]] && \
      grep -qE 'helper\s*=.*(vscode-server|vscode-remote-containers|git-credential-manager)' \
@@ -184,6 +193,9 @@ ensure_state() {
   fi
   if [[ -f "$p/db.env" ]]; then
     chmod 600 "$p/db.env" 2>/dev/null || warn "could not chmod 600 $p/db.env"
+  fi
+  if [[ -f "$p/secrets.env" ]]; then
+    chmod 600 "$p/secrets.env" 2>/dev/null || warn "could not chmod 600 $p/secrets.env"
   fi
 }
 
@@ -984,6 +996,7 @@ case "$CMD" in
     echo "    $p/config/git/"
     echo "    $p/gemini-home/oauth_creds.json"
     echo "    $p/db.env  (if present)"
+    echo "    $p/secrets.env  (if present)"
     echo "  WIPE:"
     echo "    docker compose down --remove-orphans  ($([[ $all_vols == 1 ]] && echo '+ ALL named volumes' || echo '+ DB volumes preserved'))"
     echo "    rm -rf $p/*  (everything except the PRESERVE list above)"
@@ -1028,6 +1041,7 @@ case "$CMD" in
     [[ -d "$p/config/git" ]]                    && mv "$p/config/git"                    "$stage/config/git"
     [[ -f "$p/gemini-home/oauth_creds.json" ]]  && mv "$p/gemini-home/oauth_creds.json"  "$stage/gemini-home/oauth_creds.json"
     [[ -f "$p/db.env" ]]                        && mv "$p/db.env"                        "$stage/db.env"
+    [[ -f "$p/secrets.env" ]]                   && mv "$p/secrets.env"                   "$stage/secrets.env"
     ok "staged auth artefacts → $stage"
 
     rm -rf "$p"
@@ -1041,6 +1055,7 @@ case "$CMD" in
     [[ -d "$stage/config/git" ]]                    && mv "$stage/config/git"                    "$p/config/git"
     [[ -f "$stage/gemini-home/oauth_creds.json" ]]  && mv "$stage/gemini-home/oauth_creds.json"  "$p/gemini-home/oauth_creds.json"
     [[ -f "$stage/db.env" ]]                        && mv "$stage/db.env"                        "$p/db.env"
+    [[ -f "$stage/secrets.env" ]]                   && mv "$stage/secrets.env"                   "$p/secrets.env"
 
     residue=$(find "$stage" -mindepth 1 -not -type d 2>/dev/null)
     if [[ -n "$residue" ]]; then
@@ -1053,6 +1068,7 @@ case "$CMD" in
 
     [[ -f "$p/claude-home/.credentials.json" ]] && chmod 600 "$p/claude-home/.credentials.json"
     [[ -f "$p/db.env" ]]                        && chmod 600 "$p/db.env"
+    [[ -f "$p/secrets.env" ]]                   && chmod 600 "$p/secrets.env"
     ok "restored auth artefacts into fresh $p"
 
     ensure_state
