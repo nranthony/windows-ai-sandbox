@@ -137,6 +137,15 @@ ensure_state() {
     printf '{}\n' > "$p/claude.json"
   fi
   mkdir -p "$p/config/git"
+  # pnpm: always run the image's pnpm; ignore repo `packageManager` pins.
+  # pnpm 10's version manager re-execs a downloaded pnpm from ~/.local/share/
+  # pnpm/.tools/ — a noexec tmpfs (audit Finding G) — so any pin that drifts
+  # from the image kills every pnpm command with EACCES. Global pnpm rc only;
+  # npm never reads it (no warnings). Mirrors init-profile-state.sh.
+  mkdir -p "$p/config/pnpm"
+  if ! grep -qs '^manage-package-manager-versions=' "$p/config/pnpm/rc"; then
+    printf 'manage-package-manager-versions=false\n' >> "$p/config/pnpm/rc"
+  fi
   cp "$SCRIPT_DIR/sandbox_templates/common/db.env.template" "$p/db.env.example"
   cp "$SCRIPT_DIR/sandbox_templates/common/secrets.env.template" "$p/secrets.env.example"
   if [[ ! -f "$p/claude-home/settings.json" ]] && [[ -f "$SCRIPT_DIR/sandbox_templates/claude/claude-settings.json" ]]; then

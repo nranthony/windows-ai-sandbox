@@ -24,8 +24,21 @@ mkdir -p \
   "$BASE/config/gh" \
   "$BASE/config/glab-cli" \
   "$BASE/config/git" \
+  "$BASE/config/pnpm" \
   "$BASE/gemini-home" \
   "$BASE/kaggle"
+
+# pnpm: always run the image's pnpm; ignore repo `packageManager` pins. pnpm
+# 10's built-in version manager downloads the pinned version into
+# ~/.local/share/pnpm/.tools/ and re-execs it, but /root/.local is a noexec
+# tmpfs (docker-compose.yml, audit Finding G), so the re-exec dies with EACCES
+# and every pnpm command fails in any repo whose pin drifts from the image.
+# The opt-out lives in pnpm's global rc (~/.config/pnpm/rc) — npm never reads
+# that file, so no "Unknown config" warnings. Pins stay honored on host/CI.
+# Mirrors ensure_state in profile.sh.
+if ! grep -qs '^manage-package-manager-versions=' "$BASE/config/pnpm/rc"; then
+  printf 'manage-package-manager-versions=false\n' >> "$BASE/config/pnpm/rc"
+fi
 
 # Single-file bind mount target — must exist on host, non-empty JSON.
 if [[ ! -s "$BASE/claude.json" ]]; then

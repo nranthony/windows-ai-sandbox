@@ -56,7 +56,7 @@ See `sandbox-hardening-package.md` §4 and `docs/compose-network-ipam.md`.
 ├── claude-home/       → /root/.claude           (sessions, settings, credentials, MCP)
 ├── claude.json        → /root/.claude.json      (single-file bind; seeded '{}' on first up)
 ├── cache/             → /root/.cache            (npm, uv, pip caches)
-├── config/            → /root/.config           (gh/, glab-cli/, git/config)
+├── config/            → /root/.config           (gh/, glab-cli/, git/config, pnpm/rc)
 ├── gemini-home/       → /root/.gemini           (Antigravity CLI `agy` home)
 ├── kaggle/            → /root/.kaggle           (kaggle.json, chmod 600; optional — egress gated by [kaggle] allowlist)
 ├── subnet-octet       (this profile's 172.30.<octet>.0/24 allocation)
