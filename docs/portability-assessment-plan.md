@@ -104,7 +104,7 @@ Rootful-Docker-with-bolt-ons is the *most expensive* way to get back what rootle
 ### Carried-forward (from from-scratch review, still valid)
 - **A. `docs/NEW-DEVICE.md`** — one ordered checklist chaining Windows/Linux base → host_setup → clone repos + stage data → `.env` → build → profile up → `db.env` from template → `COMPOSE_PROFILES=db-postgres up` → DB steps. Mostly links to existing docs. (Now branches per substrate per #6.)
 - **B. Close the `db-postgres` footgun** — `COMPOSE_PROFILES` appears **nowhere** in `profile.sh`; a plain `up` brings up agent+proxy **without Postgres**, so the pipeline API crash-loops on its asyncpg pool. Implement the per-profile `compose-profiles` file the DB doc already designed (mirroring `subnet-octet`) so `up` is zero-prefix.
-- **C. Document the therapod data fixtures** — the pipeline repo + H10 raw_data parquet (`raw_data/.../polar_h10_ecg_parquet/P01..P24_ECG.parquet`) are separate repos / large data referenced as pre-existing; no doc tells a new operator to fetch them.
+- **C. Document the project data fixtures** — the pipeline repo + any large raw_data fixtures are separate repos / large data referenced as pre-existing; no doc tells a new operator to fetch them.
 
 ---
 

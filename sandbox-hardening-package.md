@@ -2,7 +2,7 @@
 
 **Audience:** a Claude instance on Windows + WSL2 + rootless Docker + VS Code Dev Containers, helping a user harden a similar Claude-Code-in-a-container setup.
 
-**Source environment:** macOS + Colima VM + rootful Docker + VS Code Dev Containers. Audit of a single profile (`therapod`) against a hardened reference (`macolima`). Auditor ran inside the container, read-only, against a pre-staged config bundle. Full report at `/Volumes/DataDrive/repo/therapod/sandbox-audit-therapod-2026-04-22.md` (not included here — this doc is the actionable distillation).
+**Source environment:** macOS + Colima VM + rootful Docker + VS Code Dev Containers. Audit of a single profile (`<profile>`) against a hardened reference (`macolima`). Auditor ran inside the container, read-only, against a pre-staged config bundle. Full report kept locally alongside the profile's own audits (not included here — this doc is the actionable distillation).
 
 **Date:** 2026-04-23.
 

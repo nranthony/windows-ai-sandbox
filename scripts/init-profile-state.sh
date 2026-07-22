@@ -91,12 +91,12 @@ fi
 # email. GIT_USER_NAME/GIT_USER_EMAIL override the defaults, but an override
 # email that is not a users.noreply.github.com address is refused (that is
 # the whole guarantee). Mirrors ensure_state in profile.sh.
-GIT_ID_NAME="${GIT_USER_NAME:-nranthony}"
-GIT_ID_EMAIL="${GIT_USER_EMAIL:-16306836+nranthony@users.noreply.github.com}"
+GIT_ID_NAME="${GIT_USER_NAME:-Sandbox User}"
+GIT_ID_EMAIL="${GIT_USER_EMAIL:-sandbox@users.noreply.github.com}"
 if [[ "$GIT_ID_EMAIL" != *@users.noreply.github.com ]]; then
   echo "warning: GIT_USER_EMAIL '$GIT_ID_EMAIL' is not a users.noreply.github.com address — using default noreply identity" >&2
-  GIT_ID_NAME="nranthony"
-  GIT_ID_EMAIL="16306836+nranthony@users.noreply.github.com"
+  GIT_ID_NAME="Sandbox User"
+  GIT_ID_EMAIL="sandbox@users.noreply.github.com"
 fi
 CUR_EMAIL=""
 [[ -f "$BASE/config/git/config" ]] && \

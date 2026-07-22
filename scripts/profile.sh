@@ -184,12 +184,12 @@ ensure_state() {
   # email. GIT_USER_NAME/GIT_USER_EMAIL override the defaults, but an override
   # email that is not a users.noreply.github.com address is refused (that is
   # the whole guarantee). Mirrors init-profile-state.sh.
-  local git_id_name="${GIT_USER_NAME:-nranthony}"
-  local git_id_email="${GIT_USER_EMAIL:-16306836+nranthony@users.noreply.github.com}"
+  local git_id_name="${GIT_USER_NAME:-Sandbox User}"
+  local git_id_email="${GIT_USER_EMAIL:-sandbox@users.noreply.github.com}"
   if [[ "$git_id_email" != *@users.noreply.github.com ]]; then
     warn "GIT_USER_EMAIL '$git_id_email' is not a users.noreply.github.com address — using default noreply identity"
-    git_id_name="nranthony"
-    git_id_email="16306836+nranthony@users.noreply.github.com"
+    git_id_name="Sandbox User"
+    git_id_email="sandbox@users.noreply.github.com"
   fi
   local cur_email=""
   [[ -f "$p/config/git/config" ]] && \

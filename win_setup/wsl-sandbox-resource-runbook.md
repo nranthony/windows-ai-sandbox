@@ -1,6 +1,6 @@
 # WSL Sandbox — Resource Changes Runbook
 
-> **Transfer this to `C:\Users\nelly\` (or anywhere on the Windows side) so it is
+> **Transfer this to `C:\Users\<you>\` (or anywhere on the Windows side) so it is
 > reachable while WSL is shut down / being reset.** Lives in the repo at
 > `win_setup/wsl-sandbox-resource-runbook.md`. Date: 2026-06-23.
 
@@ -29,16 +29,16 @@ it; two need manual action from **Windows**.
 ## STEP A — Activate the WSL memory bump (Windows side, REQUIRED)
 
 The repo file is just the source copy. WSL reads `.wslconfig` from your Windows
-profile, so it must be copied to `C:\Users\nelly\.wslconfig`.
+profile, so it must be copied to `C:\Users\<you>\.wslconfig`.
 
 1. **Close** all VS Code windows and WSL terminals (the shutdown kills them).
 2. Put the config in place. Either:
    - From a WSL terminal (before shutting down):
      ```bash
-     cp ~/repo/sandbox/windows-ai-sandbox/win_setup/.wslconfig /mnt/c/Users/nelly/.wslconfig
+     cp ~/repo/sandbox/windows-ai-sandbox/win_setup/.wslconfig /mnt/c/Users/<you>/.wslconfig
      ```
    - Or, if WSL is already down / was reset, paste this into
-     `C:\Users\nelly\.wslconfig` with Notepad:
+     `C:\Users\<you>\.wslconfig` with Notepad:
      ```ini
      # force traffic to use Windows/3rd party Firewall (e.g. Norton)
      [wsl2]

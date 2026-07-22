@@ -99,6 +99,17 @@ daily-cloudcode-pa.googleapis.com
 # audit reported DRIFT while these were absent, 2026-07-04):
 codeassist.google.com
 developers.google.com
+# Google account avatar CDN. The eligibility check (loadCodeAssist) fetches the
+# signed-in account's profile picture; a 403 here hard-fails the whole check
+# with "failed to get profile picture" (confirmed via Squid CONNECT 403,
+# 2026-07-22). Pinned lhN subdomain per M3 — never wildcard
+# `.googleusercontent.com`, which serves arbitrary user content. Avatars may
+# land on lh4/lh5/lh6 for other accounts; uncomment a sibling if a later 403
+# names it.
+lh3.googleusercontent.com
+# lh4.googleusercontent.com
+# lh5.googleusercontent.com
+# lh6.googleusercontent.com
 # Candidates also embedded in the `agy` binary — uncomment if startup/auth/run
 # hits a TCP_DENIED (verify against Squid access.log on first authed run; kept
 # commented to keep egress tight):
@@ -177,17 +188,17 @@ kaggle.com
 api.kaggle.com
 storage.googleapis.com
 
-# --- therapod citation_tools / paperbridge [citation-tools] ---
-# Egress for ~/repo/therapod/citation_tools (see its docs/required_domains.md).
+# --- Academic / citation tooling [citation-tools] ---
+# Egress for a citation-tooling workload (example project profile).
 # Read-only academic/citation APIs + search/tracing + preprint servers. Every
-# paperbridge client endpoint is listed, since citation_tools depends on
-# paperbridge and any client may be exercised. Overlaps already covered
-# elsewhere and NOT repeated here: api.anthropic.com [claude], api.openai.com
-# [openai], github.com/codeload.github.com [git], pypi/pythonhosted [pypi].
+# citation-client endpoint is listed, since any client may be exercised.
+# Overlaps already covered elsewhere and NOT repeated here: api.anthropic.com
+# [claude], api.openai.com [openai], github.com/codeload.github.com [git],
+# pypi/pythonhosted [pypi].
 #
 # LLM / search / tracing:
 generativelanguage.googleapis.com
-# api.tavily.com is dual-purpose: citation_tools search AND the `webfetch`
+# api.tavily.com is dual-purpose: citation-tooling search AND the `webfetch`
 # web-read broker (docs/web-read-broker.md). Keep it — the broker lets the
 # agent read arbitrary pages WITHOUT adding their domains here.
 api.tavily.com
@@ -210,7 +221,7 @@ www.medrxiv.org
 chemrxiv.org
 
 # --- Grants.gov REST APIs [grants-gov] ---
-# Federal grants search/opportunity APIs for the therapod grant-admin research
+# Federal grants search/opportunity APIs for a grant-admin research
 # workload. Read-only REST; pinned api.* subdomains only, never a `.grants.gov`
 # wildcard (M3 — a sibling subdomain could host user-controllable content).
 # api.grants.gov          production REST (search2 / fetchOpportunity) — verified endpoint
