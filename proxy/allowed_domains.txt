@@ -209,6 +209,17 @@ www.biorxiv.org
 www.medrxiv.org
 chemrxiv.org
 
+# --- Grants.gov REST APIs [grants-gov] ---
+# Federal grants search/opportunity APIs for the therapod grant-admin research
+# workload. Read-only REST; pinned api.* subdomains only, never a `.grants.gov`
+# wildcard (M3 — a sibling subdomain could host user-controllable content).
+# api.grants.gov          production REST (search2 / fetchOpportunity) — verified endpoint
+# api.staging.grants.gov  staging REST — the sanctioned test surface (per API guide)
+# api.simpler.grants.gov  Simpler.Grants.gov REST — self-service API key, verified base URL
+api.grants.gov
+api.staging.grants.gov
+api.simpler.grants.gov
+
 # --- Google Fonts [google-fonts] ---
 # Web-dev font pulls. fonts.googleapis.com serves the CSS API
 # (@import/link href); fonts.gstatic.com serves the woff2 font files the
