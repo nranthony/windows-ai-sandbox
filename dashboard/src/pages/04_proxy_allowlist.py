@@ -135,7 +135,7 @@ if "last_reload_results" in st.session_state:
                         if r.get("domains") is not None else r["profile"]
                         for r in ok
                     ]
-                    st.success(f"Reconfigured: {', '.join(parts)}")
+                    st.success(f"Reloaded (restarted): {', '.join(parts)}")
                 for r in failed:
                     if r.get("needs_recreate"):
                         st.error(f"**{r['profile']}**: {r['msg']}")

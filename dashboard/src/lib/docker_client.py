@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import os
 import subprocess
 
@@ -13,8 +12,6 @@ DOCKER_SOCK = os.environ.get(
 )
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 PROFILE_SCRIPT = os.path.join(REPO_ROOT, "scripts", "profile.sh")
-ALLOWLIST_PATH = os.path.join(REPO_ROOT, "proxy", "allowed_domains.txt")
-CONTAINER_ALLOWLIST = "/etc/squid/allowed_domains.txt"
 
 
 class DockerClient:
@@ -49,53 +46,51 @@ class DockerClient:
             return {"profile": profile, "ok": False,
                     "msg": f"{proxy_name} not found"}
 
-        # Detect stale bind mount BEFORE trusting a reconfigure. An external
-        # atomic-replace edit (sed -i, vim, git checkout, an editor's temp+
-        # rename) gives the host file a new inode; the running container stays
-        # pinned to the old one and keeps serving the pre-edit allowlist. The
-        # in-container domain count can't catch this — the stale file is the
-        # old *full* allowlist, so the count looks healthy. Compare a hash of
-        # the host file against the container's copy instead.
-        if self._allowlist_drifted(container):
+        # Guard: the caller derives profiles from running AGENT containers, so a
+        # proxy that has exited (e.g. crashed, or an earlier reload killed it)
+        # still reaches here. Any exec/restart on a stopped container raises a
+        # 409 that would otherwise bubble up and crash the whole page. Report it
+        # as a recoverable state and route to the recreate button instead.
+        container.reload()  # refresh .status from the daemon
+        if container.status != "running":
             return {"profile": profile, "ok": False,
-                    "msg": "Host allowlist differs from the container's copy "
-                           "(stale bind mount — likely an external edit that "
-                           "swapped the file's inode). Reconfigure would load "
-                           "stale content. Recreate the proxy to resync.",
+                    "msg": f"{proxy_name} is {container.status}, not running — "
+                           "recreate it to bring egress back.",
                     "needs_recreate": True}
 
-        exit_code, _ = container.exec_run("squid -k reconfigure")
-        if exit_code != 0:
+        # Apply the host allowlist by RESTARTING the proxy — never
+        # `squid -k reconfigure`. Two reasons, both load-bearing:
+        #   1. SIGHUP death. squid runs as the container's foreground PID, so the
+        #      SIGHUP that `reconfigure` sends is taken as Hangup and the proxy
+        #      exits 129 — i.e. the "reload" KILLS the very container it targets,
+        #      then the follow-up exec 409s on the corpse.
+        #   2. Stale bind mount. An atomic-replace edit (this editor, sed -i,
+        #      vim, git checkout) swaps the host file's inode; a live reconfigure
+        #      would re-read the OLD inode the running container is still pinned
+        #      to. A restart re-runs the entrypoint and re-resolves the mount to
+        #      the current inode — which is exactly the resync we need, so it
+        #      also subsumes the old _allowlist_drifted pre-check.
+        try:
+            container.restart(timeout=10)
+            container.reload()
+        except docker.errors.APIError as e:
             return {"profile": profile, "ok": False,
-                    "msg": "squid -k reconfigure failed",
+                    "msg": f"proxy restart failed: {e}",
+                    "needs_recreate": True}
+
+        if container.status != "running":
+            return {"profile": profile, "ok": False,
+                    "msg": "proxy did not come back up after restart — "
+                           "check squid.conf / allowed_domains.txt.",
                     "needs_recreate": True}
 
         domains = self._count_active_domains(container)
-        if domains == 0:
+        if not domains:
             return {"profile": profile, "ok": False,
-                    "msg": "Reconfigure succeeded but 0 domains loaded — "
-                           "likely stale bind mount. Recreate the proxy "
-                           "container to resync.",
+                    "msg": "Proxy restarted but 0 domains loaded — check "
+                           "allowed_domains.txt / squid.conf.",
                     "needs_recreate": True}
         return {"profile": profile, "ok": True, "domains": domains}
-
-    def _allowlist_drifted(self, container) -> bool:
-        """True if the host allowlist and the container's copy differ.
-
-        A byte-for-byte mismatch means the bind mount no longer points at the
-        current host inode. Fails closed: if either side can't be read, treat
-        it as drift so the caller routes to a recreate rather than trusting a
-        stale reconfigure.
-        """
-        try:
-            with open(ALLOWLIST_PATH, "rb") as f:
-                host_hash = hashlib.sha256(f.read()).hexdigest()
-        except OSError:
-            return True
-        exit_code, output = container.exec_run(f"cat {CONTAINER_ALLOWLIST}")
-        if exit_code != 0 or output is None:
-            return True
-        return hashlib.sha256(output).hexdigest() != host_hash
 
     def _count_active_domains(self, container) -> int | None:
         exit_code, output = container.exec_run(

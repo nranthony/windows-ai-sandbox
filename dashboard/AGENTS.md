@@ -26,8 +26,11 @@ uv run streamlit run src/app.py     # http://127.0.0.1:8501
 - **Allowlist edits**: write `proxy/allowed_domains.txt` relative to the repo
   root, preserving its conventions (no inline comments, pinned subdomains,
   `[tag]` block headers — see `.agents/skills/squid-management.md`), then
-  reload each running profile's proxy
-  (`docker exec egress-proxy-<profile> squid -k reconfigure`).
+  reload each running profile's proxy with a **restart**, not a reconfigure
+  (`docker restart egress-proxy-<profile>`). `squid -k reconfigure` sends SIGHUP,
+  which the foreground squid takes as Hangup and exits 129 — the reconfigure
+  kills the proxy; a restart also re-resolves the bind mount to the current
+  inode after an atomic-replace edit.
 - **Scope**: read-mostly. Lifecycle operations (up/down/rebuild/verify) stay
   on the CLI via `scripts/profile.sh` — do not reimplement them here (root
   AGENTS.md golden rule 1).
