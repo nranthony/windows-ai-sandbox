@@ -368,8 +368,18 @@ RUN npm install -g --allow-scripts=@anthropic-ai/claude-code "@anthropic-ai/clau
 #   /root/.gemini             <- ~/.ai-sandbox/profiles/<profile>/gemini-home
 #                                (Antigravity CLI `agy` home — config under
 #                                 /root/.gemini/antigravity-cli/; dir name kept)
+# DISABLE_AUTOUPDATER/DISABLE_UPDATES: Claude Code's runtime self-updater runs a
+# plain `npm install -g @anthropic-ai/claude-code` (no --allow-scripts), which
+# this image's npm allow-scripts allowlist blocks — the postinstall (install.cjs,
+# fetches the platform-native binary) is skipped, so `claude --version` becomes
+# "native binary not installed" for every process in the shared global install.
+# Update claude ONLY at build time (the RUN above passes --allow-scripts) via
+# `scripts/profile.sh build --refresh-ai`. Mirrored in the seeded Claude settings
+# (sandbox_templates/claude/claude-settings.json "env").
 ENV HOME=/root \
     SHELL=/usr/bin/zsh \
+    DISABLE_AUTOUPDATER=1 \
+    DISABLE_UPDATES=1 \
     PATH="/root/.local/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 
 USER root

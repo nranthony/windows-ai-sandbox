@@ -1,5 +1,10 @@
 {
   "_comment": "Ported from macolima/config/claude-settings.json. Restricts Claude Code's Bash/Read tools ONLY. Interactive zsh is unrestricted — use it to pip/uv/npm install, clone, push, etc. during planning, then hand off to Claude with this permission profile in force. Paths adapted for root-in-container (rootless Docker userns=host).",
+  "_env_comment": "DISABLE_AUTOUPDATER/DISABLE_UPDATES: Claude Code's self-updater runs a plain `npm install -g @anthropic-ai/claude-code`, which this image's npm allow-scripts allowlist blocks — the postinstall (node install.cjs, which fetches the platform-native binary) is skipped, leaving `claude --version` = 'native binary not installed' for EVERY process in the shared global install. Manifested as multiple-VS-Code-attach breaking claude, but a single auto-update is enough. Claude Code is baked at image build time (Dockerfile, with --allow-scripts) and bumped only via `scripts/profile.sh build --refresh-ai`; the runtime updater must stay off. Also set as OS env in the Dockerfile as belt-and-suspenders.",
+  "env": {
+    "DISABLE_AUTOUPDATER": "1",
+    "DISABLE_UPDATES": "1"
+  },
   "sandbox": {
     "_comment": "Disabled: Claude Code's bwrap sandbox needs unprivileged user namespaces, which our seccomp filter blocks. The container itself is the security boundary (cap_drop ALL + seccomp + internal network + Squid allowlist). Sub-blocks preserved inert so the file is portable.",
     "enabled": false,
