@@ -328,3 +328,4 @@ blender.org
 #                        access. Use CrossRef/OpenAlex/PubMed clients instead.
 # www.researchgate.net — paywall + auth wall + CAPTCHA. Returns near-zero
 #                        useful content unauthenticated.
+sheets.googleapis.com

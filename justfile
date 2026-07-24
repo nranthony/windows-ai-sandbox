@@ -1,4 +1,4 @@
-# justfile — discoverable front door over scripts/profile.sh + scripts/setup.sh
+# justfile — front door over scripts/profile.sh + setup.sh + code-attach.sh
 # =============================================================================
 # CONVENIENCE LAYER ONLY. The bash scripts remain canonical (see AGENTS.md).
 # Every recipe is a thin pass-through — it must NOT call `docker compose`
@@ -26,6 +26,7 @@
 
 profile_sh := justfile_directory() / "scripts" / "profile.sh"
 setup_sh   := justfile_directory() / "scripts" / "setup.sh"
+code_sh    := justfile_directory() / "scripts" / "code-attach.sh"
 
 # default: banner + recipe list (a bare `just` lists, never runs a recipe).
 _default:
@@ -88,6 +89,17 @@ list:
 # cross-profile health: flag any profile whose agent/proxy/DB aren't all up together (no profile arg)
 health:
     {{profile_sh}} health
+
+# ---- VS Code (host-side, code-attach.sh) ------------------------------------
+#
+# Pins the folder by URI, so it does NOT reopen whatever folder you had open
+# last (as "Attach to Running Container" does) and needs no devcontainer.json.
+# Omit the folder to list what's under /workspace. Trailing args pass through
+# to `code`, e.g. `just code work app_blast -r` reuses the current window.
+
+# open a specific folder in the running agent container in VS Code
+code profile *args:
+    {{code_sh}} {{profile}} {{args}}
 
 # ---- auth (profile.sh) ------------------------------------------------------
 

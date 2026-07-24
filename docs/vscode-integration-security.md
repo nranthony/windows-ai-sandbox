@@ -37,6 +37,16 @@ interpreter/terminal — are restored via the **attached-container configuration
 file** instead (below). They are UX guardrails, not sandbox controls; the
 container is equally hardened without them.
 
+`just code <profile> <folder>` (`scripts/code-attach.sh`) is the same attach by
+a different door: it opens `vscode-remote://attached-container+<hex>/<folder>`,
+naming the container *and* the `rootless` docker context explicitly. It starts
+nothing and reads no repo `devcontainer.json`, so every finding below applies
+unchanged — the attached-container configuration file is still what supplies
+extensions, `remoteUser`, and the port guardrail. The only key it overrides is
+`workspaceFolder`, because the folder is pinned in the URI. Use it when the
+palette flow keeps reopening the last folder: that is VS Code's recent-window
+history winning over `workspaceFolder`, not a config error.
+
 ### Extensions and the port guardrail
 
 - **Extensions:** host user `settings.json` → `"dev.containers.defaultExtensions": [...]` (marketplace `publisher.extension` IDs). Installs into *any* attached container, on next attach, into `/root/.vscode-server/extensions/` — no image rebuild.
