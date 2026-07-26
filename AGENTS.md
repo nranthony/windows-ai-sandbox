@@ -62,6 +62,37 @@ Any change to them requires:
 Hook edits additionally require
 `bash sandbox_templates/claude/hooks/deny-destructive.test.sh` (35/35).
 
+## Container state placement
+
+Where a piece of state lives decides whether it survives `docker rm`. The rule:
+**if losing it would hurt, it does not live in a container's writable layer.**
+
+| State | Home | Survives `docker rm` |
+|---|---|---|
+| Source code | host bind mount, in git | yes |
+| Python env | `.venv` inside the workspace | yes |
+| Models / large data | host dir, gitignored | yes |
+| DB data | named volume | yes |
+| pip / apt / HF caches | writable layer — disposable by design | no |
+
+A stopped container keeps its whole copy-on-write layer and nothing reports the
+cost; six stale VS Code devcontainers reached 149GB here before anyone looked.
+`scripts/docker-gc.sh` (`just docker-gc`) sweeps that up — monthly is about
+right. It deliberately splits what may be automated from what may not:
+
+- **Auto-prunable**: stopped containers, BuildKit cache. Nothing durable is
+  there if the table above is respected.
+- **Report-only, human decides**: images and volumes. Volumes are the only
+  place durable data lives. And `docker image prune` is *not* safe to automate
+  here — pulling a digest-pinned `repo:tag@sha256:...` (as `docker-compose.yml`
+  does for postgres/mongo/squid) stores the image with NO tag, so Docker
+  classifies it as dangling and an unfiltered prune deletes it. That is why the
+  post-build prunes in `scripts/profile.sh` are filtered to the `sandbox.image`
+  label set in the `Dockerfile` — never unfilter them.
+
+Never `docker commit` a container as a backup: it captures caches, not data,
+and cannot be diffed or restored selectively. Back up the source dir or volume.
+
 ## Operational guides (host-agent skills)
 
 - Profile lifecycle, builds, DBs, ephemeral runs:
@@ -80,6 +111,7 @@ scripts/profile.sh <profile> up|down|attach|verify|audit
 scripts/profile.sh list
 scripts/profile.sh build --refresh-ai        # bump AI CLIs (tail layer only)
 scripts/with-egress.sh <p> --with pypi -- '<cmd>'   # temporary egress widening
+scripts/docker-gc.sh --dry-run               # host Docker hygiene (see above)
 ```
 
 Host state: `~/.ai-sandbox/profiles/<profile>/`; workspace:
