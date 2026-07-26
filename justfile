@@ -27,6 +27,7 @@
 profile_sh := justfile_directory() / "scripts" / "profile.sh"
 setup_sh   := justfile_directory() / "scripts" / "setup.sh"
 code_sh    := justfile_directory() / "scripts" / "code-attach.sh"
+gc_sh      := justfile_directory() / "scripts" / "docker-gc.sh"
 
 # default: banner + recipe list (a bare `just` lists, never runs a recipe).
 _default:
@@ -155,6 +156,17 @@ reset-settings profile:
 # overwrite this profile's claude skills from sandbox_templates/skills/ (backs up old)
 reset-skills profile:
     {{profile_sh}} {{profile}} reset-skills
+
+# ---- host Docker hygiene (docker-gc.sh) -------------------------------------
+#
+# Daemon-wide, NOT per-profile: reclaims what no profile's lifecycle owns —
+# stale VS Code devcontainers and their writable layers, plus BuildKit cache.
+# Skips `ai-sandbox-*` containers entirely (profile.sh owns those) and only
+# REPORTS dangling images/orphaned volumes. Monthly is about right.
+
+# reclaim stale containers + build cache. Accepts --dry-run / --yes / --days N / --keep-cache SIZE.
+docker-gc *args:
+    {{gc_sh}} {{args}}
 
 # ---- control dashboard (host-side Streamlit) --------------------------------
 
