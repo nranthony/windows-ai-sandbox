@@ -18,6 +18,15 @@
 
 FROM nvidia/cuda:12.6.3-base-ubuntu24.04@sha256:c87e78933f4c16e3272123bf2f75537306596d0fbaa395a29696a22786e5ee0e
 
+# Load-bearing for the post-build `docker image prune` in scripts/profile.sh —
+# that prune is filtered to this label so it reaps ONLY superseded builds of
+# this image. Unfiltered, `docker image prune` is daemon-wide and deletes every
+# untagged image, which silently includes the digest-pinned postgres/mongo/
+# squid from docker-compose.yml: pulling `repo:tag@sha256:...` stores the image
+# under its digest with NO tag, so Docker classifies it as dangling. Renaming
+# this label means updating both prune sites in profile.sh.
+LABEL sandbox.image=windows-ai-sandbox
+
 ENV DEBIAN_FRONTEND=noninteractive \
     LANG=C.UTF-8 \
     LC_ALL=C.UTF-8

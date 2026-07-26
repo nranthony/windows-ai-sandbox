@@ -90,6 +90,14 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 COMPOSE_FILE_ARGS=()
 BUILD_FLAGS=()
 
+# Scopes the post-build image prune to images WE built (LABEL in Dockerfile).
+# An unfiltered `docker image prune` is daemon-wide and reaps every untagged
+# image — which includes the digest-pinned postgres/mongo/squid, because a
+# `repo:tag@sha256:...` pull is stored under its digest with no tag and is
+# therefore "dangling". That silently re-downloaded ~660MB per build and also
+# deleted unrelated projects' images on the same rootless daemon.
+IMAGE_PRUNE_FILTER=(--filter label=sandbox.image=windows-ai-sandbox)
+
 info()  { printf '\033[0;36m[INFO]\033[0m  %s\n' "$*"; }
 ok()    { printf '\033[0;32m[ OK ]\033[0m  %s\n' "$*"; }
 warn()  { printf '\033[1;33m[WARN]\033[0m  %s\n' "$*"; }
@@ -607,7 +615,7 @@ if [[ "${1:-}" == "build" ]]; then
   info "Building windows-ai-sandbox:latest${build_flags[*]:+ (${build_flags[*]})}"
   cd "$SCRIPT_DIR"
   PROFILE=_build docker compose build "${build_flags[@]+"${build_flags[@]}"}" ai-sandbox
-  docker image prune -f
+  docker image prune -f "${IMAGE_PRUNE_FILTER[@]}"
   docker builder prune -f --keep-storage=4g
   if (( recreate_running == 1 )); then
     info "Rolling running profiles onto the new image (--recreate-running)"
@@ -768,7 +776,7 @@ case "$CMD" in
     ensure_state
     info "Rebuilding image + recreating profile '$PROFILE'${BUILD_FLAGS[*]:+ (${BUILD_FLAGS[*]})}"
     docker compose build "${BUILD_FLAGS[@]+"${BUILD_FLAGS[@]}"}" ai-sandbox
-    docker image prune -f
+    docker image prune -f "${IMAGE_PRUNE_FILTER[@]}"
     docker builder prune -f --keep-storage=4g
     ensure_octet_free
     docker compose "${COMPOSE_FILE_ARGS[@]}" up -d --force-recreate
