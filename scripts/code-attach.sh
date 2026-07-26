@@ -66,12 +66,19 @@ command -v code   >/dev/null 2>&1 || die "the 'code' CLI is not on PATH (VS Code
 docker ps --format '{{.Names}}' | grep -qx "$container" \
   || die "container '$container' is not running — start it with: just up $profile"
 
-# No folder given: show what's there rather than guessing.
+# No folder given: show what's there rather than guessing. This is a discovery
+# path, not a failure, so it exits 0 — `just code <profile>` printing a list and
+# then "recipe failed" reads as a crash when nothing went wrong.
+# Only directories are listed: a plain file under /workspace (a stray README)
+# is not a valid target and would fail the -d guard below.
 if [ -z "$folder" ]; then
   info "repos under /workspace in $container:"
-  docker exec "$container" ls -1 /workspace 2>/dev/null | sed 's/^/  /' || true
+  docker exec "$container" find /workspace -maxdepth 1 -mindepth 1 -type d \
+    -printf '  %f\n' 2>/dev/null | sort || true
   echo
-  die "pick one: scripts/code-attach.sh $profile <folder>"
+  info "pick one:                    scripts/code-attach.sh $profile <folder>"
+  info "or open the whole workspace: scripts/code-attach.sh $profile /workspace"
+  exit 0
 fi
 
 # Bare name -> /workspace/<name>; an absolute path is used as-is.
