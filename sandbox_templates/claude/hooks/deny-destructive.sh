@@ -48,10 +48,13 @@ warn_log() {
   rule=$1; payload=$2
   ts=$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null) || ts="?"
   mkdir -p "$(dirname "$LOG")" 2>/dev/null || true
-  # JSON-line: { ts, rule, tool_input } — full envelope kept for warn->block review.
+  # JSON-line: { ts, rule, envelope } — the WHOLE tool envelope is kept for the
+  # warn->block review, so the command lives at .envelope.tool_input.command.
+  # (Field was named `tool_input` before, which read as if it held just the
+  # inner object and sent log greps one level too shallow.)
   printf '%s' "$payload" \
     | jq -c --arg ts "$ts" --arg rule "$rule" \
-        '{ts:$ts, rule:$rule, tool_input:.}' >> "$LOG" 2>/dev/null || true
+        '{ts:$ts, rule:$rule, envelope:.}' >> "$LOG" 2>/dev/null || true
 }
 
 # ---------- read envelope ----------
@@ -75,6 +78,12 @@ case "$tool_name" in
         emit_block "hook-tamper" "edit to live settings.json is denied; ask the user to run this" ;;
       /etc/claude/*)
         emit_block "hook-tamper" "edit under /etc/claude/ is denied; ask the user to run this" ;;
+      */.git/hooks/*)
+        # git runs these on commit/merge/checkout. With Bash(git commit *) on an
+        # allow list, writing one here turns the next commit into unprompted
+        # arbitrary execution — the tail end of the chain is pre-approved, so
+        # this write is the only place left to stop it.
+        emit_block "git-hook-tamper" "write to a .git/hooks/ script is denied; git executes these on commit — ask the user to install it" ;;
     esac
     emit_pass
     ;;
@@ -114,37 +123,59 @@ if match '\bfind\b[^|;&]*[[:space:]]-(exec|execdir|ok)[[:space:]]+(rm|mv|dd|trun
   emit_block "find-exec" "find -exec invoking a destructive command; ask the user to run this"
 fi
 
-# 3. git-clean — `-fdx` wipe.
+# 3. rm-recursive — spelling-independent. permissions.deny carries
+#    `Bash(rm -rf:*)`, but that is a literal prefix: `rm -r -f`, `rm -fr`,
+#    `rm -Rf`, and `rm --recursive --force` all walk straight past it. Match on
+#    "a short-flag cluster containing r, or --recursive" instead of one spelling.
+#    The cluster is restricted to rm's own short flags ([dfirv]) so a stray
+#    `-print`/`-prune` elsewhere in the segment can't trigger it. Non-recursive
+#    `rm file` and `rm -f file` still pass — this targets tree deletion only.
+#    Note `git rm -r --cached` trips this too; that is a deliberate false
+#    positive (deny is fail-safe, and `git rm` is not on the allow list anyway).
+if match '\brm\b[^|;&]*[[:space:]]-([dfirv]*r[dfirv]*|-recursive)\b'; then
+  emit_block "rm-recursive" "recursive rm is destructive; ask the user to run this"
+fi
+
+# 4. git-clean — `-fdx` wipe.
 if match '\bgit[[:space:]]+clean\b'; then
   emit_block "git-clean" "git clean wipes untracked files; ask the user to run this"
 fi
 
-# 4. shred
+# 5. shred
 if match '\bshred\b'; then
   emit_block "shred" "shred destructively overwrites; ask the user to run this"
 fi
 
-# 5. truncate
+# 6. truncate
 if match '\btruncate\b'; then
   emit_block "truncate" "truncate destructively resizes; ask the user to run this"
 fi
 
-# 6. dd-write
+# 7. dd-write
 if match '\bdd\b[^|;&]*[[:space:]]of='; then
   emit_block "dd-write" "dd of= is a raw block write; ask the user to run this"
 fi
 
-# 7. mkfs
+# 8. mkfs
 if match '\bmkfs(\.[a-z0-9]+)?\b'; then
   emit_block "mkfs" "mkfs creates a filesystem; ask the user to run this"
 fi
 
-# 8. hook-tamper (Bash side) — defence in depth on the kernel write-protect.
+# 9. hook-tamper (Bash side) — defence in depth on the kernel write-protect.
 if match '(>|>>|\btee\b|\bchmod\b|\bchown\b|\bmv\b|\bcp\b|\brm\b|\bln\b)[^|;&]*(/usr/local/lib/claude-hooks/|/root/\.claude/settings\.json|/etc/claude/)'; then
   emit_block "hook-tamper" "write/modify of hook or settings file is denied; ask the user to rebuild"
 fi
 
-# 9. cred-read — block ANY Bash command that references the agent's credential
+# 9b. git-hook-tamper (Bash side) — mirror of the Edit/Write case above, for the
+#     redirect/cp/chmod route into a repo's .git/hooks/. The `chmod` verb is the
+#     load-bearing one: a hook script git will not run is inert until it is made
+#     executable, and `chmod` is neither on the allow list nor a read-only
+#     command. Unanchored `\.git/hooks/` so relative paths count too.
+if match '(>|>>|\btee\b|\bchmod\b|\bchown\b|\bmv\b|\bcp\b|\bln\b|\binstall\b)[^|;&]*\.git/hooks/'; then
+  emit_block "git-hook-tamper" "write/chmod of a .git/hooks/ script is denied; git executes these on commit — ask the user to install it"
+fi
+
+# 10. cred-read — block ANY Bash command that references the agent's credential
 #    stores. The agent runs as root here (rootless userns), so claude-settings'
 #    Read-tool denies and the kernel write-protect do NOT cover `cat`/`cp`/`rg`/
 #    `tar`/`ln` against these paths. Matching the path substring against the
@@ -155,14 +186,14 @@ fi
 if match '(/root/|~/|\$\{?home\}?/)(\.gemini\b|\.config/(gh|glab-cli)\b|\.claude/\.credentials|\.claude\.json|\.aws\b|\.ssh\b)'; then
   emit_block "cred-read" "access to credential/identity store is denied; ask the user to run this"
 fi
-# 9b. cred-read by bare filename — catches `cd /root/.config/gh && cat …` style
+# 10b. cred-read by bare filename — catches `cd /root/.config/gh && cat …` style
 #     references where the directory was changed first. These filenames are
 #     credential-specific enough to block unconditionally.
 if match '(oauth_creds\.json|google_accounts\.json|\.credentials\.json)'; then
   emit_block "cred-read" "access to a credential file is denied; ask the user to run this"
 fi
 
-# 10. null-truncate (WARN) — `: > file` and bare `> file` clobber.
+# 11. null-truncate (WARN) — `: > file` and bare `> file` clobber.
 #    Excludes /dev/null, /dev/stderr, fd-redirects (>&), heredocs, and the
 #    common `cmd > /tmp/x` redirection that overwrites a file the agent owns.
 #    We only flag truly bare-leading clobbers at command start or after ; or &&.
@@ -172,7 +203,7 @@ if match '(^|[;&]|\|\|)[[:space:]]*:?[[:space:]]*>[[:space:]]*[^&[:space:]/]' \
   warn_log "null-truncate" "$envelope"
 fi
 
-# 11. workspace-overwrite (WARN) — bare clobber into /workspace.
+# 12. workspace-overwrite (WARN) — bare clobber into /workspace.
 if match '>[[:space:]]*/workspace/[^[:space:]]'; then
   warn_log "workspace-overwrite" "$envelope"
 fi

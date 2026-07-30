@@ -54,6 +54,11 @@ assert "echo dd is fine"            '{"tool_name":"Bash","tool_input":{"command"
 assert "shred-word in string"       '{"tool_name":"Bash","tool_input":{"command":"echo \"shredded\""}}' pass
 assert "redirect to /dev/null"      '{"tool_name":"Bash","tool_input":{"command":"foo > /dev/null"}}' pass
 assert "redirect to /tmp file"      '{"tool_name":"Bash","tool_input":{"command":"echo hi > /tmp/x"}}' pass
+assert "rm single file"             '{"tool_name":"Bash","tool_input":{"command":"rm /tmp/scratch.txt"}}' pass
+assert "rm -f single file"          '{"tool_name":"Bash","tool_input":{"command":"rm -f /tmp/scratch.txt"}}' pass
+assert "rm -d empty dir"            '{"tool_name":"Bash","tool_input":{"command":"rm -d /tmp/emptydir"}}' pass
+assert "npm run (no rm word)"       '{"tool_name":"Bash","tool_input":{"command":"npm run build"}}' pass
+assert "find -prune not rm flag"    '{"tool_name":"Bash","tool_input":{"command":"find . -name node_modules -prune"}}' pass
 
 # --- Bash: positives (must block with rule) ---
 assert "find -delete"               '{"tool_name":"Bash","tool_input":{"command":"find . -delete"}}' deny "find-delete"
@@ -67,15 +72,41 @@ assert "dd of=/tmp/x"               '{"tool_name":"Bash","tool_input":{"command"
 assert "mkfs.ext4"                  '{"tool_name":"Bash","tool_input":{"command":"mkfs.ext4 /dev/sdb1"}}' deny "mkfs"
 assert "sudo find -delete"          '{"tool_name":"Bash","tool_input":{"command":"sudo find /tmp -delete"}}' deny "find-delete"
 
+# --- Bash: rm-recursive, every flag spelling the `Bash(rm -rf:*)` deny misses ---
+assert "rm -rf"                     '{"tool_name":"Bash","tool_input":{"command":"rm -rf /workspace/foo"}}' deny "rm-recursive"
+assert "rm -r -f (split flags)"     '{"tool_name":"Bash","tool_input":{"command":"rm -r -f /workspace/foo"}}' deny "rm-recursive"
+assert "rm -fr (reordered)"         '{"tool_name":"Bash","tool_input":{"command":"rm -fr /workspace/foo"}}' deny "rm-recursive"
+assert "rm -Rf (capital R)"         '{"tool_name":"Bash","tool_input":{"command":"rm -Rf /workspace/foo"}}' deny "rm-recursive"
+assert "rm --recursive --force"     '{"tool_name":"Bash","tool_input":{"command":"rm --recursive --force /workspace/foo"}}' deny "rm-recursive"
+assert "rm -r (no force)"           '{"tool_name":"Bash","tool_input":{"command":"rm -r /workspace/foo"}}' deny "rm-recursive"
+assert "sudo rm -rf"                '{"tool_name":"Bash","tool_input":{"command":"sudo rm -rf /workspace/foo"}}' deny "rm-recursive"
+
+# --- Bash: compound commands — the allowed-prefix tail must still be inspected ---
+assert "git add && rm -rf"          '{"tool_name":"Bash","tool_input":{"command":"git add . && rm -rf /workspace/foo"}}' deny "rm-recursive"
+assert "git commit && shred"        '{"tool_name":"Bash","tool_input":{"command":"git commit -m x && shred -u /workspace/s"}}' deny "shred"
+assert "git add ; find -delete"     '{"tool_name":"Bash","tool_input":{"command":"git add . ; find /workspace -delete"}}' deny "find-delete"
+assert "cred read via cd &&"        '{"tool_name":"Bash","tool_input":{"command":"git add . && cd /root/.config/gh && cat hosts.yml"}}' deny "cred-read"
+assert "cred read in $( ) subst"    '{"tool_name":"Bash","tool_input":{"command":"git commit -m \"$(cat /root/.claude/.credentials.json)\""}}' deny "cred-read"
+
 # --- Bash: hook-tamper ---
 assert "redirect to hook path"      '{"tool_name":"Bash","tool_input":{"command":"cat > /usr/local/lib/claude-hooks/deny-destructive.sh"}}' deny "hook-tamper"
 assert "rm settings.json"           '{"tool_name":"Bash","tool_input":{"command":"rm /root/.claude/settings.json"}}' deny "hook-tamper"
 assert "chmod hook"                 '{"tool_name":"Bash","tool_input":{"command":"chmod -x /usr/local/lib/claude-hooks/deny-destructive.sh"}}' deny "hook-tamper"
 
+# --- Bash: git-hook-tamper — the Bash(git commit *) escalation chain ---
+assert "redirect to .git/hooks"     '{"tool_name":"Bash","tool_input":{"command":"echo pwned > .git/hooks/pre-commit"}}' deny "git-hook-tamper"
+assert "chmod +x .git/hooks (abs)"  '{"tool_name":"Bash","tool_input":{"command":"chmod +x /workspace/proj/.git/hooks/pre-commit"}}' deny "git-hook-tamper"
+assert "cp into .git/hooks"         '{"tool_name":"Bash","tool_input":{"command":"cp /tmp/payload .git/hooks/post-commit"}}' deny "git-hook-tamper"
+assert "git add hook then commit"   '{"tool_name":"Bash","tool_input":{"command":"chmod +x .git/hooks/pre-commit && git commit -m x"}}' deny "git-hook-tamper"
+assert "git log (not a hook path)"  '{"tool_name":"Bash","tool_input":{"command":"git log --oneline .git/hooks"}}' pass
+
 # --- Edit / Write / MultiEdit ---
 assert "Edit hook script"           '{"tool_name":"Edit","tool_input":{"file_path":"/usr/local/lib/claude-hooks/deny-destructive.sh","old_string":"a","new_string":"b"}}' deny "hook-tamper"
 assert "Write to settings.json"     '{"tool_name":"Write","tool_input":{"file_path":"/root/.claude/settings.json","content":"{}"}}' deny "hook-tamper"
+assert "Write .git/hooks/pre-commit" '{"tool_name":"Write","tool_input":{"file_path":"/workspace/proj/.git/hooks/pre-commit","content":"#!/bin/sh"}}' deny "git-hook-tamper"
+assert "Edit .git/hooks/post-merge" '{"tool_name":"Edit","tool_input":{"file_path":"/workspace/proj/.git/hooks/post-merge","old_string":"a","new_string":"b"}}' deny "git-hook-tamper"
 assert "Edit normal file"           '{"tool_name":"Edit","tool_input":{"file_path":"/workspace/foo.py","old_string":"a","new_string":"b"}}' pass
+assert "Edit .git/config (not hook)" '{"tool_name":"Edit","tool_input":{"file_path":"/workspace/proj/.git/config","old_string":"a","new_string":"b"}}' pass
 assert "Write to /tmp"              '{"tool_name":"Write","tool_input":{"file_path":"/tmp/scratch.txt","content":"x"}}' pass
 
 # --- Other tools ---
@@ -96,6 +127,16 @@ if [ "$(wc -l < "$DENY_DESTRUCTIVE_LOG" | tr -d ' ')" -ge 1 ]; then
   PASS=$((PASS+1)); printf "  ok   warn-log written (>=1 entry)\n"
 else
   FAIL=$((FAIL+1)); printf "  FAIL warn-log empty after warn rules\n"
+fi
+
+# Log shape: { ts, rule, envelope } — the command must be reachable at
+# .envelope.tool_input.command. Guards the field rename (was `tool_input`,
+# which held the whole envelope and read one level too shallow).
+if [ "$(jq -r 'select(.rule=="workspace-overwrite") | .envelope.tool_input.command' \
+         < "$DENY_DESTRUCTIVE_LOG" 2>/dev/null)" = "echo hi > /workspace/x" ]; then
+  PASS=$((PASS+1)); printf "  ok   warn-log shape (.envelope.tool_input.command)\n"
+else
+  FAIL=$((FAIL+1)); printf "  FAIL warn-log shape: command not at .envelope.tool_input.command\n"
 fi
 
 printf "\n  %d passed, %d failed\n" "$PASS" "$FAIL"

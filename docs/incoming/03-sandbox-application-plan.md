@@ -388,7 +388,7 @@ the payload contains an install command form
 **passes** (the false-positive case that decides whether this survives — plan 02
 §8 is right that FP rate is the number that matters); `npm install foo` inside
 `AGENTS.md` denied; prose mentioning a package name in `README.md` passes. The
-harness currently asserts 35/35; AGENTS.md requires it green on every hook edit.
+harness currently asserts 61/61; AGENTS.md requires it green on every hook edit.
 
 **Deliverables:** `sandbox_templates/claude/claude-settings.json`,
 `sandbox_templates/claude/hooks/deny-destructive.sh`,

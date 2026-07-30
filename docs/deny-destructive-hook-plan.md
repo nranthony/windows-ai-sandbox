@@ -98,24 +98,39 @@ For `tool_name == "Bash"`, normalise the command (lowercase, strip leading
 |---|---|---|
 | 1 | `find-delete`         | block |
 | 2 | `find-exec` (destructive subcommands only: rm/mv/dd/truncate/shred/tee/chmod/chown) | block |
-| 3 | `git-clean`           | block |
-| 4 | `shred`               | block |
-| 5 | `truncate`            | block |
-| 6 | `dd-write` (`dd … of=…`) | block |
-| 7 | `mkfs`                | block |
-| 8 | `hook-tamper` (Bash)  — writes/redirects/chmod targeting `/usr/local/lib/claude-hooks/`, `/root/.claude/settings.json`, `/etc/claude/` | block |
-| 9 | `null-truncate` — bare `> file` clobber at command start | **warn** |
-| 10 | `workspace-overwrite` — `>` into `/workspace/` | **warn** |
+| 3 | `rm-recursive` — any flag spelling carrying `-r`/`-R`/`--recursive` | block |
+| 4 | `git-clean`           | block |
+| 5 | `shred`               | block |
+| 6 | `truncate`            | block |
+| 7 | `dd-write` (`dd … of=…`) | block |
+| 8 | `mkfs`                | block |
+| 9 | `hook-tamper` (Bash)  — writes/redirects/chmod targeting `/usr/local/lib/claude-hooks/`, `/root/.claude/settings.json`, `/etc/claude/` | block |
+| 9b | `git-hook-tamper` (Bash) — writes/redirects/`chmod` targeting any `.git/hooks/` | block |
+| 10 | `cred-read` — any reference to `/root/.gemini`, `.config/{gh,glab-cli}`, `.claude/.credentials`, `.claude.json`, `.aws`, `.ssh` (also `~/` and `$HOME/` forms) | block |
+| 10b | `cred-read` by bare credential filename (`oauth_creds.json`, `google_accounts.json`, `.credentials.json`) | block |
+| 11 | `null-truncate` — bare `> file` clobber at command start | **warn** |
+| 12 | `workspace-overwrite` — `>` into `/workspace/` | **warn** |
+
+Rule 3 exists because `permissions.deny` carries `Bash(rm -rf:*)`, and that is
+a *literal prefix*: `rm -r -f`, `rm -fr`, `rm -Rf`, and `rm --recursive` all
+walk past it. The matcher can't close that; the hook can. Non-recursive
+`rm file` / `rm -f file` still pass — this targets tree deletion only.
+
+Rule 9b closes the escalation that an allow rule like `Bash(git commit *)`
+opens: git executes `.git/hooks/*` on commit, so a written-then-`chmod +x`'d
+hook script turns the next pre-approved commit into arbitrary execution.
+`chmod` is the load-bearing verb — an unexecutable hook file is inert.
 
 For `tool_name in (Edit, Write, MultiEdit)`: `realpath -m` the
 `file_path`, block if the resolved path is under
-`/usr/local/lib/claude-hooks/`, exactly `/root/.claude/settings.json`, or
-under `/etc/claude/`.
+`/usr/local/lib/claude-hooks/`, exactly `/root/.claude/settings.json`,
+under `/etc/claude/`, or under any `.git/hooks/`.
 
 **Warn behaviour**: append a JSON-line entry to
-`/root/.cache/deny-destructive.log` with `{ts, rule, tool_input}`
+`/root/.cache/deny-destructive.log` with `{ts, rule, envelope}`
 (timestamp + full envelope, not just the command — required to evaluate
-the warn→block promotion review). Return `{}`, exit 0.
+the warn→block promotion review), so the command reads back at
+`.envelope.tool_input.command`. Return `{}`, exit 0.
 
 ## Maintenance
 
@@ -139,7 +154,8 @@ build artifacts). Promote to `block` only after one clean review week:
 
 ```bash
 # Inside an active profile
-docker exec ai-sandbox-<profile> cat /root/.cache/deny-destructive.log | jq .
+docker exec ai-sandbox-<profile> cat /root/.cache/deny-destructive.log \
+  | jq -r '[.ts, .rule, .envelope.tool_input.command] | @tsv'
 ```
 
 If zero false positives over a week of active development, flip the

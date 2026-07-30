@@ -60,7 +60,7 @@ Any change to them requires:
 3. Affected docs updated (ARCHITECTURE.md, `sandbox-hardening-package.md`).
 
 Hook edits additionally require
-`bash sandbox_templates/claude/hooks/deny-destructive.test.sh` (35/35).
+`bash sandbox_templates/claude/hooks/deny-destructive.test.sh` (61/61).
 
 ## Container state placement
 
