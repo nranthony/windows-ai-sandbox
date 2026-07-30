@@ -78,7 +78,8 @@
       "Bash(just:*)",
       "Bash(bd:*)",
       "Bash(jq:*)",
-      "Bash(webfetch:*)"
+      "Bash(webfetch:*)",
+      "Bash(nvidia-smi:*)"
     ],
     "deny": [
       "Bash(curl:*)",

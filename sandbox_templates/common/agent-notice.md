@@ -47,10 +47,32 @@ action or hunt for a workaround — treat it as a human step.
   closed" on a URL means the domain isn't in the egress allowlist. Don't retry
   or route around it — ask the human to add it (or use `webfetch` if it's a
   page read).
+- **The GPU is real, but `nvidia-smi` is not on `PATH`.** On WSL2 hosts the GPU
+  comes through as `/dev/dxg`, with the Windows driver userland bind-mounted
+  read-only at `/usr/lib/wsl`. Invoke it by full path:
+  `/usr/lib/wsl/lib/nvidia-smi`. A bare `nvidia-smi: command not found` is that
+  PATH gap, **not** a missing GPU — never conclude "no GPU" from it. If
+  `/dev/dxg` is absent too, this is a bare-Linux host and no-GPU is the CORRECT
+  answer, not a fault to investigate.
+- **Three different CUDA versions is normal here, not a misconfiguration.** The
+  *driver* comes from the Windows host and is much the newest; the *image* ships
+  only `libcudart` (`CUDA_VERSION=12.6.3`, no `nvcc`, no cuDNN/cuBLAS); each
+  project's `.venv` brings its own runtime as `nvidia-*` pip packages that
+  shadow the image's. Only one rule binds them — driver ≥ runtime — and it holds
+  with room to spare. Retargeting a project's CUDA is a wheel-index edit in its
+  `pyproject.toml`, never an image change.
+- **Don't touch the CUDA environment variables.** `LD_LIBRARY_PATH` is already
+  `/usr/lib/wsl/lib`, which is what makes the host driver win over the image's
+  `cuda-compat-12-6` shim; overriding or prepending to it breaks GPU access in a
+  way that won't look like a linker fault. `NVIDIA_VISIBLE_DEVICES` and
+  `NVIDIA_REQUIRE_CUDA` are inherited from the base image and inert here
+  (passthrough is `/dev/dxg`, not the NVIDIA Container Toolkit) — don't reason
+  from their values.
 
 ### What works
 
 Read/edit files; `git add/commit/diff/log/show/checkout/stash`; run tests &
 builds (`pytest`, `npm/pnpm run|test`, `node`, `python`, `uv run`, `make`,
-`just`); `rg`, `find`, `jq`; `webfetch` for web reads. Plan with installs,
-network widening, and remote git as human steps.
+`just`); `rg`, `find`, `jq`; `webfetch` for web reads; GPU checks via
+`/usr/lib/wsl/lib/nvidia-smi`. Plan with installs, network widening, and remote
+git as human steps.

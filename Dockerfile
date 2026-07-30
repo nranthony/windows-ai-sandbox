@@ -385,11 +385,19 @@ RUN npm install -g --allow-scripts=@anthropic-ai/claude-code "@anthropic-ai/clau
 # Update claude ONLY at build time (the RUN above passes --allow-scripts) via
 # `scripts/profile.sh build --refresh-ai`. Mirrored in the seeded Claude settings
 # (sandbox_templates/claude/claude-settings.json "env").
+#
+# PATH tail /usr/lib/wsl/lib: the WSL2 GPU overlay bind-mounts the Windows driver
+# userland there READ-ONLY (docker-compose.wsl-gpu.yml), and `nvidia-smi` lives in
+# it. Without this, a bare `nvidia-smi` is "command not found" and agents conclude
+# the GPU is absent when it is working — see the GPU bullets in
+# sandbox_templates/common/agent-notice.md. LAST on PATH so a read-only,
+# host-controlled mount can never shadow an image binary. Inert on bare Linux,
+# where the overlay is not layered and the directory does not exist.
 ENV HOME=/root \
     SHELL=/usr/bin/zsh \
     DISABLE_AUTOUPDATER=1 \
     DISABLE_UPDATES=1 \
-    PATH="/root/.local/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+    PATH="/root/.local/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/usr/lib/wsl/lib"
 
 USER root
 WORKDIR /workspace

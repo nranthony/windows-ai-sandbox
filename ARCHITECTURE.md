@@ -118,6 +118,20 @@ Deliberately NOT installed in the image: `bubblewrap`, `socat`,
 - GPU: CUDA 12.6.3 needs NVIDIA driver ≥530.30.02 on Windows. Passthrough is
   `/dev/dxg` + `/usr/lib/wsl`, NOT `--gpus all` (broken under NVIDIA Container
   Toolkit ≥1.18; toolkit pinned 1.17.8-1 in host setup).
+- GPU tooling is agent-visible by design: `/usr/lib/wsl/lib` is appended to
+  `PATH` (`Dockerfile`) and `Bash(nvidia-smi:*)` is allow-listed
+  (`sandbox_templates/claude/claude-settings.json`), so `nvidia-smi` runs
+  unprompted. Both are load-bearing against a specific failure: without them a
+  bare `nvidia-smi` is "command not found" and agents report the GPU as absent
+  while it works. Rationale + the CUDA version model live in the GPU bullets of
+  `sandbox_templates/common/agent-notice.md`.
+- Three CUDA versions coexist and are NOT expected to match: the driver/UMD from
+  the Windows host (`/usr/lib/wsl/lib/libcuda.so.1`), the image's `libcudart`
+  (`CUDA_VERSION`, `-base` — no `nvcc`/cuDNN/cuBLAS), and each project's `.venv`
+  runtime from its torch wheel index. Only driver ≥ runtime must hold. Retarget
+  CUDA per project via its `pyproject.toml` wheel index, not via the image.
+  `LD_LIBRARY_PATH=/usr/lib/wsl/lib` (set in the overlay) is what makes the host
+  driver win over the image's `cuda-compat-*` shim — do not reorder it.
 - D-Bus race on WSL restart handled by the kickstart block in `~/.zprofile`/`~/.profile`.
 
 **Bare Linux (Substrate B):**
