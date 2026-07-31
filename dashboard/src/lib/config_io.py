@@ -37,6 +37,13 @@ class ConfigIO:
                     continue
 
                 if raw.startswith("# ===") or raw.startswith("# ---"):
+                    # Bare section dividers (tier headers, the DROPPED
+                    # banner) carry no [tag] bracket — every real block
+                    # header is caught by the tag_match branch above and
+                    # never reaches here. Reset so stray lines after a
+                    # divider (e.g. under DROPPED) don't inherit the
+                    # previous block's tag.
+                    current_tag = ""
                     entries.append(AllowlistEntry(raw_line=raw))
                     continue
 
