@@ -28,6 +28,7 @@ profile_sh := justfile_directory() / "scripts" / "profile.sh"
 setup_sh   := justfile_directory() / "scripts" / "setup.sh"
 code_sh    := justfile_directory() / "scripts" / "code-attach.sh"
 gc_sh      := justfile_directory() / "scripts" / "docker-gc.sh"
+skillsync_sh := justfile_directory() / "scripts" / "sync-skills-from-conventions.sh"
 
 # default: banner + recipe list (a bare `just` lists, never runs a recipe).
 _default:
@@ -156,6 +157,17 @@ reset-settings profile:
 # overwrite this profile's claude skills from sandbox_templates/skills/ (backs up old)
 reset-skills profile:
     {{profile_sh}} {{profile}} reset-skills
+
+# ---- vendored skill refresh (host-side, no profile arg) ---------------------
+#
+# Developer action, NOT lifecycle: pulls shared skills from the agentic-conventions
+# checkout into the committed sandbox_templates/skills/ tree. Never runs during a
+# build or `up`. Follow with `just reset-skills <profile>` to push edits into a
+# live profile. Source path: $CONVENTIONS_DIR or .conventions-dir.local.
+
+# refresh vendored skills from agentic-conventions. Accepts --dry-run / <skill>...
+sync-skills *args:
+    {{skillsync_sh}} {{args}}
 
 # ---- host Docker hygiene (docker-gc.sh) -------------------------------------
 #

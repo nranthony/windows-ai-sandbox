@@ -95,7 +95,7 @@ and cannot be diffed or restored selectively. Back up the source dir or volume.
 
 ## Operational guides (host-agent skills)
 
-- Profile lifecycle, builds, DBs, ephemeral runs:
+- Profile lifecycle, builds, DBs, ephemeral runs, agent-skill seeding:
   [.agents/skills/profile-lifecycle.md](.agents/skills/profile-lifecycle.md)
 - Verify / audit / trivy tiers:
   [.agents/skills/security-audit.md](.agents/skills/security-audit.md)

@@ -99,7 +99,7 @@ Deliberately NOT installed in the image: `bubblewrap`, `socat`,
 │   ├── common/                   #   dotfiles, db.env.template, secrets.env.template, pdf-styles/
 │   ├── bin/                      #   webfetch (web-read broker; baked to /usr/local/bin)
 │   ├── claude/                   #   claude-settings.json, hooks/ (deny-destructive)
-│   └── skills/                   #   sandbox-side skills (audit-sandbox tier-3)
+│   └── skills/                   #   sandbox-side skills (audit-sandbox tier-3); some vendored — UPSTREAM.md
 ├── proxy/                        # squid.conf + allowed_domains.txt (egress allowlist)
 ├── scripts/                      # profile.sh (lifecycle driver), verify/audit, with-egress, ephemeral
 ├── docs/                         # Design notes, permissions model, portability, debug recipes (index.md)

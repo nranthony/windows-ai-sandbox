@@ -36,6 +36,9 @@ AGENTS.local.md
 **/AGENTS.local.md
 **/*.local.json
 .claude/settings.local.json
+# where agentic-conventions is checked out on THIS machine — the only
+# machine-specific fact in the skill-vendoring flow (sync-skills-from-conventions.sh)
+.conventions-dir.local
 
 # OS generated files
 .DS_Store

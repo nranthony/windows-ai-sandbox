@@ -57,6 +57,31 @@ scripts/profile.sh <profile> wipe [--dry-run|--yes|--all-volumes]  # blank slate
 `down` also age-prunes MCP logs + session transcripts older than
 `SANDBOX_LOG_RETENTION_DAYS` (default 14).
 
+## Agent skills in a profile
+
+Skills are **seeded per profile, never baked into the image** — the profile's
+`claude-home` bind mount shadows `/root/.claude`, so anything `COPY`d there in
+the `Dockerfile` is invisible at runtime.
+
+Seeding is **create-only**: `up` copies in a skill that is MISSING from the
+profile but never overwrites one that exists, so local tweaks survive. So a
+NEW skill lands on the next `up`; an EDITED one needs `reset-skills`, which
+backs up the old copy first. Either way, restart `claude` in the container.
+
+`sandbox_templates/skills/` mixes sandbox-native skills (this repo is their
+source of truth) with copies VENDORED from the shared agentic-conventions repo
+— `sandbox_templates/skills/UPSTREAM.md` says which is which. Edit a vendored
+skill upstream, not here; the next sync silently reverts local edits. Refresh
+host-side, never during a build:
+
+```bash
+scripts/sync-skills-from-conventions.sh [--dry-run] [<skill> ...]   # just sync-skills
+```
+
+Source path comes from `$CONVENTIONS_DIR` or the gitignored
+`.conventions-dir.local`; the script writes only the template tree, so follow
+it with `reset-skills` per profile to push edits into a live profile.
+
 ## Databases (opt-in siblings)
 
 ```bash

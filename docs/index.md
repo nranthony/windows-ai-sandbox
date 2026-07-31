@@ -61,6 +61,7 @@ Guides in [`host_setup/`](../host_setup/):
 - [`scripts/run-ephemeral.sh`](../scripts/run-ephemeral.sh) — disposable one-shot containers
 - [`scripts/init-profile-state.sh`](../scripts/init-profile-state.sh) — idempotent state bootstrap per profile
 - [`scripts/sync-agent-notice.sh`](../scripts/sync-agent-notice.sh) — inject/refresh the managed sandbox-notice block into repo `AGENTS.md` / global `CLAUDE.md` (source: `sandbox_templates/common/agent-notice.md`)
+- [`scripts/sync-skills-from-conventions.sh`](../scripts/sync-skills-from-conventions.sh) — vendor shared skills from the `agentic-conventions` checkout into `sandbox_templates/skills/` (developer action, never runs during a build; source path from `$CONVENTIONS_DIR` / `.conventions-dir.local`)
 
 ## Operational
 
