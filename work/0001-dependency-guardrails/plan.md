@@ -17,9 +17,10 @@ Prose below refers to these as "plan 01", "plan 02", "plan 04".
 **[I]** Inferred — plausible, needs validation before it is relied on ·
 **[D]** Needs-decision — a human must choose.
 
-Repo claims marked **[C 07-31]** were re-verified against the working tree on
-2026-07-31. Container claims marked **[C 07-30]** come from the original
-`docker run --rm` probe run and have **not** been re-run since; §8 T00 re-runs them.
+Claims marked **[C 07-31]** were verified on 2026-07-31 — against the working tree, or by
+live probe against the image and the three running profiles. A few **[C 07-30]** claims
+remain from the original probe run where re-running them was not warranted; each is noted.
+**Prerequisites T00 and T01 are complete — see §0.1.**
 
 ---
 
@@ -51,6 +52,44 @@ Three consequences, all of which make the plan cheaper:
 still state that "package registries + CDNs are uncommented by default (unlike macolima,
 where they live in PLANNING-MODE and are commented)". That is no longer true of this file.
 An agent reading the header learns the opposite of the deployed posture. Fixed in T09.
+
+**[C 07-31] Verified in the running proxies, not just the file.** With all three profiles
+up, `registry.npmjs.org` and `pypi.org` both return `000` from inside a sandbox. The
+registries are closed in enforcement, not only on paper.
+
+---
+
+## 0.1 Prerequisite results (T00, T01 — both run 2026-07-31)
+
+**T00 — baseline re-taken. A1 validated, with drift.** The 07-30 probe was one day stale
+and three of six values had moved:
+
+| | 07-30 | 07-31 | Bar |
+|---|---|---|---|
+| npm | 12.0.1 | **12.0.2** | ≥ 11.10.0 ✓ |
+| node | 24.18.0 | **24.18.1** | — |
+| uv | 0.11.29 | **0.12.0** | — ✓ |
+| pnpm / pip / python | 10.34.5 / 24.0 / 3.12.3 | unchanged | ≥ 10.16 ✓ |
+
+Gate 2 remains entirely unconfigured: `min-release-age = null`, `allow-scripts = [""]`,
+`save-exact = false`, pnpm `minimumReleaseAge` undefined, no `/etc/pip.conf`.
+
+Two findings that firm up phase 2:
+- **[C 07-31]** `npm config get globalconfig` = **`/usr/etc/npmrc`** — T07's target path is
+  correct; the file does not exist yet.
+- **[C 07-31]** `min-release-age-exclude = []` exists in npm 12, so §11's per-package
+  escape hatch is real rather than assumed.
+
+**Re-run T00 before starting phase 2.** Versions moved measurably in 24h; today's numbers
+should not be trusted next week.
+
+**T01 — G1 REFUTED. See §6 G1 and §12.** `squid -k reconfigure` does not kill the proxy.
+The prerequisite is discharged and phase 3 is unblocked; T17 is dropped.
+
+**G9 discovered while verifying T01 — see §6 G9.** All three running proxies were serving a
+stale, inode-pinned allowlist permitting a domain the repo had gated. Cleared by bringing
+the profiles down and up; **[C 07-31]** all three now diff clean against the host file at
+53 domains.
 
 ---
 
@@ -92,8 +131,8 @@ already-trusted dependency. Only property 1 touches those, and only by making a 
 
 ## 2. Verified evidence — where the five gates stand
 
-Gate model from plan 02 §3. Container-side tool versions from the 2026-07-30 probe run
-(npm 12.0.1 / pnpm 10.34.5 / node 24.18.0 / uv 0.11.29 / pip 24.0 / system Python 3.12.3).
+Gate model from plan 02 §3. Container-side tool versions re-probed **2026-07-31** (T00,
+§0.1): npm 12.0.2 / pnpm 10.34.5 / node 24.18.1 / uv 0.12.0 / pip 24.0 / Python 3.12.3.
 
 | Gate | Mechanism | State | Evidence |
 |---|---|---|---|
@@ -155,8 +194,8 @@ SARIF output, fleet mode, `policy.yaml` as a separate versioned artifact, Socket
 
 **Assumptions [I] — validate before relying on them:**
 
-- **A1.** The 2026-07-30 container probe values still hold. T00 re-runs them; every
-  phase-2 threshold depends on the tool versions clearing the minimum version bars.
+- **A1. ✅ VALIDATED 2026-07-31 (T00).** Versions drifted upward but every bar is still
+  cleared. Re-validate before phase 2 — see §0.1.
 - **A2.** `min-release-age` in npm 12 does not interact badly with the
   `--allow-scripts=@anthropic-ai/claude-code` build step at `Dockerfile:365`. **[C 07-31]**
   that line exists and is load-bearing — it is what keeps `claude --version` from
@@ -273,20 +312,42 @@ pulling something published this morning. Phase 2a is not redundant with §0.
 
 ## 6. The gaps, ranked
 
-### G1 — `with-egress.sh` reloads Squid with a signal that kills it *(P0, prerequisite)*
+### G1 — ~~`with-egress.sh` reloads Squid with a signal that kills it~~ **REFUTED, CLOSED**
 
-**[C 07-31]** `scripts/with-egress.sh:97` runs `docker exec egress-proxy-$profile squid -k
-reconfigure`. Commit `3809791` established that squid runs as the proxy container's
-foreground PID and takes SIGHUP as Hangup, exiting 129 — the reload kills the container it
-targets. The fallback at `:100-102` cannot fire, because `docker exec` returns 0: the
-*signal* was delivered, it is the *daemon* that dies.
+**[C 07-31] T01 disproved this. T17 is dropped and phase 3 is unblocked.**
 
-**[C 07-31]** The inode half of that bug does **not** apply: `open_section` writes in place
-and `cleanup` uses `cp backup "$ALLOWLIST"`, both preserving the inode the running proxy is
-pinned to. Only the SIGHUP half applies.
+The claim was that `scripts/with-egress.sh:97`'s `docker exec egress-proxy-$profile squid
+-k reconfigure` kills the proxy, per commit `3809791`'s premise that squid runs as the
+container's foreground PID and takes SIGHUP as Hangup, exiting 129.
 
-**[I]** Not yet reproduced in `with-egress.sh`'s own call path — the dashboard commit
-verified the pattern in the dashboard's. **Reproduce before fixing** (T01).
+Measured directly against `egress-proxy-fluidmomenta` (idle profile; image digest-pinned
+`ubuntu/squid:latest@sha256:6a097f68…`, so this is not image drift):
+
+```
+docker exec … squid -k reconfigure  → exit 0, logs "Processing Configuration File"
+timeout 6 docker wait               → rc 124 (never stopped)
+docker inspect                      → running, exit=0, restarts=0
+```
+
+**Root cause of the misdiagnosis: squid is not PID 1.**
+
+```
+PID 1  /bin/bash /usr/local/bin/entrypoint.sh -f /etc/squid/squid.conf -NYC
+PID 42 /usr/sbin/squid -f /etc/squid/squid.conf -NYC     ← child of PID 1
+```
+
+SIGHUP reaches squid, squid handles it as a reconfigure, PID 1 is untouched. The proxy kept
+serving correctly afterwards (`api.anthropic.com` tunnelled, `example.com` denied).
+
+**[C 07-31]** The inode half also does not apply to this script: `open_section` writes in
+place and `cleanup` uses `cp backup "$ALLOWLIST"`, both preserving the inode the running
+proxy is pinned to. **Neither half applies, so there is no bug in `with-egress.sh` to fix.**
+
+The exit-129 the dashboard observed remains unexplained — most likely a proxy already dead
+of another cause, or a parse failure on a half-written allowlist. The dashboard's *fix*
+(restart, not reconfigure) is still correct, but for the G9 reason below, not this one.
+**[C 07-31]** `dashboard/AGENTS.md` and `dashboard/src/lib/docker_client.py` state the
+refuted mechanism in comments and should be corrected — **out of scope here; its own change.**
 
 ### G2 — Gate 0 is asymmetric across package managers
 
@@ -359,6 +420,38 @@ discarded on every proxy recreate.
 default; `fc7c0f0` commented them out. Documentation that inverts the deployed posture is
 worse than none, because it is what an agent reads before deciding whether an install can
 work.
+
+### G9 — a running proxy can silently enforce a different allowlist than the repo *(new, replaces G1)*
+
+**[C 07-31] Found live on all three profiles while verifying T01.** The host file and the
+container's view had diverged:
+
+```
+host      proxy/allowed_domains.txt        inode 299417  size 15430
+container /etc/squid/allowed_domains.txt   inode 523432  size 14930
+```
+
+The bind mount was pinned to a **deleted inode** — the file as it existed when the proxy
+started. An atomic-replace edit on the host (an editor, `sed -i`, a git checkout) writes a
+new file and renames over the old one, so a long-running proxy keeps serving the previous
+content indefinitely.
+
+**The delta was security-relevant and in the wrong direction.** All three proxies were
+permitting `sheets.googleapis.com`, a domain the repo deliberately gated in commit
+`ee40ee4`. It was the only difference — the registries were correctly closed in both — but
+a domain removed from the allowlist stayed reachable for hours and **nothing reported it**.
+Cleared by `down` + `up`; **[C 07-31]** all three now diff clean at 53 domains and
+`sheets.googleapis.com` returns `000` from inside a sandbox.
+
+This is the inode half of the bug commit `3809791` described, which G1 correctly ruled out
+for `with-egress.sh` — it arrives through hand edits and git operations instead, which is
+how the allowlist actually changes. `squid -k reconfigure` cannot fix it either: squid
+re-reads the *path*, which still resolves to the pinned inode. Only a container restart
+re-resolves the mount.
+
+**This is a better task than T17 was.** Silent divergence between a security control's
+source of truth and its enforcement is exactly what a tier-1 tripwire exists to catch, and
+the check is a two-line diff. Becomes **T24**.
 
 ---
 
@@ -550,11 +643,28 @@ covers the window where intel structurally fails, and it works with no network, 
 no vendor. Intel is the complement, not the primary. This is the sequencing most likely to
 be got wrong, because T16 is the more satisfying thing to build.
 
-### Phase 3 — Instrument the install window *(~2d; blocked on T01)*
+### Phase 3 — Instrument the install window *(~2d; no longer blocked)*
 
-**T17 — Fix `reload_proxy`** *(G1)*. File: `scripts/with-egress.sh`. Replace the
-`squid -k reconfigure` path with the container-restart path the dashboard now uses, plus a
-post-restart liveness check and a domain-count assertion.
+**~~T17 — Fix `reload_proxy`~~ — DROPPED.** T01 refuted G1; there is no bug to fix. See §6
+G1. `with-egress.sh`'s reload path is left exactly as it is.
+
+**T24 — Allowlist drift tripwire** *(G9, replaces T17)*. File: `scripts/verify-sandbox.sh`
+(tier 1). Assert that what the proxy loaded equals what the repo says:
+
+```sh
+diff <(grep -vE '^[[:space:]]*#|^[[:space:]]*$' proxy/allowed_domains.txt | sort) \
+     <(docker exec -u proxy egress-proxy-$p \
+         grep -vE '^[[:space:]]*#|^[[:space:]]*$' /etc/squid/allowed_domains.txt | sort)
+```
+
+`fail` on any delta, naming the domains and directing to `docker restart
+egress-proxy-<profile>`. **[C 07-31]** must run as `-u proxy`: the container is
+`cap_drop: ALL` + `cap_add: [SETGID, SETUID]` (`CapEff 0xc0`), so UID 0 has no
+`CAP_DAC_OVERRIDE` and cannot read the `0640 proxy:proxy` file. `docker exec -u root`
+fails. Same constraint applies to T20.
+
+Extra-domain deltas are the dangerous direction and should read as such in the output:
+a domain the repo removed but the proxy still permits is an open hole, not a config lag.
 
 **T18 — Pre-flight.** Extract package specs from the command; run `depaudit pkg` (T16) per
 spec. `BLOCK` refuses to open the window; `REVIEW` prints signals and asks. Plan 02's
@@ -565,8 +675,9 @@ query serially and skip the concurrency machinery plan 01 §6 specifies for flee
 lockfile hashes, `node_modules/` and `site-packages/` top-level listings. After: the same.
 
 **T20 — Egress diff.** Filter `access.log` (field 1 is epoch seconds) to the bracket;
-extract distinct destination hosts. Timestamp-filtering rather than byte-offsets is what
-survives the proxy restart from T17. Anything outside `{registry, CDN}` during an install
+extract distinct destination hosts, reading via **`docker exec -u proxy`** (see T24 —
+root cannot read the log). Timestamp-filtering rather than byte-offsets survives a proxy
+restart mid-window. Anything outside `{registry, CDN}` during an install
 window is plan 02 §Gate 4's high-signal, low-FP evidence — *observable* here rather than
 theoretical, because the window is explicit and narrow.
 
@@ -591,16 +702,17 @@ resolve to sdists. Small → impose image-wide. Large → impose per-project.
 
 ## 8. Validation plan
 
-**T00 — Re-baseline before starting.** The container probe is a day old and every phase-2
-threshold depends on it.
+**T00 — Re-baseline. Run before *each* phase-2 session, not once.** Versions moved
+measurably in 24h (§0.1).
 
 ```bash
 docker run --rm windows-ai-sandbox:latest bash -lc \
   'npm --version; pnpm --version; node --version; uv --version; pip --version;
    npm config get min-release-age; npm config get allow-scripts;
-   pnpm config get minimumReleaseAge'
+   npm config get globalconfig; pnpm config get minimumReleaseAge'
 ```
-Expect: npm ≥ 11.10.0, pnpm ≥ 10.16, `min-release-age` `null`, `minimumReleaseAge` unset.
+Expect: npm ≥ 11.10.0, pnpm ≥ 10.16, `min-release-age` `null`, `minimumReleaseAge` unset,
+`globalconfig` = `/usr/etc/npmrc`.
 
 **Per phase:**
 
@@ -617,20 +729,31 @@ Expect: npm ≥ 11.10.0, pnpm ≥ 10.16, `min-release-age` `null`, `minimumRelea
 | 2 | `python3 scripts/depaudit.py posture .` | runs offline, exits 0, zero flags on the known-good corpus |
 | 2 | `python3 scripts/depaudit.py pkg npm unused-imports` | **BLOCK** (`MAL-2025-48781`) |
 | 2 | `python3 scripts/depaudit.py pkg npm express` | no BLOCK — `GHSA-` present but not a signal on this path |
-| 3 | G1 repro, below | container exits 129 before the fix; stays `running` after |
+| 2 | T24 allowlist diff, per profile | zero delta between host file and every running proxy |
 | 3 | `scripts/with-egress.sh <p> --with pypi -- 'python -c "import sys;print(sys.version)"'` | window opens and closes; one JSONL line appended |
 | all | `scripts/profile.sh <p> audit` | tier-2 probes clean |
 
-**G1 reproduction (T01) — run this before writing the fix:**
+**G1 reproduction (T01) — RUN 2026-07-31, result: refuted.** Kept for the record, because
+the negative result is the finding:
 
 ```bash
 docker exec egress-proxy-<p> squid -k reconfigure; echo "exec exit=$?"
-sleep 2
+timeout 6 docker wait egress-proxy-<p>; echo "wait rc=$?"     # no foreground sleep needed
 docker inspect -f '{{.State.Status}} {{.State.ExitCode}}' egress-proxy-<p>
 ```
-Expected if G1 is real: `exec exit=0` **and** `exited 129`. If the container is still
-`running`, G1 does not apply to this call path and T17 is unnecessary — say so and drop it
-rather than fixing a bug that is not there.
+
+Observed: `exec exit=0`, `wait rc=124` (never stopped), `running 0`. The plan's own
+instruction was to drop T17 in exactly this case, and it has been dropped. **[C 07-31]**
+
+**G9 drift check (T24) — the check that found the live defect:**
+
+```bash
+diff <(grep -vE '^[[:space:]]*#|^[[:space:]]*$' proxy/allowed_domains.txt | sort) \
+     <(docker exec -u proxy egress-proxy-<p> \
+         grep -vE '^[[:space:]]*#|^[[:space:]]*$' /etc/squid/allowed_domains.txt | sort)
+```
+Expect empty. A `>` line is a domain the proxy permits and the repo does not — the
+dangerous direction. Note `-u proxy`; root cannot read the file.
 
 ---
 
@@ -685,6 +808,7 @@ this argument about itself and it applies unchanged.
 | 2b (T09) | Uncomment the tags, restart the proxy | Installs fail with `TCP_DENIED` until reverted |
 | 2c (T13) | Delete the script | None — read-only, spawns nothing |
 | 3 | Revert `with-egress.sh` | Install window breaks; **`with-egress.sh` is currently the only registry route (§0)**, so this blocks all installs. Test on one profile first |
+| T24 | Remove the check | None — read-only assertion; a false positive costs a `verify` FAIL, not a broken profile |
 | 4 | Unset the env var | Sdist-only packages fail to build |
 
 **Reliability note.** T12's tripwires must not depend on the network. Per plan 01 §1,
@@ -720,8 +844,8 @@ not a degraded one (upstream ADR-0003).
 
 | ID | Task | Phase | Effort | Depends on |
 |---|---|---|---|---|
-| T00 | Re-baseline container probe | — | 15m | — |
-| T01 | **Reproduce G1** on `with-egress.sh`'s own path | — | 30m | — |
+| ~~T00~~ | ~~Re-baseline container probe~~ — **DONE 07-31**, §0.1 | — | — | — |
+| ~~T01~~ | ~~Reproduce G1~~ — **DONE 07-31, REFUTED**, §6 G1 | — | — | — |
 | T02 | Rules into `agent-notice.md` + sync | 0 | 1h | — |
 | T03 | Deny-list symmetry | 1 | 1h | — |
 | T04 | `manifest-dep-add` hook rule | 1 | 2h | — |
@@ -737,19 +861,20 @@ not a degraded one (upstream ADR-0003).
 | T14 | `profile.sh deps` + justfile | 2 | 1h | T13 |
 | T15 | Fixtures + corpora | 2 | 0.5d | T13 |
 | T16 | `depaudit pkg` + OSV `MAL-` | 2 | 0.5d | T13, T07, T10 |
-| T17 | Fix `reload_proxy` | 3 | 2h | T01 |
-| T18 | Window pre-flight | 3 | 0.5d | T16, T17 |
-| T19 | Bracket + snapshot | 3 | 3h | T17 |
+| ~~T17~~ | ~~Fix `reload_proxy`~~ — **DROPPED**, G1 refuted | 3 | — | — |
+| **T24** | **Allowlist drift tripwire** *(G9, replaces T17)* | 2 | 2h | — |
+| T18 | Window pre-flight | 3 | 0.5d | T16 |
+| T19 | Bracket + snapshot | 3 | 3h | — |
 | T20 | Egress diff | 3 | 3h | T19 |
 | T21 | Filesystem diff | 3 | 2h | T19 |
 | T22 | Persist to host audit log | 3 | 3h | T19–T21 |
 | T23 | Python wheels-only, staged | 4 | TBD | T22 telemetry |
 
-**Suggested order.** T00 + T01 first — both are short and both change what the later tasks
-say. Then **phase 1 in full**: it is half a day, it closes the manifest-edit path (the acute
-unguarded risk), and per plan 02 §7 it produces the telemetry that sets every other
-threshold. Phase 0 can land any time. Then T09 (cheap now, and fixes a live documentation
-defect), then T07/T08/T10/T12, then T13→T16.
+**Suggested order.** ~~T00 + T01 first~~ — **both done 2026-07-31**; they removed one task
+(T17) and added another (T24). Next: **phase 1 in full** — half a day, closes the
+manifest-edit path (the acute unguarded risk), and per plan 02 §7 it produces the telemetry
+that sets every other threshold. Phase 0 can land any time. Then T09 + T24 (both cheap, both
+fix live defects), then T07/T08/T10/T12, then T13→T16. Phase 3 is no longer gated.
 
 **On sequencing T16:** it is the cheapest unit here and the most tempting to do first,
 because a verified-working free API is more satisfying to build than an `.npmrc` line.
