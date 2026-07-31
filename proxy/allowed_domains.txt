@@ -70,9 +70,9 @@ api.openai.com
 # `.vscode-unpkg.net` is kept as a wildcard because VS Code's extension fetcher
 # rotates across many subdomains under that single MS-controlled parent. No
 # known third-party-owned subdomain under it.
-marketplace.visualstudio.com
-.vscode-unpkg.net
-update.code.visualstudio.com
+# marketplace.visualstudio.com
+# .vscode-unpkg.net
+# update.code.visualstudio.com
 
 # --- Antigravity CLI [antigravity] ---
 # Runtime + OAuth for Google's `agy` (Antigravity CLI; replaces the former
@@ -142,17 +142,17 @@ codeload.github.com
 # gitlab.com
 
 # --- Python package ecosystem [pypi] ---
-.pypi.org
-.files.pythonhosted.org
-.astral.sh
+# .pypi.org
+# .files.pythonhosted.org
+# .astral.sh
 
 # --- PyTorch / NVIDIA CUDA wheels [pytorch] ---
 # download.pytorch.org
 
 # --- Node.js / npm (Claude Code updates + per-repo npm) [npm] ---
-registry.npmjs.org
-nodejs.org
-deb.nodesource.com
+# registry.npmjs.org
+# nodejs.org
+# deb.nodesource.com
 
 # --- NVIDIA container + compute stack [nvidia] ---
 # developer.download.nvidia.com
@@ -160,18 +160,18 @@ deb.nodesource.com
 
 # --- Numerai tournament + MCP [numerai] ---
 # GraphQL API (all ops: data listing, submissions, staking, diagnostics, MCP)
-api-tournament.numer.ai
+# api-tournament.numer.ai
 # Website (MCP device-token auth flow, account/key creation)
-numer.ai
+# numer.ai
 # S3 data buckets (presigned URLs for dataset download + submission upload).
 # Bucket names returned dynamically by the GraphQL API; these are the known
 # ones. If a download/upload hits TCP_DENIED, check Squid access.log for the
 # actual S3 subdomain and add it here.
-numerai-datasets-us-west-2.s3.amazonaws.com
-numerai-datasets-us-west-2.s3.us-west-2.amazonaws.com
-numerai-datasets-us-west-2.s3-us-west-2.amazonaws.com
-numerai-datasets.s3.amazonaws.com
-numerai-public-datasets.s3-us-west-2.amazonaws.com
+# numerai-datasets-us-west-2.s3.amazonaws.com
+# numerai-datasets-us-west-2.s3.us-west-2.amazonaws.com
+# numerai-datasets-us-west-2.s3-us-west-2.amazonaws.com
+# numerai-datasets.s3.amazonaws.com
+# numerai-public-datasets.s3-us-west-2.amazonaws.com
 
 # --- Kaggle CLI [kaggle] ---
 # `kaggle` package (pip-installed, already covered by [pypi]) talks to the
@@ -183,10 +183,10 @@ numerai-public-datasets.s3-us-west-2.amazonaws.com
 # Needs ~/.kaggle/kaggle.json (or KAGGLE_USERNAME/KAGGLE_KEY) for auth and
 # the competition's rules accepted on kaggle.com — neither is an egress
 # concern, both are on you.
-www.kaggle.com
-kaggle.com
-api.kaggle.com
-storage.googleapis.com
+# www.kaggle.com
+# kaggle.com
+# api.kaggle.com
+# storage.googleapis.com
 
 # --- Academic / citation tooling [citation-tools] ---
 # Egress for a citation-tooling workload (example project profile).
