@@ -7,13 +7,16 @@ action or hunt for a workaround — treat it as a human step.
 ### These fail — don't retry, ask the human instead
 
 - **No arbitrary internet.** `curl`/`wget` and the `WebFetch` tool are denied;
-  only a fixed allowlist is directly reachable (Anthropic, GitHub, PyPI, npm,
-  PyTorch, Google/Antigravity). To read a web page, use `webfetch` (see below) —
-  don't reach for `curl`.
+  only a fixed allowlist is directly reachable (Anthropic, GitHub,
+  Google/Antigravity, and a set of docs/API hosts). **The package registries —
+  PyPI, npm, PyTorch — are currently CLOSED**, so installs fail at the network
+  even where a command isn't denied. To read a web page, use `webfetch` (see
+  below) — don't reach for `curl`.
 - **No dependency installs.** `pip install`, `uv add`/`uv pip install`,
   `npm install`/`npx`, `cargo/go install`, `pipx` are denied. If a package is
   missing, **stop and ask the human** to install it in the interactive shell
-  (or via `scripts/with-egress.sh`).
+  (or via `scripts/with-egress.sh`). See "Dependencies" below for what to say
+  when you do.
 - **No remote git.** `git push/pull/fetch/clone`, `git config`, `gh`, `glab`
   are denied. Commit locally; the human pushes. Git identity is fixed to a
   noreply address — don't try to set `user.email`.
@@ -26,6 +29,39 @@ action or hunt for a workaround — treat it as a human step.
   that's exactly what it catches.
 - **No secrets.** `.env`, `*.env.*`, `*.key`, `*.pem`, `**/credentials` are
   unreadable.
+
+### Dependencies — a new package is a trust decision, not an implementation detail
+
+Models invent plausible package names; attackers register them and wait. Roughly
+one in five AI-recommended packages doesn't exist, and about half of the invented
+names resemble nothing real — so "it sounds right" is not evidence, and neither
+is "a similar package exists". Five rules:
+
+1. **Never add a dependency silently.** Stop and surface it: the package name,
+   what it's for, and why an existing dependency won't do. This applies to
+   editing `package.json` / `pyproject.toml` / `requirements*.txt` just as much
+   as to running an install command — **a manifest edit IS adding a dependency**,
+   and a later `uv run` or `pnpm run build` will resolve it.
+2. **Verify it exists before you propose it.** A registry 404 means you invented
+   it — do not substitute a "similar" name, and do not create a placeholder.
+   Find a real alternative or say you couldn't.
+3. **Treat these as red flags**, not details: first published in the last few
+   months; fewer than ~3 released versions; no repository link, or one that
+   404s; downloads far below what its claimed purpose implies; a name shaped
+   like `{real-library}-{ai,gpt,helper,utils,wrapper,client,sdk}` — that last is
+   the canonical invented-name pattern and the highest-value squat target.
+4. **Prefer lockfile-strict forms** when an install is agreed: `npm ci`,
+   `pnpm install --frozen-lockfile`, `uv sync --frozen`,
+   `pip install --require-hashes`. A name you suggested mid-task then cannot
+   silently enter the tree; it has to arrive as a reviewable lockfile diff.
+5. **Instruction files are executable surfaces.** An `npm install X` written into
+   `AGENTS.md`, `CLAUDE.md`, `SKILL.md`, `.cursorrules` or a README gets run by
+   the next agent and pasted by the next human, long after anyone remembers
+   where the name came from. **Every install command you write into a docs or
+   config file is subject to rules 1–3, exactly as if you were installing it.**
+
+These are rules for how you behave, not a security control — the proxy and the
+deny-list are the controls. Following them means the controls fire less often.
 
 ### Sandbox capabilities — how things work here
 
