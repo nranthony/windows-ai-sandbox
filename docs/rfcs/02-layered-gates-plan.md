@@ -1,9 +1,15 @@
-# Layered Dependency Gates — Design Plan
+# RFC: Layered Dependency Gates (`depgate`)
+
+- Status: Draft — largely **declined for this repo**; see
+  [`work/0001-dependency-guardrails/plan.md`](../../work/0001-dependency-guardrails/plan.md) §4
+  ("what we deliberately do not build"). Retained as the gate model plan 01 and the
+  application plan both reason against.
+- Author: external draft, imported 2026-07-30
 
 **Codename:** `depgate`
 **Scope:** Node + Python. Two deployment topologies: inside the egress container, and
 client-side without it.
-**Status:** Design. Not built.
+**Build status:** Design. Not built.
 
 ---
 

@@ -40,6 +40,10 @@ AGENTS.local.md
 # machine-specific fact in the skill-vendoring flow (sync-skills-from-conventions.sh)
 .conventions-dir.local
 
+# native plan-mode drafts (plansDirectory in .claude/settings.json) — drafts, not the
+# durable artifact; a draft becomes durable by promotion to work/NNNN-slug/plan.md
+work/plans/
+
 # OS generated files
 .DS_Store
 .DS_Store?

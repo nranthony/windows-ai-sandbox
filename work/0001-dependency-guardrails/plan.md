@@ -1,11 +1,21 @@
 # Dependency Guardrails — Application Plan for windows-ai-sandbox
 
-**Inputs:** `01-posture-scanner-plan.md` (`depaudit`), `02-layered-gates-plan.md`
-(`depgate`), `DEPENDENCY_GUARDRAILS.md`.
-**Status:** Plan. Nothing implemented.
+**Status:** DRAFT — carried over verbatim from `docs/incoming/03-sandbox-application-plan.md`
+on 2026-07-31 when the `work/` tier was adopted ([ADR-0001](../../docs/adr/0001-provenance-tiers.md)).
+It has not yet been rewritten to the `make-plan` §3 contract: it lacks systematic
+**Confirmed / Inferred / Needs-decision** labelling, and its §8 open decisions are
+unresolved. Treat the technical content as sound and the document shape as provisional.
+
+**Exit rule:** this folder is deleted, or moved to `work/archive/`, when the work merges.
+
+**Inputs (now in the RFC tier):**
+[`01-posture-scanner-plan.md`](../../docs/rfcs/01-posture-scanner-plan.md) (`depaudit`),
+[`02-layered-gates-plan.md`](../../docs/rfcs/02-layered-gates-plan.md) (`depgate`),
+[`DEPENDENCY_GUARDRAILS.md`](../../docs/rfcs/DEPENDENCY_GUARDRAILS.md).
+Prose below refers to these as "plan 01", "plan 02" and by filename — those names are unchanged.
 **Scope:** what to build *here*, in this repo, against this egress model. The
 cross-repo / pre-deployment subset is split out into
-[`04-portable-guardrails-outside-sandbox.md`](04-portable-guardrails-outside-sandbox.md).
+[`04-portable-guardrails-outside-sandbox.md`](../../docs/rfcs/04-portable-guardrails-outside-sandbox.md).
 
 ---
 
@@ -300,7 +310,7 @@ Recorded so it is a decision, not an omission.
 | **SARIF output** (plan 01 §8) | No GitHub code-scanning ingestion in this repo's workflow. Add if that changes. |
 | **Fleet mode** (plan 01 §8) | The "fleet" is `~/repo/<profile>/`. `depaudit posture` over a glob is the whole feature. |
 | **`policy.yaml` as a versioned artifact in its own repo** (plan 02 §2) | Correct at org scale, overhead at this scale. Keep a single `depaudit/policy.toml` in-repo (TOML, so `tomllib` reads it — no YAML parser, per D2). Revisit if macolima needs to share it. |
-| **Socket Firewall (`sfw`)** — install-time proxy for npm/yarn/pnpm/pip/uv/cargo | The argument for it is real: *the exposure is the 200 transitive dependencies, not the package you chose.* But we already answer that twice — plan 01 §5 `inventory` resolves the **full tree including transitives** from lockfiles, and `enrich` runs over every unique `(eco, name)`, not just direct deps. Phase 3 closes the remaining timing gap by diffing the lockfile *inside* the install window. Adopting `sfw` would put a third-party binary that proxies every install **inside** the security boundary, requiring egress to a vendor service — the exact shape D2 exists to refuse. Correct answer for a host with no window; see [`04`](04-portable-guardrails-outside-sandbox.md) §6. |
+| **Socket Firewall (`sfw`)** — install-time proxy for npm/yarn/pnpm/pip/uv/cargo | The argument for it is real: *the exposure is the 200 transitive dependencies, not the package you chose.* But we already answer that twice — plan 01 §5 `inventory` resolves the **full tree including transitives** from lockfiles, and `enrich` runs over every unique `(eco, name)`, not just direct deps. Phase 3 closes the remaining timing gap by diffing the lockfile *inside* the install window. Adopting `sfw` would put a third-party binary that proxies every install **inside** the security boundary, requiring egress to a vendor service — the exact shape D2 exists to refuse. Correct answer for a host with no window; see [`04`](../../docs/rfcs/04-portable-guardrails-outside-sandbox.md) §6. |
 | **Socket `batchPackageFetch`** (behavioural analysis, ~1k scans/month free) | Genuinely catches what OSV cannot — compromises before an advisory exists. But it costs a new allowlist entry, an API key in `secrets.env`, and a vendor dependency in the trust path. Revisit once OSV's hit rate is known from phase 3 telemetry; do not add a second source before the first has been observed. |
 | **`osv-scanner` binary** | A Go binary to avoid writing a `urllib` POST. D2 says no. The API is one stdlib call — verified working in §3 D6. |
 | **Local OSV mirror** (`gs://osv-vulnerabilities`) | Would make the check work inside the container offline, and `storage.googleapis.com` happens to be allowlisted already (for Kaggle). But it is ~240k advisory records to sync and keep fresh, against a check that runs host-side where the live API is free. Revisit only if the check moves in-container. |
@@ -624,7 +634,7 @@ always be a named human act — not because a signal fired.
    them bash-3.2-safe (D5).
 4. **Does `depaudit` live here or in its own repo?** It is useful to every repo,
    not just the sandbox — see
-   [`04-portable-guardrails-outside-sandbox.md`](04-portable-guardrails-outside-sandbox.md) §5.
+   [`04-portable-guardrails-outside-sandbox.md`](../../docs/rfcs/04-portable-guardrails-outside-sandbox.md) §5.
 5. **A second intel source, ever?** OSV is free, keyless, and costs no egress
    surface (D6). Socket adds behavioural detection OSV structurally cannot have,
    at the cost of a vendor in the trust path. Recommendation: ship 2e, let phase

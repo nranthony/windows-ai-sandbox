@@ -204,7 +204,7 @@ portability work. At assessment time it was not yet started; both landed togethe
    section omits `dashboard/`, and the GPU "Important Notes" ("NOT `--gpus all`", `/dev/dxg`
    passthrough) must be rewritten as WSL-arm-conditional. The repo name `windows-ai-sandbox`
    becomes a partial misnomer — note it in ARCHITECTURE.md; renaming is out of scope.
-6. **Housekeeping tie-in:** `REPO-SCAN_in-transit_audit-and-housekeeping.md` quick-win #3
+6. **Housekeeping tie-in:** [`work/0003-repo-scan-audit/plan.md`](../work/0003-repo-scan-audit/plan.md) quick-win #3
    flags root-level doc sprawl; once AGENTS.md exists, `agent_repo_conventions_advice.md` is
    superseded and should move to `docs/_archive/`.
 

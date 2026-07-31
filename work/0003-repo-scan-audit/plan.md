@@ -1,8 +1,17 @@
-# Repo Scan — In-Transit Handoff (audit + housekeeping)
+# Repo Scan — audit + housekeeping
 
-> **Status:** planning / not started. Created 2026-06-22 as a follow-up checkpoint.
+> **Status:** planning / not started. Created 2026-06-22 as a follow-up checkpoint;
+> migrated from root `REPO-SCAN_in-transit_audit-and-housekeeping.md` into the `work/`
+> tier on 2026-07-31 ([ADR-0001](../../docs/adr/0001-provenance-tiers.md)).
 > Resume by reading this file, then pick a phase below.
-> This is a transient working doc — delete or fold into `docs/` once the scan is done.
+>
+> **Exit rule:** this folder is deleted, or moved to `work/archive/`, when the scan
+> completes — replacing the hand-rolled "delete or fold into `docs/`" note it carried
+> as a root-level file.
+>
+> **Note (2026-07-31):** quick win 3 (root-level doc sprawl) is now partly addressed —
+> the two in-transit root docs it names are gone, and `numerai-setup.md`,
+> `SECURITY_ASSESSMENT.md`, `sandbox-hardening-package.md` remain open questions.
 
 ## Goal
 

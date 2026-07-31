@@ -1,11 +1,15 @@
-# Portable Dependency Guardrails — Outside the Sandbox
+# RFC: Portable Dependency Guardrails — Outside the Sandbox
 
-**Companion to:** [`03-sandbox-application-plan.md`](03-sandbox-application-plan.md).
-**Question this answers:** of everything in the three incoming documents, what
+- Status: Draft — estate-wide scope, no owning work item yet
+- Author: external draft, imported 2026-07-30
+
+**Companion to:** [`work/0001-dependency-guardrails/plan.md`](../../work/0001-dependency-guardrails/plan.md)
+(formerly `03-sandbox-application-plan.md`).
+**Question this answers:** of everything in the three imported documents, what
 applies to **any** repo — pre-deployment development on the host, sibling
 projects, work on a laptop — where there is no egress container and no Squid
 allowlist?
-**Status:** Plan. Nothing implemented.
+**Build status:** Plan. Nothing implemented.
 
 ---
 
@@ -88,7 +92,7 @@ Two consequences:
 
 The highest-leverage single move for a multi-repo estate, and it is genuinely
 cheap: the `PreToolUse` hooks from
-[`03-sandbox-application-plan.md`](03-sandbox-application-plan.md) phase 1 are
+[`03-sandbox-application-plan.md`](../../work/0001-dependency-guardrails/plan.md) phase 1 are
 plain POSIX shell reading JSON on stdin. Nothing about them is sandbox-specific
 except the protected paths.
 
@@ -176,12 +180,12 @@ Four notes that matter more than the YAML:
   different control, or it generates false confidence.
 - **The OSV cross-check is what makes that separation workable**, and it is
   portable verbatim — free, keyless, one stdlib POST. See
-  [`03`](03-sandbox-application-plan.md) §3 D6 for the verified API shape. The
+  [`03`](../../work/0001-dependency-guardrails/plan.md) §3 D6 for the verified API shape. The
   whole discipline is one line: **consume `MAL-` records, discard
   `GHSA-`/`PYSEC-`/`CVE-` on this path.** Honour `withdrawn` before blocking.
   `osv-scanner` is the batteries-included alternative if you would rather not
   write the client — outside the sandbox its Go binary costs nothing, whereas
-  inside it violates the stdlib-only rule ([`03`](03-sandbox-application-plan.md) §4).
+  inside it violates the stdlib-only rule ([`03`](../../work/0001-dependency-guardrails/plan.md) §4).
 - **Run the intel check over the resolved tree, not the direct deps.** Plan 01
   §5 is emphatic and it matters most here: a hallucinated name often arrives as
   a *transitive* dependency and never appears in `package.json` at all. Checking
@@ -269,7 +273,7 @@ The three mitigations that recover part of it, all cheap:
   than inside it, and the reason is worth understanding: inside, it would be a
   third-party binary intermediating every install from within the security
   boundary, duplicating what the audited install window and lockfile inventory
-  already do ([`03`](03-sandbox-application-plan.md) §4). Outside, there **is**
+  already do ([`03`](../../work/0001-dependency-guardrails/plan.md) §4). Outside, there **is**
   no window and no proxy — so an install-time interception layer is filling a
   genuine hole rather than adding a redundant one. Its strongest argument
   applies in both places though: your real exposure is the ~200 transitive

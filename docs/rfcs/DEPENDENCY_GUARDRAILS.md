@@ -1,9 +1,14 @@
-# Dependency Guardrails — Slopsquatting Defense
+# RFC: Dependency Guardrails — Slopsquatting Defense
 
-> **Status:** Proposal / suggestions. Nothing here is enforced yet.
+- Status: Draft
+- Author: external draft, imported 2026-07-30
+- Applied by: [`work/0001-dependency-guardrails/plan.md`](../../work/0001-dependency-guardrails/plan.md) phase 0
+
+> **Nothing here is enforced yet.**
 > **Audience:** AI coding agents operating in this repo, and the humans reviewing their PRs.
-> **Where this lives:** drop this file at the repo root, or inline the "Rules" section into
-> `AGENTS.md` / `CLAUDE.md` / `.cursorrules` so the agent actually reads it on every session.
+> **Where the accepted content lands:** §2's rules are destined for
+> `sandbox_templates/common/agent-notice.md`, which `scripts/sync-agent-notice.sh`
+> propagates into repo `AGENTS.md` files — not this document.
 
 ---
 
