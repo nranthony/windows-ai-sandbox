@@ -139,5 +139,93 @@ else
   FAIL=$((FAIL+1)); printf "  FAIL warn-log shape: command not at .envelope.tool_input.command\n"
 fi
 
+# ============================================================================
+# manifest-dep-add (T04) — blocks a dependency being ADDED, not a manifest
+# being edited. The version-bump negative is the merge gate for this rule:
+# if it ever fails, the rule is a false-positive generator and gets reverted
+# rather than shipped. Fixtures are real files on disk because the rule
+# subtracts the manifest's CURRENT dependency set from the payload's.
+# ============================================================================
+FIX=$(mktemp -d -t deny-destructive-fix.XXXXXX)
+trap 'rm -f "$DENY_DESTRUCTIVE_LOG"; rm -rf "$FIX"' EXIT
+
+cat > "$FIX/package.json" <<'JSON'
+{
+  "name": "demo",
+  "version": "1.4.2",
+  "scripts": { "build": "tsc" },
+  "dependencies": { "express": "^4.18.0", "left-pad": "1.0.0" }
+}
+JSON
+
+cat > "$FIX/pyproject.toml" <<'TOML'
+[project]
+name = "demo"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = ["requests>=2.31", "httpx==0.27.0"]
+TOML
+
+cat > "$FIX/requirements.txt" <<'REQ'
+requests==2.31.0
+httpx>=0.27
+REQ
+
+ed() { printf '{"tool_name":"Edit","tool_input":{"file_path":"%s","new_string":%s}}' "$1" "$2"; }
+
+# --- positives: a name not already in the manifest ---
+assert "dep-add package.json" \
+  "$(ed "$FIX/package.json" '"    \"lodash\": \"^4.17.21\","')" deny manifest-dep-add
+assert "dep-add pyproject (PEP 508)" \
+  "$(ed "$FIX/pyproject.toml" '"dependencies = [\"requests>=2.31\", \"flask>=3.0\"]"')" deny manifest-dep-add
+assert "dep-add requirements.txt" \
+  "$(ed "$FIX/requirements.txt" '"boto3==1.34.0"')" deny manifest-dep-add
+assert "dep-add via MultiEdit" \
+  "$(printf '{"tool_name":"MultiEdit","tool_input":{"file_path":"%s","edits":[{"new_string":"  \\"axios\\": \\"^1.6.0\\","}]}}' "$FIX/package.json")" \
+  deny manifest-dep-add
+assert "dep-add via Write (whole file)" \
+  "$(printf '{"tool_name":"Write","tool_input":{"file_path":"%s","content":"{\\"dependencies\\":{\\"express\\":\\"^4.18.0\\",\\"chalk\\":\\"^5.0.0\\"}}"}}' "$FIX/package.json")" \
+  deny manifest-dep-add
+
+# --- THE MERGE GATE: version bumps must pass ---
+assert "version bump package.json  <-- MERGE GATE" \
+  "$(ed "$FIX/package.json" '"    \"left-pad\": \"1.0.1\""')" pass
+assert "version bump caret->exact  <-- MERGE GATE" \
+  "$(ed "$FIX/package.json" '"    \"express\": \"4.19.2\""')" pass
+assert "version bump pyproject     <-- MERGE GATE" \
+  "$(ed "$FIX/pyproject.toml" '"dependencies = [\"requests>=2.32\", \"httpx==0.27.2\"]"')" pass
+assert "version bump requirements  <-- MERGE GATE" \
+  "$(ed "$FIX/requirements.txt" '"requests==2.32.0"')" pass
+
+# --- other negatives: manifest edits that add no dependency ---
+assert "script change is not a dep"  "$(ed "$FIX/package.json" '"  \"scripts\": { \"build\": \"tsc -p .\" }"')" pass
+assert "project version metadata"    "$(ed "$FIX/pyproject.toml" '"version = \"0.2.0\""')" pass
+assert "requires-python metadata"    "$(ed "$FIX/pyproject.toml" '"requires-python = \">=3.12\""')" pass
+assert "comment added to reqs"       "$(ed "$FIX/requirements.txt" '"# pinned for CVE-2024-1234"')" pass
+assert "non-manifest file untouched" "$(ed "$FIX/notes.md" '"npm install left-pad"')" pass
+
+# ============================================================================
+# docs-install-cmd (T05) — WARN only, deliberately. Documentation about
+# dependency rules legitimately quotes install commands; blocking would fire on
+# correct writing. Asserts the warn fires (and that lockfile forms do not).
+# ============================================================================
+: > "$DENY_DESTRUCTIVE_LOG"
+assert "install cmd in AGENTS.md warns not blocks" \
+  "$(ed "$FIX/AGENTS.md" '"Run npm install left-pad to get started."')" pass
+if jq -e 'select(.rule=="docs-install-cmd")' < "$DENY_DESTRUCTIVE_LOG" >/dev/null 2>&1; then
+  PASS=$((PASS+1)); printf "  ok   docs-install-cmd warn logged\n"
+else
+  FAIL=$((FAIL+1)); printf "  FAIL docs-install-cmd not logged for AGENTS.md\n"
+fi
+
+: > "$DENY_DESTRUCTIVE_LOG"
+assert "lockfile form in README does not warn" \
+  "$(ed "$FIX/README.md" '"Install with npm ci, or uv sync --frozen."')" pass
+if [ ! -s "$DENY_DESTRUCTIVE_LOG" ]; then
+  PASS=$((PASS+1)); printf "  ok   lockfile-form install not warned (npm ci / uv sync --frozen)\n"
+else
+  FAIL=$((FAIL+1)); printf "  FAIL lockfile form wrongly warned: $(cat "$DENY_DESTRUCTIVE_LOG")\n"
+fi
+
 printf "\n  %d passed, %d failed\n" "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

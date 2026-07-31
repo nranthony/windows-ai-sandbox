@@ -1,6 +1,7 @@
 # Dependency Guardrails — Implementation Plan
 
-**Status:** Plan, awaiting approval. Nothing implemented.
+**Status:** IN PROGRESS. **Phases 0 and 1 complete (2026-07-31)**; phases 2–4 planned.
+Prerequisites T00/T01 discharged — see §0.1.
 **Exit rule:** this folder is deleted, or moved to `work/archive/`, when the work merges.
 **Owner decision gate:** §13. Five decisions need an answer; four of them only block later phases.
 
@@ -136,7 +137,7 @@ Gate model from plan 02 §3. Container-side tool versions re-probed **2026-07-31
 
 | Gate | Mechanism | State | Evidence |
 |---|---|---|---|
-| **0 — Intent** | Agent refuses / surfaces the name | ⚠️ **Partial** — flat denies, asymmetric across package managers | **[C 07-31]** `claude-settings.json` deny list |
+| **0 — Intent** | Agent refuses / surfaces the name | ✅ **CLOSED 07-31 (phase 1)** — deny list symmetric (87 entries), manifest-edit path blocked by hook rule 13, docs path warn-logged by rule 14 | **[C 07-31]** `claude-settings.json`; `deny-destructive.sh`; suite 79/79 |
 | **1 — Pre-resolution** | Metadata check before resolving | ❌ **Absent** | no equivalent |
 | **2 — Resolution** | Age gate + pinned registry | ❌ **Absent in config, present in every tool** | **[C 07-30]** `min-release-age = null`; pnpm `minimumReleaseAge` undefined; no `exclude-newer` |
 | **3 — Download, pre-exec** | Script blocking | ✅ **npm by default** (`allow-scripts = [""]`) · ❌ **Python open** — sdists run `setup.py` | **[C 07-30]** `npm config ls -l`; **[C 07-31]** no `pip.conf` in repo or image |
@@ -478,10 +479,15 @@ act, not because a signal fired.
   They earn their place by improving first-attempt behaviour and reducing how often the
   real gates fire.
 
-### Phase 1 — Close the Gate 0 holes *(~0.5d — do this first regardless)*
+### Phase 1 — Close the Gate 0 holes ✅ **COMPLETE 2026-07-31**
 
-**T03 — Symmetry in the deny list** *(G2)*. File:
-`sandbox_templates/claude/claude-settings.json`. Add:
+All four tasks landed. Suite: **79 passed, 0 failed** (was 61). Hook verified POSIX-clean
+under `dash` (D5), so it cross-ports to macolima.
+
+**T03 — Symmetry in the deny list** *(G2)*. ✅ **DONE.** File:
+`sandbox_templates/claude/claude-settings.json`, deny list 74 → 87 entries. Added `pnpm
+add/install/dlx`, `yarn add/install`, `bun add/install`, `uv sync`, `uv lock`, `poetry
+add/install/lock`, `cargo add`. Original spec:
 
 ```
 Bash(pnpm add:*)    Bash(pnpm install:*)   Bash(pnpm dlx:*)
@@ -495,12 +501,24 @@ will happily resolve a `pyproject.toml` the agent just edited (G3), making it an
 command in a lockfile costume. Reconsider allowing `uv sync --frozen` specifically once
 T06 lands.
 
-**T04 — Manifest rule in the hook** *(G3)*. File:
-`sandbox_templates/claude/hooks/deny-destructive.sh`, extending the `Edit|Write|MultiEdit`
-branch after the existing hook-tamper cases and before `emit_pass`. Not a blanket block on
-manifest edits — too noisy, since version bumps and metadata edits are routine — but a
-targeted `manifest-dep-add` rule: block when the basename is a manifest **and** the payload
-introduces a dependency line.
+**T04 — Manifest rule in the hook** *(G3)*. ✅ **DONE**, as hook rule 13. File:
+`sandbox_templates/claude/hooks/deny-destructive.sh`.
+
+**Shipped design differs from the sketch below, because the sketch fails the merge gate.**
+A regex over the payload alone cannot tell a dependency *addition* from a version *bump*:
+an Edit whose `new_string` is `"left-pad": "1.0.1"` matches it exactly as well as one
+adding `"lodash": "^4.17.21"`. Implemented instead as a **set difference**: `dep_names()`
+extracts dependency names from the manifest **on disk** and from the payload, and only
+names absent from the file block. A bump leaves the name set unchanged, so it passes.
+Comparing against the file rather than `old_string` matters — an Edit payload is only a
+fragment and cannot tell you what the manifest already holds.
+
+One bug found by the merge-gate test during implementation: the first extraction was
+line-oriented and silently returned nothing for compact manifests
+(`{"a":"^1","b":"^2"}`, `dependencies = ["x>=1", "y>=2"]`). An empty *old* set makes every
+existing dependency look new, which fired the rule on version bumps. Fixed by normalising
+on `{}[],` first. **The failing merge gate is what caught it** — exactly the argument for
+making it a gate. Original sketch, kept for the record:
 
 ```sh
 case "$(basename "$rp")" in
@@ -518,13 +536,29 @@ esac
 POSIX sh per D5. The `emit_block` reason is written *for a model to act on*, per plan 02
 §Gate 0: it states the rule, the why, and the alternative — not just "denied".
 
-**T05 — Docs rule** *(G4)*. Same branch, for `AGENTS.md`, `CLAUDE.md`, `agent-notice.md`,
-`*.mdc`, `.cursorrules`, `README.md`, `SKILL.md`: block when the payload contains an
-install command form (`npm i(nstall)`, `pnpm add`, `pip install`, `uv add`, `uvx`, `npx`).
+**T05 — Docs rule** *(G4)*. ✅ **DONE 2026-07-31, but as a WARN — deviation from this
+plan, flagged for your call.**
 
-**T06 — Tests.** File: `sandbox_templates/claude/hooks/deny-destructive.test.sh`.
-**[C 07-31]** the harness currently reports **61 passed, 0 failed**; AGENTS.md requires it
-green on every hook edit. Minimum new cases:
+The plan specified *block*. Implementing it showed that is wrong: documentation **about**
+dependency rules legitimately quotes install commands. `agent-notice.md` — the file phase 0
+just wrote, the one that carries rule 5 — contains `npm ci`, `pnpm install
+--frozen-lockfile`, `uv sync --frozen`, `pip install --require-hashes` and the phrase
+"`npm install X` written into `AGENTS.md`". A blocking rule would refuse the very edit that
+closes G4, and this repo's `README.md` would be similarly unwritable.
+
+Implemented as `warn_log`, using the hook's existing warn→block review pattern. Bare and
+lockfile forms are ignored — the pattern requires a non-flag argument, i.e. an actual
+package name — so `npm ci` and `uv sync --frozen` do not fire. **Promote to block only
+after reviewing real warn-log volume**, per plan 02 §8 on false-positive rate. Two tests
+assert both directions.
+
+**T06 — Tests.** ✅ **DONE. 61 → 79 passed, 0 failed.** File:
+`sandbox_templates/claude/hooks/deny-destructive.test.sh`. Fixtures are real files in a
+`mktemp -d`, because rule 13 reads the manifest from disk. 18 new assertions: 5 dep-add
+positives (package.json, PEP 508, requirements.txt, MultiEdit, whole-file Write), **4
+version-bump merge gates**, 5 further negatives (scripts change, `version`,
+`requires-python`, comment, non-manifest file), and 4 for rule 14 in both directions.
+Original minimum:
 
 | Case | Expect |
 |---|---|
@@ -846,11 +880,11 @@ not a degraded one (upstream ADR-0003).
 |---|---|---|---|---|
 | ~~T00~~ | ~~Re-baseline container probe~~ — **DONE 07-31**, §0.1 | — | — | — |
 | ~~T01~~ | ~~Reproduce G1~~ — **DONE 07-31, REFUTED**, §6 G1 | — | — | — |
-| T02 | Rules into `agent-notice.md` + sync | 0 | 1h | — |
-| T03 | Deny-list symmetry | 1 | 1h | — |
-| T04 | `manifest-dep-add` hook rule | 1 | 2h | — |
-| T05 | Docs install-command hook rule | 1 | 1h | T04 |
-| T06 | Hook tests → ≥ 66 green | 1 | 1h | T04, T05 |
+| ~~T02~~ | ~~Rules into `agent-notice.md` + sync~~ — **DONE 07-31** | 0 | — | — |
+| ~~T03~~ | ~~Deny-list symmetry~~ — **DONE 07-31**, 74→87 denies | 1 | — | — |
+| ~~T04~~ | ~~`manifest-dep-add` hook rule~~ — **DONE 07-31**, rule 13, blocks | 1 | — | — |
+| ~~T05~~ | ~~Docs install-command rule~~ — **DONE 07-31**, rule 14, **warns** (deviation, §7) | 1 | — | — |
+| ~~T06~~ | ~~Hook tests~~ — **DONE 07-31**, 61→**79 passed, 0 failed** | 1 | — | — |
 | T07 | `/usr/etc/npmrc` in Dockerfile | 2 | 1h | T00 |
 | T08 | **Validate autoupdater interaction** | 2 | 30m | T07 |
 | T09 | Allowlist lifecycle + fix stale header | 2 | 2h | — |

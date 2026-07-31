@@ -15,8 +15,8 @@ What exists in this repo:
 
 ```
 sandbox_templates/claude/hooks/
-  deny-destructive.sh           # POSIX sh + jq, 10 rules, fail-open trap
-  deny-destructive.test.sh      # 35-assertion host-side harness, all green
+  deny-destructive.sh           # POSIX sh + jq, 14 rules, fail-open trap
+  deny-destructive.test.sh      # 79-assertion host-side harness, all green
 Dockerfile                      # COPY + chmod 0755 to /usr/local/lib/claude-hooks/
 sandbox_templates/claude/claude-settings.json     # top-level "hooks" block (Bash + Edit|Write|MultiEdit)
 scripts/verify-sandbox.sh       # tripwire: file invariants + behavioural deny probe
@@ -110,6 +110,43 @@ For `tool_name == "Bash"`, normalise the command (lowercase, strip leading
 | 10b | `cred-read` by bare credential filename (`oauth_creds.json`, `google_accounts.json`, `.credentials.json`) | block |
 | 11 | `null-truncate` — bare `> file` clobber at command start | **warn** |
 | 12 | `workspace-overwrite` — `>` into `/workspace/` | **warn** |
+| 13 | `manifest-dep-add` (Edit/Write/MultiEdit) — a dependency **name not already in** `package.json` / `pyproject.toml` / `requirements*.txt` / `Pipfile` | block |
+| 14 | `docs-install-cmd` (Edit/Write/MultiEdit) — an install command naming a package, written into `AGENTS.md`, `CLAUDE.md`, `SKILL.md`, `README.md`, `CONTRIBUTING.md`, `agent-notice.md`, `.cursorrules`, `*.mdc` | **warn** |
+
+### Rules 13–14 — dependency guardrails
+
+Added by [`work/0001-dependency-guardrails`](../work/0001-dependency-guardrails/plan.md)
+phase 1 (T04, T05). Both close paths no Bash matcher can see.
+
+**Rule 13 exists because an install command is not the only way to install.** An agent
+that writes a dependency line into a manifest and then runs an *allowed* build command
+(`uv run`, `pnpm run build`, `make`, `just`) has installed a package without ever issuing
+an install command. Every one of those runners is on the **allow** list.
+
+It blocks a dependency being **added**, not a manifest being **edited** — the distinction
+that decides whether the rule survives contact. The dependency names already present in
+the file *on disk* are subtracted from the names in the payload; only genuinely new names
+block. That is what lets a version bump, a `scripts` change, or a metadata edit through.
+Comparing against the file rather than against `old_string` is deliberate: an Edit payload
+is only a fragment, so `old_string` cannot tell you what the manifest already contains.
+
+`dep_names()` normalises on `{}[],` before matching, because a line-oriented match misses
+every compact manifest (`{"a":"^1","b":"^2"}`, `dependencies = ["x>=1", "y>=2"]`). A missed
+*old* name is the dangerous direction — it makes an existing dependency look newly added
+and fires the rule on a version bump.
+
+**Rule 14 warns rather than blocks, deliberately.** Instruction files are executable
+surfaces: an install command written into one is run by the next agent and pasted by the
+next human. But documentation *about* dependency rules legitimately quotes install
+commands — `sandbox_templates/common/agent-notice.md` does exactly that — so blocking
+would fire on correct writing. Bare and lockfile forms (`npm ci`, `uv sync --frozen`,
+`pip install --require-hashes -r`) are ignored: the pattern requires a non-flag argument,
+i.e. an actual package name. Review the warn log before considering promotion to block.
+
+**The four version-bump cases in the test harness are merge gates.** If any of them ever
+fails, rule 13 is a false-positive generator and gets reverted rather than shipped — a
+rule that fires on routine edits is switched off within a week, and then there is no rule
+at all.
 
 Rule 3 exists because `permissions.deny` carries `Bash(rm -rf:*)`, and that is
 a *literal prefix*: `rm -r -f`, `rm -fr`, `rm -Rf`, and `rm --recursive` all
