@@ -8,6 +8,7 @@ right: an **RFC** proposes → an **ADR** records → **work/** implements → t
 
 - [docs/adr/](adr/) — decisions and their rationale. Append-only.
   - [ADR-0001](adr/0001-provenance-tiers.md) — adopt these tiers
+  - [ADR-0002](adr/0002-dependency-guardrail-scope.md) — dependency guardrails: what we deliberately do not build (Proposed)
 - [docs/rfcs/](rfcs/) — proposals under discussion ([TEMPLATE.md](rfcs/TEMPLATE.md))
   - [DEPENDENCY_GUARDRAILS.md](rfcs/DEPENDENCY_GUARDRAILS.md) — slopsquatting threat + agent behavioural rules
   - [01-posture-scanner-plan.md](rfcs/01-posture-scanner-plan.md) — `depaudit`, stdlib-only dependency posture/inventory scanner
