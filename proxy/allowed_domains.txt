@@ -320,6 +320,17 @@ blender.org
 # release-assets.githubusercontent.com
 # raw.githubusercontent.com
 
+# # --- Google Docs / Workspace [google-workspace] ---
+# # Read/draft access to Docs, Drive and Sheets during a manual session.
+# # sheets.googleapis.com previously sat live and untagged at the bottom of
+# # this file (under the DROPPED banner below, which a parser bug also
+# # mis-attributed to [beads-install] in the dashboard) — pinned here
+# # properly instead. Short-lived — keep commented unless you're actively
+# # working with Google Docs/Sheets.
+# docs.google.com
+# drive.google.com
+# sheets.googleapis.com
+
 
 # =============================================================================
 # === DROPPED — explicitly NOT in the list ===================================
@@ -328,4 +339,3 @@ blender.org
 #                        access. Use CrossRef/OpenAlex/PubMed clients instead.
 # www.researchgate.net — paywall + auth wall + CAPTCHA. Returns near-zero
 #                        useful content unauthenticated.
-sheets.googleapis.com
