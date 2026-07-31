@@ -7,7 +7,9 @@ inside a sandbox container. Human-facing setup/run details: [README.md](README.m
 ## Tech stack
 
 - Python ≥ 3.12, managed by **uv** (`uv sync`, `uv run` — never bare pip)
-- Streamlit UI (`src/app.py` + `src/pages/`), Python Docker SDK (`src/lib/docker_client.py`)
+- Streamlit UI — single page, tabs in the main panel, no sidebar
+  (`src/app.py` assembles `src/lib/status_view.py` +
+  `src/lib/proxy_allowlist_view.py`); Python Docker SDK (`src/lib/docker_client.py`)
 
 ## Workflow
 
