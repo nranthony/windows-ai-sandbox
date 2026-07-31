@@ -1,8 +1,12 @@
-# Post-Hoc Dependency Posture Scanner — Design Plan
+# RFC: Post-Hoc Dependency Posture Scanner (`depaudit`)
+
+- Status: Draft — partially accepted; phase 1 (`posture`) is scheduled by
+  [`work/0001-dependency-guardrails/plan.md`](../../work/0001-dependency-guardrails/plan.md) phase 2c
+- Author: external draft, imported 2026-07-30
 
 **Codename:** `depaudit`
 **Scope:** Node (npm/pnpm/yarn/bun) and Python (pip/uv/poetry/pdm/pipenv) repos.
-**Status:** Design. Not built.
+**Build status:** Design. Not built.
 
 Answers two independent questions per repo, and reports them separately because they
 have different owners and different remediation timelines:

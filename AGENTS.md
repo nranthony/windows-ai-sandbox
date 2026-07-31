@@ -104,6 +104,25 @@ and cannot be diffed or restored selectively. Back up the source dir or volume.
 
 Deep-dive docs are indexed in [docs/index.md](docs/index.md).
 
+## Where things live
+
+Nothing below `docs/` or `work/` is auto-loaded — this index is how it is found.
+Before starting work, check `docs/adr/` for decisions constraining the area, and
+`work/` for anything already in flight on it.
+
+| The question | Home |
+|---|---|
+| System map & boundaries | [ARCHITECTURE.md](ARCHITECTURE.md) |
+| Why a decision was made | [docs/adr/](docs/adr/) — append-only; supersede, never delete |
+| Proposals under discussion | [docs/rfcs/](docs/rfcs/) — `Draft → In review → Accepted → ADR-NNNN \| Rejected` |
+| What is in flight right now | [work/](work/) — `NNNN-slug/`, **deleted or archived on merge** |
+| Raw unprocessed input | [docs/incoming/](docs/incoming/) — unverified; triage out, don't accumulate |
+| Superseded / completed docs | [docs/_archive/](docs/_archive/) |
+
+Tiers adopted 2026-07-31 — [ADR-0001](docs/adr/0001-provenance-tiers.md). A decision
+touching the security boundary, persistent data, public contracts, core architecture, or
+cross-repo conventions gets an ADR; local implementation details never do.
+
 ## Quick reference
 
 ```bash

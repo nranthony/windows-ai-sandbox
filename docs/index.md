@@ -1,5 +1,24 @@
 # Documentation Index
 
+## Provenance tiers
+
+Adopted 2026-07-31 ([ADR-0001](adr/0001-provenance-tiers.md)). The chain reads left to
+right: an **RFC** proposes → an **ADR** records → **work/** implements → the commit
+(citing the ADR) is the outcome.
+
+- [docs/adr/](adr/) — decisions and their rationale. Append-only.
+  - [ADR-0001](adr/0001-provenance-tiers.md) — adopt these tiers
+- [docs/rfcs/](rfcs/) — proposals under discussion ([TEMPLATE.md](rfcs/TEMPLATE.md))
+  - [DEPENDENCY_GUARDRAILS.md](rfcs/DEPENDENCY_GUARDRAILS.md) — slopsquatting threat + agent behavioural rules
+  - [01-posture-scanner-plan.md](rfcs/01-posture-scanner-plan.md) — `depaudit`, stdlib-only dependency posture/inventory scanner
+  - [02-layered-gates-plan.md](rfcs/02-layered-gates-plan.md) — `depgate`, five-gate model (largely declined here)
+  - [04-portable-guardrails-outside-sandbox.md](rfcs/04-portable-guardrails-outside-sandbox.md) — what applies on the host, outside the egress boundary
+- [work/](../work/) — in-flight items, deleted or archived on merge ([README](../work/README.md))
+  - [0001-dependency-guardrails](../work/0001-dependency-guardrails/plan.md) — applying the above to this repo
+  - [0002-host-side-skill-slot](../work/0002-host-side-skill-slot/plan.md) — `make-plan`/`wrap-up` are container-only
+  - [0003-repo-scan-audit](../work/0003-repo-scan-audit/plan.md) — audit + housekeeping scan
+- [docs/incoming/](incoming/) — raw unprocessed input, **unverified** ([README](incoming/README.md))
+
 ## Architecture & Security
 
 - [AGENTS.md](../AGENTS.md) — agent conventions: golden rules, security-sensitive files, verification protocol (CLAUDE.md is a generated pointer to it)
@@ -78,3 +97,4 @@ Superseded or exploratory documents in [`_archive/`](_archive/):
 - [gpt_suggestions_todo.md](_archive/gpt_suggestions_todo.md) — early-stage suggestions list
 - [claude_internal_audit_wsl.md](_archive/claude_internal_audit_wsl.md) — manual audit prompt, superseded by tier-2 probes + tier-3 skill
 - [agent_repo_conventions_advice.md](_archive/agent_repo_conventions_advice.md) — agent-native repo conventions proposal, implemented 2026-07-04 (AGENTS.md, .agents/skills/, sandbox_templates/)
+- [IN_TRANSIT_agent-native-migration.md](_archive/IN_TRANSIT_agent-native-migration.md) — execution plan distilled from the above; all 8 steps landed 2026-07-04, archived from the repo root 2026-07-31
