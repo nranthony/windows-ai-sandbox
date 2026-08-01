@@ -388,8 +388,8 @@ every repo the notice syncs into — a fan-out path the imported plans do not co
 
 | Tool | Setting | Present | Min required | Configured? |
 |---|---|---|---|---|
-| npm | `min-release-age` (days) | 12.0.1 | 11.10.0 | ❌ `null` |
-| pnpm | `minimumReleaseAge` (minutes) | 10.34.5 | 10.16 | ❌ undefined |
+| npm | `min-release-age` (**days**) | 12.0.1 | 11.10.0 | ❌ `null` |
+| pnpm | `minimum-release-age` (**minutes**) | 10.34.5 | 10.16 | ❌ undefined |
 | uv | `exclude-newer` (timestamp) | 0.11.29 | — | ❌ unset |
 | pip | none native | 24.0 | — | N/A — proxy-only |
 
@@ -422,6 +422,31 @@ discarded on every proxy recreate.
 default; `fc7c0f0` commented them out. Documentation that inverts the deployed posture is
 worse than none, because it is what an agent reads before deciding whether an install can
 work.
+
+### G10 — a project `.npmrc` silently overrides the global quarantine *(new, 2026-08-01)*
+
+**[C 08-01]** npm/pnpm config precedence is `cli > env > project > user > global`. Our Gate 2
+values live in `/usr/etc/npmrc` (**global**), so **any repo under `/workspace` can switch the
+quarantine off for itself** by shipping an `.npmrc` — without touching anything this sandbox
+owns, and with no signal. Measured: a project file containing `min-release-age=0` takes
+`npm config get min-release-age` from `7` to `0` inside a running profile.
+
+This is not hypothetical here. `~/repo/therapod` carries three:
+
+| File | Value | Effective state |
+|---|---|---|
+| `app_blast/.npmrc` | `minimum-release-age=0` | quarantine **OFF** |
+| `app_zero/.npmrc` | *(not set)* | inherits our **10080** ✅ |
+| `engine/.npmrc` | `minimum-release-age=0s` | **BROKEN — rejects every version** |
+
+`0s` is worse than off. pnpm computes the cutoff as `value * 60 * 1e3`, so a suffixed
+string yields `NaN` and `new Date(NaN)` = **Invalid Date**; every comparison against it is
+false, so pnpm rejects *every* version and nothing resolves at all. It fails closed and
+presents as a broken registry. **[C 08-01]** verified in-image with node.
+
+Covered by T12 as a `warn` (not `fail`) — the workspace is the user's own repo and may have
+a considered reason. Also the precise shape plan 01's `N01`–`N04` posture checks exist for,
+so `depaudit` (T13) should report it per-repo rather than only per-profile.
 
 ### G9 — a running proxy can silently enforce a different allowlist than the repo *(new, replaces G1)*
 
@@ -1011,3 +1036,41 @@ duration, so an image-wide value freezes every project at a fixed date and goes
 stale. Documented in `docs/local-wheels.md`.
 
 **State:** all three profiles rebuilt, `verify` **35 passed / 0 failed** each.
+
+
+---
+
+## 15. Units cross-check (2026-08-01)
+
+Prompted by a sibling audit of an app whose `.npmrc` carried
+`minimum-release-age=0`. **Both units verified from the implementations, not the docs:**
+
+| Tool | Setting | Unit | Source of truth | Our value |
+|---|---|---|---|---|
+| npm | `min-release-age` | **DAYS** | `man 7 config`: "versions that were available more than the given number of **days** ago"; npm's own example is `min-release-age=7` | `7` = 7 days |
+| pnpm | `minimum-release-age` | **MINUTES** | `pnpm.cjs`: `new Date(Date.now() - minimumReleaseAge * 60 * 1e3)` | `10080` = 7 days |
+
+**The two settings use different units and both of our values are correct and equal.**
+Do not "harmonise" them to the same number — that is a 1440× error in one direction or the
+other. The sibling app's `1440` is the same unit as our `10080`; it is a 24-hour window
+where ours is 7 days, which is a policy difference, not a units bug.
+
+**Value verdict: keep 7 days here.** The friction argument for 24h is real in a normal repo,
+but it is weak in this one — the registries are closed by default (§0), so installs already
+happen only inside a deliberate `with-egress.sh` window and are rare. This is also the
+high-autonomy, agent-driven environment the whole threat model is about. `min-release-age-exclude`
+/ `minimumReleaseAgeExclude` exist for the case where a genuinely fresh release is needed.
+Revisit if the quarantine actually blocks real work more than about once a month.
+
+**Failure-mode table, verified in-image with node:**
+
+| Value | Cutoff | Effect |
+|---|---|---|
+| `10080` | 7 days ago | intended |
+| `1440` | 24 h ago | valid, shorter window |
+| `0` | none (falsy) | quarantine **OFF** |
+| `"0s"` / `"7d"` | **Invalid Date** | **rejects EVERY version** — nothing resolves |
+
+The suffixed forms are the trap: they look like a duration, parse as `NaN`, and fail closed
+in a way that reads as a broken registry rather than a config error. T12 now hard-`fail`s on
+any non-integer for exactly this reason, and its message states the fix.
