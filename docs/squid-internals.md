@@ -36,6 +36,39 @@ Default allowlist uses specific subdomains (`api.anthropic.com`, `console.anthro
 
 Tmpfs-backed `proxy:proxy 0640` — forensic trail of every request, resets on `--force-recreate`. Read with: `docker exec -u proxy egress-proxy-<p> tail -f /var/log/squid/access.log`.
 
-## Hot reload
+## Applying an allowlist edit
 
-Preferred: `docker exec egress-proxy-<p> squid -k reconfigure` (zero-downtime). Fall back to `docker compose restart egress-proxy` only when the container is unhealthy.
+**Use a restart. `squid -k reconfigure` silently no-ops on the most common kind of edit.**
+
+Preferred, in order:
+
+1. **Dashboard → "Save & Reload Proxies"** (`just dashboard`) — writes the file and restarts
+   every running proxy, then asserts a non-zero domain count. The supported path.
+2. `docker restart egress-proxy-<p>` — same effect, one profile, no UI.
+3. `scripts/profile.sh <p> up` after `docker rm -f egress-proxy-<p>` — for a wedged proxy.
+
+### Why not `squid -k reconfigure` (measured 2026-07-31)
+
+There are **two independent staleness modes**, and reconfigure only fixes one:
+
+| Edit style | Container sees new bytes? | `squid -k reconfigure` | `docker restart` |
+|---|---|---|---|
+| **In-place** (dashboard save, `>` truncate) | yes — inode preserved | ✅ applies | ✅ applies |
+| **Atomic replace** (`vim`, `sed -i`, `git checkout`, most editors) | **no — inode swapped** | ❌ **silently no-ops** | ✅ applies |
+
+The trap is that **reconfigure exits 0 and logs "Processing Configuration File" in both
+cases.** Measured: after an atomic-replace edit commenting out `arxiv.org`, reconfigure
+returned 0 and `arxiv.org` still tunnelled (`200`). The container was pinned to inode
+275839 while the host file had become 275707. A restart re-runs the entrypoint and
+re-resolves the bind mount, so it is correct for both modes.
+
+Note also that squid parses the allowlist into memory at start. Even with a live inode, an
+edit is not enforced until a reconfigure or restart — so a container-side `grep` of
+`allowed_domains.txt` shows the *file*, not what is being *enforced*. Only an egress probe
+(or a reload) settles it.
+
+**Correction:** this file previously called reconfigure "preferred (zero-downtime)". It is
+not preferred. It also previously appeared that reconfigure *killed* the proxy (SIGHUP →
+exit 129); that is refuted — squid runs as a child of `entrypoint.sh` (PID 1), handles
+SIGHUP as a reconfigure, and the container survives. The real defect is the silent no-op
+above, not a crash.

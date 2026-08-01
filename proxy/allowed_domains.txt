@@ -18,9 +18,15 @@
 #     by default. Add blocks here for domains reachable only while you're
 #     driving the shell.
 #
-# Hot-reload after edits:
-#   COMPOSE_PROJECT_NAME=ai-sandbox-<profile> PROFILE=<profile> \
-#     docker compose restart egress-proxy
+# APPLYING AN EDIT — an edit here does NOTHING until a proxy reload.
+#   Easiest:  just dashboard  ->  Proxy Allowlist  ->  "Save & Reload Proxies"
+#             (writes this file and restarts every running proxy)
+#   By hand:  docker restart egress-proxy-<profile>
+#
+#   Do NOT use `squid -k reconfigure`. It exits 0 and logs a successful reload
+#   while applying NOTHING if the edit replaced this file atomically — which
+#   vim, sed -i, and every git checkout do. The container stays bound to the old
+#   inode. Only a restart re-resolves the mount. See docs/squid-internals.md.
 #
 # Blocks are tagged like `[name]` for grep — e.g. `grep "\[claude\]" allowed_domains.txt`.
 # To bulk-toggle a block: select its lines and `s/^# //` (uncomment) or

@@ -29,10 +29,19 @@ uv run streamlit run src/app.py     # http://127.0.0.1:8501
   root, preserving its conventions (no inline comments, pinned subdomains,
   `[tag]` block headers — see `.agents/skills/squid-management.md`), then
   reload each running profile's proxy with a **restart**, not a reconfigure
-  (`docker restart egress-proxy-<profile>`). `squid -k reconfigure` sends SIGHUP,
-  which the foreground squid takes as Hangup and exits 129 — the reconfigure
-  kills the proxy; a restart also re-resolves the bind mount to the current
-  inode after an atomic-replace edit.
+  (`docker restart egress-proxy-<profile>`). `squid -k reconfigure` **exits 0 and
+  applies nothing** after an atomic-replace edit (vim, `sed -i`, `git checkout`):
+  the swap gives the host file a new inode while the container stays bound to the
+  old one, so the reload re-reads a file that no longer changes. Only a restart
+  re-resolves the mount. Measured 2026-07-31; see `docs/squid-internals.md`.
+  (An earlier note here claimed reconfigure *killed* the proxy via SIGHUP — that
+  is refuted; squid is a child of `entrypoint.sh`, not PID 1. Restart is still
+  correct, for the inode reason.)
+- **The "Save & Reload Proxies" button is the supported allowlist path.** It
+  writes the file and restarts every running proxy, asserting a non-zero domain
+  count each. Its write truncates in place and never swaps the inode, so the
+  dashboard is not a source of allowlist drift — hand/git edits that are never
+  reloaded are. Verified end-to-end 2026-07-31 in both directions.
 - **Scope**: read-mostly. Lifecycle operations (up/down/rebuild/verify) stay
   on the CLI via `scripts/profile.sh` — do not reimplement them here (root
   AGENTS.md golden rule 1).

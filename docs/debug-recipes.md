@@ -21,8 +21,14 @@ scripts/profile.sh <p> wipe --all-volumes      # also drop DB named volumes
 # Recreate only (covers seccomp / mounts / env / squid.conf changes)
 PROFILE=<p> COMPOSE_PROJECT_NAME=ai-sandbox-<p> docker compose up -d --force-recreate
 
-# Proxy reload (covers allowed_domains.txt) — per profile
-docker exec egress-proxy-<p> squid -k reconfigure
+# Proxy reload (covers allowed_domains.txt) — per profile.
+# RESTART, not `squid -k reconfigure`: reconfigure exits 0 but silently no-ops
+# after an atomic-replace edit (vim / sed -i / git checkout swap the file's
+# inode; the container stays pinned to the old one). See docs/squid-internals.md.
+docker restart egress-proxy-<p>
+
+# All running profiles at once, with a domain-count assertion:
+#   just dashboard  ->  Proxy Allowlist tab  ->  "Save & Reload Proxies"
 
 # Probe gitstatusd / zsh init with a TTY
 docker exec -t ai-sandbox-<p> zsh -ic 'echo ok'

@@ -692,13 +692,35 @@ diff <(grep -vE '^[[:space:]]*#|^[[:space:]]*$' proxy/allowed_domains.txt | sort
 ```
 
 `fail` on any delta, naming the domains and directing to `docker restart
-egress-proxy-<profile>`. **[C 07-31]** must run as `-u proxy`: the container is
-`cap_drop: ALL` + `cap_add: [SETGID, SETUID]` (`CapEff 0xc0`), so UID 0 has no
-`CAP_DAC_OVERRIDE` and cannot read the `0640 proxy:proxy` file. `docker exec -u root`
-fails. Same constraint applies to T20.
+egress-proxy-<profile>`. Extra-domain deltas are the dangerous direction: a domain the repo
+removed but the proxy still permits is an open hole, not a config lag.
 
-Extra-domain deltas are the dangerous direction and should read as such in the output:
-a domain the repo removed but the proxy still permits is an open hole, not a config lag.
+**[C 07-31] That file diff alone is NOT sufficient — there are two staleness modes and it
+catches only one.** Measured while testing the dashboard reload:
+
+| Mode | Container sees new bytes? | Caught by file diff? | `squid -k reconfigure` | `docker restart` |
+|---|---|---|---|---|
+| **A — unreloaded edit** (in-place write; inode preserved) | yes | ❌ **no — file matches** | ✅ applies | ✅ applies |
+| **B — stale inode** (atomic replace: `vim`, `sed -i`, `git checkout`) | no | ✅ yes | ❌ **silent no-op** | ✅ applies |
+
+Mode A is invisible to a file comparison: the container's copy is byte-identical to the
+repo's, but **squid parsed the allowlist into memory at start** and is still enforcing the
+old set. Proven directly — with `fonts.gstatic.com` commented out in place, the container's
+file showed it commented while `curl https://fonts.gstatic.com/` still returned `404`
+(i.e. squid tunnelled it). G9 as originally found was Mode B; Mode A is a second gap.
+
+So T24 needs **both**:
+
+1. **File diff** (above) — hard `fail`. Catches Mode B.
+2. **Reload-lag check** — `warn` when `proxy/allowed_domains.txt` mtime is newer than the
+   proxy container's `.State.StartedAt` and no reload has happened since. Catches Mode A
+   without a network call, which matters because tier-1 `verify` must never depend on
+   egress (§10). An egress probe would be definitive but is not tier-1 appropriate.
+
+**[C 07-31]** The file read must use `docker exec -u proxy` for `access.log` (T20): the
+container is `cap_drop: ALL` + `cap_add: [SETGID, SETUID]` (`CapEff 0xc0`), so UID 0 has no
+`CAP_DAC_OVERRIDE` against the `0640 proxy:proxy` log. The *allowlist* is host-owned `0644`
+and readable by root, so `_count_active_domains`-style reads are fine either way.
 
 **T18 — Pre-flight.** Extract package specs from the command; run `depaudit pkg` (T16) per
 spec. `BLOCK` refuses to open the window; `REVIEW` prints signals and asks. Plan 02's
