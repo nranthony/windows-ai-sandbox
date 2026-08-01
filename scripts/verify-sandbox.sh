@@ -228,6 +228,62 @@ else
   fail "git user.email '$id_email' is not a users.noreply.github.com address — personal email would leak into commits"
 fi
 
+# ---------------------------------------------------------------------------
+# Gate 2 — dependency-resolution quarantine (slopsquat defence).
+# work/0001-dependency-guardrails T12. These assert the LIVE values, because the
+# agent runs as root here and can edit both /usr/etc/npmrc (image layer) and
+# ~/.config/pnpm/rc (bind mount). The config is defence-in-depth, not a kernel
+# boundary — this tripwire is what makes drift surface within one `up`.
+# Purely local: no network call, so it still runs with egress down.
+# ---------------------------------------------------------------------------
+NPM_AGE="$(npm config get min-release-age 2>/dev/null || echo '')"
+case "$NPM_AGE" in
+  ''|null|undefined)
+    fail "npm min-release-age unset — freshly-published packages resolve with no quarantine (expected 7; see Dockerfile 'Gate 2')" ;;
+  *[!0-9]*)
+    warn "npm min-release-age is '$NPM_AGE' (not a plain integer)" ;;
+  *)
+    if [[ "$NPM_AGE" -ge 1 ]]; then pass "npm min-release-age=$NPM_AGE day(s)"
+    else fail "npm min-release-age=$NPM_AGE — quarantine effectively disabled"; fi ;;
+esac
+
+# pnpm's unit is MINUTES (npm's is days) — 10080 = 7 days. A value that looks
+# like a day-count (e.g. 7) means the units were confused and the quarantine is
+# ~7 minutes, which fails open. Worth its own message.
+PNPM_AGE="$(pnpm config get minimumReleaseAge 2>/dev/null || echo '')"
+case "$PNPM_AGE" in
+  ''|null|undefined)
+    fail "pnpm minimumReleaseAge unset — pnpm resolves with no quarantine (expected 10080 minutes; see init-profile-state.sh)" ;;
+  *[!0-9]*)
+    warn "pnpm minimumReleaseAge is '$PNPM_AGE' (not a plain integer)" ;;
+  *)
+    if [[ "$PNPM_AGE" -ge 1440 ]]; then pass "pnpm minimumReleaseAge=$PNPM_AGE min ($((PNPM_AGE/1440)) day(s))"
+    elif [[ "$PNPM_AGE" -ge 1 ]]; then fail "pnpm minimumReleaseAge=$PNPM_AGE MINUTES (<1 day) — looks like days were entered where minutes are required; quarantine is effectively off"
+    else fail "pnpm minimumReleaseAge=$PNPM_AGE — quarantine disabled"; fi ;;
+esac
+
+# npm 12 blocks lifecycle scripts by default via the allow-scripts allowlist.
+# That is where a slopsquat payload runs, so losing it matters more than the
+# age gate. Empty list = nothing may run scripts (the wanted state).
+NPM_SCRIPTS="$(npm config get allow-scripts 2>/dev/null || echo '')"
+if [[ "$NPM_SCRIPTS" == '[""]' || -z "$NPM_SCRIPTS" ]]; then
+  pass "npm install scripts blocked (allow-scripts=${NPM_SCRIPTS:-empty})"
+else
+  warn "npm allow-scripts=$NPM_SCRIPTS — packages in this list run install scripts"
+fi
+
+# extra-index-url is a dependency-confusion vector: pip may prefer whichever
+# index offers the higher version. Its ABSENCE is the control.
+if [[ -f /etc/pip.conf ]]; then
+  if grep -qE '^[[:space:]]*extra-index-url' /etc/pip.conf; then
+    fail "/etc/pip.conf sets extra-index-url — dependency-confusion vector; remove it"
+  else
+    pass "pip index pinned, no extra-index-url"
+  fi
+else
+  warn "/etc/pip.conf absent — pip index not pinned (see Dockerfile 'Gate 2')"
+fi
+
 echo ""
 echo "== $PASS passed | $FAIL failed | $WARN warnings =="
 [[ $FAIL -eq 0 ]]

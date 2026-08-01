@@ -367,6 +367,66 @@ RUN npm install -g --allow-scripts=@anthropic-ai/claude-code "@anthropic-ai/clau
  && claude --version \
  && /usr/local/bin/agy --version
 
+# ---------- Gate 2: dependency resolution quarantine ------------------------
+# Slopsquatting defence. Attackers register plausible-sounding package names that
+# an LLM invented and wait for an agent to install one; the payload runs at
+# install time. A quarantine window is the ONE control that covers the gap where
+# every threat-intel feed structurally fails — the hours-to-days between an
+# attacker publishing and anyone detecting it. See
+# work/0001-dependency-guardrails/plan.md and docs/rfcs/DEPENDENCY_GUARDRAILS.md.
+#
+# Why config and not the deny list: permissions.deny keys on a command PREFIX, so
+# it is routed around by any wrapper (`make`, `just`, `npm run`, `uv run` — all on
+# the ALLOW list) and does not constrain the human's interactive zsh at all. An
+# .npmrc gate is invocation-path independent: it fires no matter what reached the
+# installer, and it fires for the human too.
+#
+# ORDER IS LOAD-BEARING: this MUST come after the claude/agy install above.
+# min-release-age applies to `npm install` at BUILD time as well, so writing it
+# earlier would make `@anthropic-ai/claude-code@latest` unresolvable whenever the
+# newest release is under the quarantine window — a self-inflicted build break.
+# The gate is meant for the agent at runtime, not for our own image build.
+#
+# globalconfig is /usr/etc/npmrc here because prefix=/usr (verified:
+# `npm config get globalconfig`). It lives in the image layer, so a rebuild always
+# restores it. The agent is root and CAN edit it — that is accepted, and is why
+# scripts/verify-sandbox.sh asserts the live values on every `up`; drift surfaces
+# within one cycle. Defence-in-depth, not a kernel boundary.
+#
+# NOT setting ignore-scripts=true: npm 12 already blocks lifecycle scripts by
+# default via the allow-scripts allowlist (`allow-scripts = [""]`), and setting
+# both risks interacting with the --allow-scripts install above, which is what
+# keeps `claude --version` from reporting "native binary not installed".
+# mkdir: prefix=/usr but /usr/etc does not exist in this base image, so npm's
+# globalconfig path is dangling until it is created.
+RUN mkdir -p /usr/etc \
+ && printf '%s\n' \
+      '# Managed by Dockerfile — see the Gate 2 block there before editing.' \
+      '# Quarantine: refuse to resolve anything published in the last N days.' \
+      'min-release-age=7' \
+      '# Pin resolution to the official registry rather than relying on the default.' \
+      'registry=https://registry.npmjs.org/' \
+      '# Refuse to silently rewrite version ranges — makes lockfile diffs reviewable.' \
+      'save-exact=true' \
+    > /usr/etc/npmrc \
+ && npm config get min-release-age | grep -qx 7 \
+ && npm config get save-exact | grep -qx true \
+ && claude --version
+
+# pip has no native age gate (that is proxy-enforced here: the registries are
+# closed unless a with-egress window is open). This pins the index and, by its
+# absence, documents that NO extra-index-url is set — that flag is a
+# dependency-confusion vector, since pip may prefer whichever index offers the
+# higher version. Wheels-only (`--only-binary :all:`, the pip analogue of script
+# blocking, since sdists run setup.py at build time) is deliberately NOT set yet:
+# it is the highest-friction control on a CUDA/ML image and is gated behind real
+# sdist-usage data. See plan.md T23.
+RUN printf '%s\n' \
+      '[global]' \
+      '# Managed by Dockerfile. No extra-index-url: dependency-confusion vector.' \
+      'index-url = https://pypi.org/simple' \
+    > /etc/pip.conf
+
 # ---------- runtime layout ---------------------------------------------------
 # Expected bind mounts (see docker-compose.yml):
 #   /workspace                <- ~/repo/<profile>/

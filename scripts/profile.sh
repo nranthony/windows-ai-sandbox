@@ -103,6 +103,67 @@ ok()    { printf '\033[0;32m[ OK ]\033[0m  %s\n' "$*"; }
 warn()  { printf '\033[1;33m[WARN]\033[0m  %s\n' "$*"; }
 fail()  { printf '\033[0;31m[FAIL]\033[0m  %s\n' "$*" >&2; exit 1; }
 
+# ---------------------------------------------------------------------------
+# check_allowlist_sync — tier-1 tripwire: is the proxy ENFORCING the repo's
+# allowlist? (work/0001-dependency-guardrails T24, gap G9.)
+#
+# Two independent staleness modes, and a naive file comparison catches only one:
+#
+#   Mode B — inode swap. An atomic-replace edit (vim, sed -i, git checkout, the
+#     Edit tool) gives the host file a NEW inode; the bind-mounted container
+#     stays on the OLD one and can never see another update. Caught below by
+#     diffing host content against the container's view. `squid -k reconfigure`
+#     does NOT fix this and does not report failure — it exits 0 having applied
+#     nothing. Only a restart re-resolves the mount.
+#
+#   Mode A — edited in place but never reloaded. The container's file is
+#     byte-identical to the repo's, so the diff is clean, but squid parsed the
+#     allowlist into memory at startup and is still enforcing the OLD set. This
+#     is INVISIBLE to any file comparison; approximated below by comparing the
+#     allowlist mtime against the proxy's start time.
+#
+# Deliberately makes no network call: tier 1 must work with egress down.
+# An extra domain in the container is the dangerous direction — a host the repo
+# revoked but the proxy still permits — so that is a hard FAIL, not a warning.
+# ---------------------------------------------------------------------------
+check_allowlist_sync() {
+  local proxy="egress-proxy-$PROFILE"
+  local allowlist="$SCRIPT_DIR/proxy/allowed_domains.txt"
+  local rc=0
+
+  [[ -f "$allowlist" ]] || { warn "allowlist missing: $allowlist"; return 0; }
+  docker inspect "$proxy" >/dev/null 2>&1 || { info "allowlist sync: $proxy not running — skipped"; return 0; }
+
+  local strip='^[[:space:]]*#|^[[:space:]]*$'
+  local host_doms ctr_doms delta
+  host_doms=$(grep -vE "$strip" "$allowlist" | sort)
+  ctr_doms=$(docker exec "$proxy" sh -c \
+    "grep -vE '^[[:space:]]*#|^[[:space:]]*\$' /etc/squid/allowed_domains.txt | sort" 2>/dev/null) || {
+      warn "allowlist sync: could not read allowlist inside $proxy"; return 0; }
+
+  if [[ "$host_doms" == "$ctr_doms" ]]; then
+    ok "allowlist in sync with $proxy ($(printf '%s\n' "$host_doms" | grep -c . ) domains)"
+  else
+    delta=$(diff <(printf '%s\n' "$host_doms") <(printf '%s\n' "$ctr_doms") | grep '^[<>]' | head -10)
+    printf '\033[0;31m[FAIL]\033[0m  allowlist DRIFT — %s is not serving this repo'"'"'s allowlist\n' "$proxy" >&2
+    printf '%s\n' "$delta" | sed 's/^>/        proxy permits (repo does NOT):/; s/^</        repo has (proxy lacks):     /' >&2
+    printf '        fix: docker restart %s   (NOT squid -k reconfigure — silent no-op)\n' "$proxy" >&2
+    rc=1
+  fi
+
+  # Mode A approximation: allowlist changed after the proxy started.
+  local started epoch_started epoch_file
+  started=$(docker inspect -f '{{.State.StartedAt}}' "$proxy" 2>/dev/null) || started=""
+  if [[ -n "$started" ]]; then
+    epoch_started=$(date -d "$started" +%s 2>/dev/null || echo 0)
+    epoch_file=$(stat -c %Y "$allowlist" 2>/dev/null || echo 0)
+    if [[ "$epoch_started" -gt 0 && "$epoch_file" -gt "$epoch_started" ]]; then
+      warn "allowlist mtime is newer than $proxy start — squid may still be enforcing the previous set (it parses at startup). Restart the proxy, or use the dashboard's 'Save & Reload Proxies'."
+    fi
+  fi
+  return "$rc"
+}
+
 usage() {
   sed -n '2,/^# =====/p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
   exit 1
@@ -153,6 +214,15 @@ ensure_state() {
   mkdir -p "$p/config/pnpm"
   if ! grep -qs '^manage-package-manager-versions=' "$p/config/pnpm/rc"; then
     printf 'manage-package-manager-versions=false\n' >> "$p/config/pnpm/rc"
+  fi
+  # Gate 2 (pnpm half) — slopsquat quarantine, 10080 MINUTES = 7 days. pnpm's
+  # unit is minutes; npm's min-release-age (Dockerfile) is days. Lives here
+  # rather than in the image because /root/.config is a per-profile bind mount
+  # that would mask an image-layer value. Key must be KEBAB-case: the documented
+  # `minimumReleaseAge` spelling is silently ignored in the rc file. Mirrors
+  # init-profile-state.sh.
+  if ! grep -qs '^minimum-release-age=' "$p/config/pnpm/rc"; then
+    printf 'minimum-release-age=10080\n' >> "$p/config/pnpm/rc"
   fi
   cp "$SCRIPT_DIR/sandbox_templates/common/db.env.template" "$p/db.env.example"
   cp "$SCRIPT_DIR/sandbox_templates/common/secrets.env.template" "$p/secrets.env.example"
@@ -791,8 +861,19 @@ case "$CMD" in
   verify)
     src="$SCRIPT_DIR/scripts/verify-sandbox.sh"
     [[ -f "$src" ]] || fail "verify-sandbox.sh missing: $src"
+
+    # ---- host-side tier-1 checks --------------------------------------------
+    # These CANNOT live in verify-sandbox.sh: that script is streamed into the
+    # AGENT container, which can see neither this repo (the sandbox repo is not
+    # bind-mounted into /workspace) nor the proxy container. Anything comparing
+    # host state against the proxy has to run here.
+    verify_rc=0
+    check_allowlist_sync || verify_rc=1
+
     info "Running verify-sandbox.sh inside $AGENT (streamed via stdin)"
-    exec docker exec -i "$AGENT" bash -s -- "$@" < "$src"
+    # NOT `exec` — the host-side result above still has to affect the exit code.
+    docker exec -i "$AGENT" bash -s -- "$@" < "$src" || verify_rc=1
+    exit "$verify_rc"
     ;;
 
   audit)

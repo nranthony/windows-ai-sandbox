@@ -1,6 +1,7 @@
 # Dependency Guardrails — Implementation Plan
 
-**Status:** IN PROGRESS. **Phases 0 and 1 complete (2026-07-31)**; phases 2–4 planned.
+**Status:** IN PROGRESS. **Phases 0 and 1 complete; phase 2 config half complete
+(T07–T12, T24, T09, T11) — 2026-07-31.** Remaining: `depaudit` (T13–T16), phase 3, phase 4.
 Prerequisites T00/T01 discharged — see §0.1.
 **Exit rule:** this folder is deleted, or moved to `work/archive/`, when the work merges.
 **Owner decision gate:** §13. Five decisions need an answer; four of them only block later phases.
@@ -907,6 +908,13 @@ not a degraded one (upstream ADR-0003).
 | ~~T04~~ | ~~`manifest-dep-add` hook rule~~ — **DONE 07-31**, rule 13, blocks | 1 | — | — |
 | ~~T05~~ | ~~Docs install-command rule~~ — **DONE 07-31**, rule 14, **warns** (deviation, §7) | 1 | — | — |
 | ~~T06~~ | ~~Hook tests~~ — **DONE 07-31**, 61→**79 passed, 0 failed** | 1 | — | — |
+| ~~T07~~ | ~~`/usr/etc/npmrc`~~ — **DONE 07-31**, +`/etc/pip.conf` | 2 | — | — |
+| ~~T08~~ | ~~Validate autoupdater~~ — **DONE 07-31, PASSED** (`claude 2.1.220` after `--refresh-ai`) | 2 | — | — |
+| ~~T09~~ | ~~Allowlist lifecycle + header~~ — **DONE 07-31** (D1 = strict) | 2 | — | — |
+| ~~T10~~ | ~~pnpm quarantine in state init~~ — **DONE 07-31** (kebab-case fix) | 2 | — | — |
+| ~~T11~~ | ~~uv `exclude-newer` documented~~ — **DONE 07-31** | 2 | — | — |
+| ~~T12~~ | ~~Tier-1 Gate-2 tripwires~~ — **DONE 07-31**, verify 31→**35 passed** | 2 | — | — |
+| ~~T24~~ | ~~Allowlist drift tripwire~~ — **DONE 07-31**, host-side in `profile.sh` | 2 | — | — |
 | T07 | `/usr/etc/npmrc` in Dockerfile | 2 | 1h | T00 |
 | T08 | **Validate autoupdater interaction** | 2 | 30m | T07 |
 | T09 | Allowlist lifecycle + fix stale header | 2 | 2h | — |
@@ -918,7 +926,6 @@ not a degraded one (upstream ADR-0003).
 | T15 | Fixtures + corpora | 2 | 0.5d | T13 |
 | T16 | `depaudit pkg` + OSV `MAL-` | 2 | 0.5d | T13, T07, T10 |
 | ~~T17~~ | ~~Fix `reload_proxy`~~ — **DROPPED**, G1 refuted | 3 | — | — |
-| **T24** | **Allowlist drift tripwire** *(G9, replaces T17)* | 2 | 2h | — |
 | T18 | Window pre-flight | 3 | 0.5d | T16 |
 | T19 | Bracket + snapshot | 3 | 3h | — |
 | T20 | Egress diff | 3 | 3h | T19 |
@@ -955,3 +962,52 @@ Four of five block only later phases, so none of them should hold up phases 0–
 [`docs/adr/0002-dependency-guardrail-scope.md`](../../docs/adr/0002-dependency-guardrail-scope.md)
 (Proposed) rather than buried here, per `make-plan` §4 — they affect the security boundary
 and would otherwise be re-litigated every time someone reads plan 02.
+
+
+---
+
+## 14. Phase 2 results (config half) — 2026-07-31
+
+**T07 — image config.** `/usr/etc/npmrc` with `min-release-age=7`,
+`registry=`, `save-exact=true`; plus `/etc/pip.conf` pinning the index with no
+`extra-index-url`. **Ordering is load-bearing and the plan did not call it out:**
+the npmrc layer MUST come after the claude/agy install, because `min-release-age`
+applies to `npm install` at *build* time too — written earlier it would make
+`@anthropic-ai/claude-code@latest` unresolvable whenever the newest release is
+inside the quarantine window, a self-inflicted build break. `/usr/etc` does not
+exist in the base image and must be created.
+
+**T08 — the gate on T07: PASSED.** `scripts/profile.sh build --refresh-ai` then
+`claude --version` → `2.1.220 (Claude Code)`, not "native binary not installed".
+The layer ordering is why. `agy` 1.1.9 also healthy.
+
+**T10 — pnpm, and a bug the tripwire caught.** pnpm documents the setting as
+`minimumReleaseAge`, and this plan said the same — but **in the rc file that
+spelling is silently ignored** (`pnpm config get minimumReleaseAge` → `undefined`).
+It must be written kebab-case as `minimum-release-age=10080`, matching the
+existing `manage-package-manager-versions` line. **[C 07-31]** Seeded by both
+`init-profile-state.sh` and `profile.sh ensure_state` (they mirror each other).
+T12 is what surfaced this — the config looked right and was doing nothing.
+
+**T12 — tripwires, verify 31 → 35 checks.** npm age, pnpm age, `allow-scripts`,
+and pip `extra-index-url` absence. The pnpm check fails *distinctly* when the
+value is under 1440, because that means days were entered where minutes are
+required — a 1440× error that fails OPEN.
+
+**T24 — drift tripwire, host-side.** **The plan put this in
+`verify-sandbox.sh`; that is impossible.** That script is streamed into the AGENT
+container, which can see neither this repo (not bind-mounted) nor the proxy. It
+lives in `profile.sh`'s `verify` subcommand instead, which also meant dropping the
+`exec` so the host-side result still affects the exit code. Verified both ways:
+clean → `[ OK ] allowlist in sync (53 domains)`; induced Mode B drift → names the
+domain and direction, prints the fix, and exits 1.
+
+**T09 — D1 answered: strict.** Header rewritten to state that registries are
+commented by default and that opening one is a bounded `with-egress.sh` act.
+Closes G8.
+
+**T11 — uv stays per-project.** `exclude-newer` takes a timestamp, not a
+duration, so an image-wide value freezes every project at a fixed date and goes
+stale. Documented in `docs/local-wheels.md`.
+
+**State:** all three profiles rebuilt, `verify` **35 passed / 0 failed** each.
