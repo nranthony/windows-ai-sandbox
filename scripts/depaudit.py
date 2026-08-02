@@ -283,34 +283,60 @@ def check_node(root: Path, rep: Report, ctx: dict) -> None:
     ws = root / "pnpm-workspace.yaml"
     uses_pnpm = "pnpm" in ctx["node"]
 
-    # --- N01: install scripts blocked -------------------------------------
+    # --- N01: install scripts -------------------------------------------
     # This is where a slopsquat payload runs, so it outranks the age gate.
+    #
+    # THE DEFAULT IS BLOCKED, AND THE ALLOWLIST IS THE HOLE. pnpm 10 does not run
+    # dependency lifecycle scripts at all unless a package is named in
+    # `allowBuilds` / `onlyBuiltDependencies`. Verified 2026-08-02: a bare install
+    # prints "Ignored build scripts: esbuild@0.25.0"; adding either key silences
+    # it and lets the script run.
+    #
+    # An earlier version of this check had it exactly backwards — it FAILed a repo
+    # for having no allowlist, i.e. for being in the safest possible state, and
+    # would have pushed someone to punch a hole to make the scanner happy. Worth
+    # the comment: the intuition "a list of allowed things = a control" is wrong
+    # here, and it is the second inverted assumption this scanner has shipped.
     ignore, ln = ini_get(npmrc, "ignore-scripts")
     allow_builds, wl = yaml_lookup(ws, "allowBuilds")
     only_built, ol = yaml_lookup(ws, "onlyBuiltDependencies")
-    if ignore == "true":
+
+    exempt: list[str] = []
+    src_file, src_line = "", 0
+    if allow_builds is not None:
+        exempt = [x.split(":")[0].strip() for x in allow_builds.splitlines() if ":" in x]
+        src_file, src_line = "pnpm-workspace.yaml", wl
+    elif only_built is not None:
+        exempt = [x.lstrip("- ").strip() for x in only_built.splitlines()
+                  if x.strip().startswith("-")] or ["(inline list)"]
+        src_file, src_line = "pnpm-workspace.yaml", ol
+
+    if uses_pnpm:
+        if not exempt:
+            rep.add("N01", PASS, "Install scripts blocked for every dependency",
+                    "pnpm 10 runs no dependency lifecycle scripts unless allowlisted, and "
+                    "nothing is allowlisted here — the strongest available posture",
+                    file="pnpm-workspace.yaml" if ws.exists() else "")
+        elif len(exempt) <= 3:
+            rep.add("N01", PASS, "Install scripts blocked except for a named allowlist",
+                    f"{len(exempt)} exemption(s): {', '.join(exempt)} — each may run "
+                    "arbitrary code at install time; keep the list this short",
+                    file=src_file, line=src_line)
+        else:
+            rep.add("N01", WARN, "Install-script allowlist is broad",
+                    f"{len(exempt)} packages may run arbitrary code at install time: "
+                    + ", ".join(exempt[:8]) + (" …" if len(exempt) > 8 else ""),
+                    file=src_file, line=src_line,
+                    fix="Trim to packages that genuinely need a native build step")
+    elif ignore == "true":
         rep.add("N01", PASS, "Install scripts blocked", "ignore-scripts=true",
                 file=".npmrc", line=ln)
-    elif allow_builds is not None:
-        n = len([x for x in allow_builds.splitlines() if ":" in x])
-        rep.add("N01", PASS, "Install scripts blocked by allowlist",
-                f"pnpm allowBuilds — {n} package(s) permitted; all others blocked",
-                file="pnpm-workspace.yaml", line=wl)
-    elif only_built is not None:
-        rep.add("N01", PASS, "Install scripts blocked by allowlist",
-                "onlyBuiltDependencies set", file="pnpm-workspace.yaml", line=ol)
-    elif uses_pnpm:
-        rep.add("N01", FAIL, "Install scripts NOT blocked",
-                "No allowBuilds / onlyBuiltDependencies allowlist; every package may run "
-                "postinstall — the primary execution vector in npm supply-chain attacks",
-                file="pnpm-workspace.yaml" if ws.exists() else ".npmrc",
-                fix="Add `allowBuilds:` to pnpm-workspace.yaml listing only what truly needs it")
     else:
-        # npm >= 12 blocks by default via allow-scripts; cannot confirm the
-        # installed version from the repo, so this is genuinely UNKNOWN.
+        # npm >= 12 blocks by default via its allow-scripts allowlist, but the
+        # installed version cannot be confirmed from the repo alone.
         rep.add("N01", UNKNOWN, "Install-script policy not declared in-repo",
                 "npm >=12 blocks by default, but nothing here pins that",
-                fix="Set ignore-scripts=true in .npmrc to make it explicit")
+                fix="Set ignore-scripts=true in .npmrc to make it explicit and version-proof")
 
     # --- N02 / N02p: resolution age gate ----------------------------------
     # BOTH locations are valid for this setting, and that is not obvious.

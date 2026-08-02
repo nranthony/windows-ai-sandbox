@@ -1167,12 +1167,21 @@ manifests" and read as clean. `deps` scans the root plus each child carrying a
 manifest, then prints a roll-up — nine reports with no summary is how a FAIL gets
 scrolled past.
 
-**Real finding on first run: `app_zero` FAILs `N01`** — it has no `allowBuilds` /
-`onlyBuiltDependencies` allowlist, so **every** package there may run install
-scripts. `app_blast` and `engine` both have one. This is the control the sibling
-audit's §6 calls "doing more for you than every CVE bump in §5 combined", and one
-of the three repos is missing it. Not fixed here: choosing the allowlist requires
-knowing which packages legitimately build, and getting it wrong breaks installs.
+**RETRACTED — the `app_zero` "finding" was my check being backwards.** It
+reported FAIL for having no `allowBuilds` allowlist. Measured 2026-08-02: **pnpm 10
+blocks dependency lifecycle scripts by default**; a bare install prints
+`Ignored build scripts: esbuild@0.25.0`, and adding `allowBuilds` or
+`onlyBuiltDependencies` is what *permits* them. So no allowlist is the **safest**
+state, not a missing control, and the check would have pushed someone to punch a
+hole to satisfy the scanner. Now: no allowlist → PASS; a short allowlist → PASS
+naming the exemptions; a broad one → WARN. All three repos PASS, workspace FAIL
+count 1 → 0.
+
+This also qualifies the sibling audit's §6, which credits
+`allowBuilds: {esbuild: true}` with keeping scripts "blocked for all 694 other
+packages". The blocking is pnpm 10's default; that line is the single
+**exception** to it. Good posture either way — one exemption is about as tight as
+a real build gets — but the credit belongs to the tool's default, not the line.
 
 `--osv` across the whole workspace covered **1,974 lockfile-pinned packages** in
 nine projects, all `NO-KNOWN-MAL`. Host-side, so no profile egress is involved.
