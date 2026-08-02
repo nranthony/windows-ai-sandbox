@@ -40,6 +40,7 @@ right: an **RFC** proposes → an **ADR** records → **work/** implements → t
 |---|---|---|
 | 1 | [`scripts/verify-sandbox.sh`](../scripts/verify-sandbox.sh) | Fast tripwire (~57 pass/fail/warn outcomes across ~28 checks) |
 | 2 | [`scripts/audit/`](../scripts/audit/) | ~80 structured probes, JSON output ([README](../scripts/audit/README.md)) |
+| — | [`scripts/depaudit.test.sh`](../scripts/depaudit.test.sh) | depaudit regression suite (26 offline, `--online` adds the OSV corpus) over [fixtures](../scripts/depaudit-fixtures/) |
 | 3 | [`sandbox_templates/skills/audit-sandbox/SKILL.md`](../sandbox_templates/skills/audit-sandbox/SKILL.md) | Agent-side judgment over tier-2 JSON (staged into container by `profile.sh audit`) |
 
 ## Agent Tool Controls

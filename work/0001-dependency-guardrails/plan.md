@@ -942,7 +942,7 @@ not a degraded one (upstream ADR-0003).
 | ~~T24~~ | ~~Allowlist drift tripwire~~ — **DONE 07-31**, host-side in `profile.sh` | 2 | — | — |
 | ~~T13~~ | ~~`depaudit posture`~~ — **DONE 08-02**, `scripts/depaudit.py` | 2 | — | — |
 | ~~T14~~ | ~~`profile.sh deps` + justfile~~ — **DONE 08-02** | 2 | — | — |
-| T15 | Fixtures + corpora | 2 | 0.5d | T13 |
+| ~~T15~~ | ~~Fixtures + corpora~~ — **DONE 08-02**, 26 offline / 27 online | 2 | — | — |
 | ~~T16~~ | ~~`depaudit pkg` + OSV `MAL-`~~ — **DONE 08-02**, + `deps` lockfile mode | 2 | — | — |
 | ~~T17~~ | ~~Fix `reload_proxy`~~ — **DROPPED**, G1 refuted | 3 | — | — |
 | T18 | Window pre-flight | 3 | 0.5d | T16 |
@@ -1188,3 +1188,46 @@ nine projects, all `NO-KNOWN-MAL`. Host-side, so no profile egress is involved.
 
 Phase 2 is complete apart from T15 (fixtures), which would let the corpus test
 run without network as a regression test rather than a live check.
+
+
+---
+
+## 19. T15 result (2026-08-02) — phase 2 complete
+
+`scripts/depaudit.test.sh` over seven fixture repos in
+`scripts/depaudit-fixtures/`. **26 assertions offline, 27 with `--online`.**
+Offline by default is the point: the posture fixtures run anywhere, including
+with egress down. Only the OSV corpus needs network, and it is opt-in.
+
+Fixtures: full-posture, zero-posture, multi-lockfile, **docs-only injection**
+(the `X04` case plan 01 says most implementations skip — a package named *only*
+in `AGENTS.md`), python-uv (sdist + `exclude-newer`), pip-confusion
+(`extra-index-url`), and peer-suffix.
+
+**Two assertions are regression locks for checks that shipped inverted today:**
+
+- `zero-posture N01 == PASS` — no allowlist is the *safest* state, because
+  pnpm 10 blocks dependency install scripts by default. The first version FAILed
+  this and advised adding an allowlist, i.e. advised punching a hole.
+- `full-posture N02p == PASS` — `minimum-release-age` in `.npmrc` IS honoured.
+  The first version rejected it there by false analogy to
+  `supportedArchitectures`.
+
+Plus an enumeration lock for the peer-dependency-suffix bug that made 121 of 869
+packages report clean under garbage names.
+
+**The fixtures immediately found two more bugs**, which is the whole argument for
+writing them:
+
+1. **`N06`/`X07` were blind to nested projects.** The git checks tested for a
+   `.git` entry *at the scan root*, so any subdirectory — every monorepo member,
+   exactly what `profile.sh deps` iterates — reported `UNKNOWN`. Now uses
+   `git rev-parse --is-inside-work-tree`. `apps/dashboard` went `UNKNOWN → PASS`.
+2. **`ini_get` missed npm's array syntax.** npm writes list settings as
+   `key[]=value`, so `min-release-age-exclude[]=…` never matched and `N11` —
+   the check that exemptions carry a stated reason — silently never fired on a
+   real exemption list.
+
+**Phase 2 is complete: T07–T16 and T24 all done.** Remaining: phase 3 (T18–T22,
+install-window instrumentation, unblocked since G1 was refuted) and T23 (Python
+wheels-only, still gated on the sdist data — `dashboard` alone has 45).

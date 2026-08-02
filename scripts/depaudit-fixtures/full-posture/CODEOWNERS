@@ -1,0 +1,3 @@
+package.json @team/security
+pnpm-lock.yaml @team/security
+.npmrc @team/security

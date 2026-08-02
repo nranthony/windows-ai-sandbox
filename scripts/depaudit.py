@@ -126,7 +126,9 @@ def ini_get(path: Path, key: str) -> tuple[str | None, int]:
         s = line.strip()
         if not s or s.startswith(("#", ";")):
             continue
-        m = re.match(rf"{re.escape(key)}\s*=\s*(.*)$", s)
+        # npm array config is `key[]=value`; without the optional `[]` this
+        # silently misses every list-valued setting (e.g. an exemption list).
+        m = re.match(rf"{re.escape(key)}(?:\[\])?\s*=\s*(.*)$", s)
         if m:
             val, ln = m.group(1).strip(), n
     return val, ln
@@ -186,9 +188,20 @@ def git(root: Path, *args: str) -> str:
         return ""
 
 
+def in_git(root: Path) -> bool:
+    """Is this path inside a work tree?
+
+    Checking for a `.git` entry at the scan root is wrong: a monorepo member
+    (`apps/dashboard`) or any subdirectory is inside a repo without containing
+    `.git` itself, so the git-backed checks would report UNKNOWN for the common
+    `profile.sh deps` case of scanning nested projects.
+    """
+    return git(root, "rev-parse", "--is-inside-work-tree").strip() == "true"
+
+
 def tracked(root: Path, rel: str) -> bool | None:
-    """True/False if git can say; None if this is not a git repo."""
-    if not (root / ".git").exists():
+    """True/False if git can say; None if this is not inside a work tree."""
+    if not in_git(root):
         return None
     return bool(git(root, "ls-files", "--", rel).strip())
 
@@ -628,8 +641,9 @@ def check_cross(root: Path, rep: Report, ctx: dict) -> None:
     # --- X07: how dependencies actually got added -------------------------
     # Dependency additions bundled into large feature commits are the pattern
     # that hides an agent-added package.
-    if not (root / ".git").exists():
-        rep.add("X07", UNKNOWN, "Dependency-add provenance unavailable", "not a git repo")
+    if not in_git(root):
+        rep.add("X07", UNKNOWN, "Dependency-add provenance unavailable",
+                "not inside a git work tree")
         return
     manifest_paths = [m for m in MANIFESTS if (root / m).exists()]
     if not manifest_paths:

@@ -1,0 +1,11 @@
+version = 1
+
+[[package]]
+name = "requests"
+version = "2.31.0"
+sdist = { url = "https://example/requests.tar.gz" }
+
+[[package]]
+name = "certifi"
+version = "2026.1.1"
+wheels = [{ url = "https://example/certifi.whl" }]
