@@ -940,7 +940,7 @@ not a degraded one (upstream ADR-0003).
 | ~~T11~~ | ~~uv `exclude-newer` documented~~ — **DONE 07-31** | 2 | — | — |
 | ~~T12~~ | ~~Tier-1 Gate-2 tripwires~~ — **DONE 07-31**, verify 31→**35 passed** | 2 | — | — |
 | ~~T24~~ | ~~Allowlist drift tripwire~~ — **DONE 07-31**, host-side in `profile.sh` | 2 | — | — |
-| T13 | `depaudit posture` | 2 | 1.5d | — |
+| ~~T13~~ | ~~`depaudit posture`~~ — **DONE 08-02**, `scripts/depaudit.py` | 2 | — | — |
 | T14 | `profile.sh deps` + justfile | 2 | 1h | T13 |
 | T15 | Fixtures + corpora | 2 | 0.5d | T13 |
 | T16 | `depaudit pkg` + OSV `MAL-` | 2 | 0.5d | T13, T07, T10 |
@@ -1068,3 +1068,41 @@ Revisit if the quarantine actually blocks real work more than about once a month
 The suffixed forms are the trap: they look like a duration, parse as `NaN`, and fail closed
 in a way that reads as a broken registry rather than a config error. T12 now hard-`fail`s on
 any non-integer for exactly this reason, and its message states the fix.
+
+
+---
+
+## 16. T13 result (2026-08-02)
+
+`scripts/depaudit.py` — Python 3.11+ stdlib only, read-only, offline. 21 checks
+across discover / Node / Python / cross-cutting, each emitting
+`PASS|FAIL|WARN|N/A|UNKNOWN` with the file and line that produced it. Markdown and
+JSON output (`schema: depaudit/posture/1`), `--fail-on {fail,warn,never}`.
+Verified: no network code, zero write calls, one read-only `git` subprocess for
+X07 provenance.
+
+**A false positive it caught in itself, worth recording.** The first draft of
+`N02p` hard-FAILed `minimum-release-age` when set in `.npmrc`, generalising from
+the `supportedArchitectures` finding of the day before. That generalisation was
+wrong. Measured with a deliberately absurd 10-year window: the install failed
+from `.npmrc` **and** from `pnpm-workspace.yaml`, so **both locations are
+enforced** for this setting. The difference is scalar vs nested-object settings —
+a plain `key=value` survives the npmrc path, a nested map does not. The check now
+accepts either location and flags only absent / zero / non-integer / sub-day
+values. Per plan 02 §8, a false FAIL is worse than no check: it trains people to
+ignore the output.
+
+**Real findings on first run**, none of them planted:
+
+- `app_blast` — install commands in `AGENTS.md` and `docs/handoff/README.md`
+  (X04, the check most implementations skip); two manifest commits with no
+  matching lockfile change (X07).
+- `dashboard` — **45 dependencies resolve to sdists** (P08), i.e. 45 packages
+  running `setup.py` at install time. That is exactly the data T23 (phase 4,
+  Python wheels-only) was deferred pending, and it says image-wide
+  `--only-binary :all:` is not viable here.
+- Root of this repo — no manifests at root but nested projects exist (D03), so
+  the scan says so instead of reporting a misleading clean.
+
+**Scope honestly stated:** root-scoped, one directory per run. Monorepo recursion
+is not implemented; D03 exists so that limitation is visible rather than silent.

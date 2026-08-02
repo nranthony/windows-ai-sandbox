@@ -1,0 +1,728 @@
+#!/usr/bin/env python3
+"""depaudit — dependency posture scanner (read-only, offline, stdlib-only).
+
+Answers one question per repo: *which dependency-supply-chain controls are
+configured?* It does NOT resolve, install, or reach the network.
+
+Design constraints (work/0001-dependency-guardrails/plan.md D1, D2 and plan 01 §1):
+
+  * **Zero third-party dependencies.** A supply-chain audit tool must not have a
+    supply chain of its own; it has to be auditable by reading it. Python 3.11+
+    stdlib only — no PyYAML, no requests. Mirrors sandbox_templates/bin/webfetch.
+  * **Read-only.** Never writes to the target, never installs, never runs a
+    package manager. Lockfiles are PARSED, not executed: building an environment
+    to enumerate one is the dangerous act this is meant to avoid.
+  * **Offline.** Every check here is local. Registry enrichment is a separate
+    phase (T16) and is deliberately not in this file.
+  * **Evidence with every verdict.** A finding carries the file and line that
+    produced it, so it is actionable without re-investigation.
+
+Statuses: PASS · FAIL · WARN · N/A (toolchain absent) · UNKNOWN (could not tell).
+`N/A` and `UNKNOWN` are distinct on purpose — plan 01 §1 is explicit that an
+unknown must never be reported as a pass.
+
+Usage:
+    depaudit.py posture <path> [--format md|json] [--fail-on fail|warn|never]
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import re
+import subprocess
+import sys
+import tomllib
+from dataclasses import dataclass, field
+from pathlib import Path
+
+PASS, FAIL, WARN, NA, UNKNOWN = "PASS", "FAIL", "WARN", "N/A", "UNKNOWN"
+
+# Instruction files are executable surfaces: an install command written into one
+# gets run by the next agent and pasted by the next human (X04).
+DOC_TARGETS = (
+    "AGENTS.md", "CLAUDE.md", "GEMINI.md", "SKILL.md", "README.md",
+    "CONTRIBUTING.md", ".cursorrules",
+)
+
+INSTALL_CMD = re.compile(
+    r"(?:^|[^\w-])("
+    r"npm\s+(?:i|install|add)|pnpm\s+(?:add|install|dlx)|yarn\s+add|bun\s+add"
+    r"|pip3?\s+install|uv\s+add|uv\s+pip\s+install|pipx\s+install|poetry\s+add"
+    r"|cargo\s+(?:install|add)|go\s+(?:install|get)"
+    r")\s+([^\s`'\"]+)"
+)
+
+MANIFESTS = ("package.json", "pyproject.toml", "requirements.txt", "Pipfile")
+
+
+@dataclass
+class Finding:
+    id: str
+    status: str
+    title: str
+    detail: str = ""
+    file: str = ""
+    line: int = 0
+    fix: str = ""
+
+    def loc(self) -> str:
+        if not self.file:
+            return ""
+        return f"{self.file}:{self.line}" if self.line else self.file
+
+
+@dataclass
+class Report:
+    root: str
+    ecosystems: list[str] = field(default_factory=list)
+    package_managers: list[str] = field(default_factory=list)
+    findings: list[Finding] = field(default_factory=list)
+
+    def add(self, *a, **kw) -> None:
+        self.findings.append(Finding(*a, **kw))
+
+    def counts(self) -> dict[str, int]:
+        c: dict[str, int] = {}
+        for f in self.findings:
+            c[f.status] = c.get(f.status, 0) + 1
+        return c
+
+
+# --------------------------------------------------------------------------
+# helpers — deliberately small and total; a parse failure must degrade to
+# UNKNOWN rather than raise, because a crashed scanner reports nothing.
+# --------------------------------------------------------------------------
+
+def read(p: Path) -> str:
+    try:
+        return p.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ""
+
+
+def find_line(text: str, pattern: str) -> int:
+    """1-indexed line of the first regex match, else 0."""
+    for n, line in enumerate(text.splitlines(), 1):
+        if re.search(pattern, line):
+            return n
+    return 0
+
+
+def ini_get(path: Path, key: str) -> tuple[str | None, int]:
+    """Value + line for `key=value` in an npmrc/pip.conf-style file.
+
+    Ignores commented lines. Returns the LAST occurrence, matching how these
+    files are read (later wins within one file).
+    """
+    text = read(path)
+    val, ln = None, 0
+    for n, line in enumerate(text.splitlines(), 1):
+        s = line.strip()
+        if not s or s.startswith(("#", ";")):
+            continue
+        m = re.match(rf"{re.escape(key)}\s*=\s*(.*)$", s)
+        if m:
+            val, ln = m.group(1).strip(), n
+    return val, ln
+
+
+def yaml_lookup(path: Path, dotted: str) -> tuple[str | None, int]:
+    """Minimal YAML probe for `a.b` scalar/list keys — no PyYAML (D2).
+
+    Handles only the shapes pnpm-workspace.yaml actually uses: top-level keys,
+    one level of nesting, `key: value`, `key: [a, b]`, and `- item` blocks.
+    Anything else returns None, which callers must treat as UNKNOWN rather than
+    absent.
+    """
+    text = read(path)
+    if not text:
+        return None, 0
+    parts = dotted.split(".")
+    want_top, want_sub = parts[0], (parts[1] if len(parts) > 1 else None)
+    lines = text.splitlines()
+    top_indent = None
+    for n, raw in enumerate(lines, 1):
+        if not raw.strip() or raw.lstrip().startswith("#"):
+            continue
+        indent = len(raw) - len(raw.lstrip())
+        m = re.match(r"([A-Za-z0-9_-]+)\s*:\s*(.*)$", raw.strip())
+        if indent == 0 and m and m.group(1) == want_top:
+            if want_sub is None:
+                inline = m.group(2).strip()
+                if inline:
+                    return inline, n
+                # collect the block beneath
+                block = []
+                for r2 in lines[n:]:
+                    if r2.strip() and (len(r2) - len(r2.lstrip())) == 0:
+                        break
+                    block.append(r2.strip())
+                return ("\n".join(x for x in block if x) or None), n
+            top_indent = indent
+            continue
+        if top_indent is not None:
+            if raw.strip() and indent <= top_indent:
+                break  # left the block
+            if m and m.group(1) == want_sub:
+                return (m.group(2).strip() or ""), n
+    return None, 0
+
+
+def git(root: Path, *args: str) -> str:
+    """Read-only git query. Empty string if not a repo or git is unavailable."""
+    try:
+        r = subprocess.run(
+            ["git", "-C", str(root), *args],
+            capture_output=True, text=True, timeout=20,
+        )
+        return r.stdout if r.returncode == 0 else ""
+    except (OSError, subprocess.SubprocessError):
+        return ""
+
+
+def tracked(root: Path, rel: str) -> bool | None:
+    """True/False if git can say; None if this is not a git repo."""
+    if not (root / ".git").exists():
+        return None
+    return bool(git(root, "ls-files", "--", rel).strip())
+
+
+# --------------------------------------------------------------------------
+# discover — fingerprint before checking, so a repo is never marked FAIL for a
+# toolchain it does not use (plan 01 §3).
+# --------------------------------------------------------------------------
+
+def discover(root: Path, rep: Report) -> dict:
+    marks = {
+        "npm": (root / "package-lock.json").exists(),
+        "pnpm": (root / "pnpm-lock.yaml").exists() or (root / "pnpm-workspace.yaml").exists(),
+        "yarn": (root / "yarn.lock").exists(),
+        "bun": (root / "bun.lock").exists() or (root / "bun.lockb").exists(),
+        "uv": (root / "uv.lock").exists(),
+        "poetry": (root / "poetry.lock").exists(),
+        "pdm": (root / "pdm.lock").exists(),
+        "pipenv": (root / "Pipfile.lock").exists(),
+    }
+    pkg = root / "package.json"
+    declared = ""
+    if pkg.exists():
+        try:
+            declared = (json.loads(read(pkg)) or {}).get("packageManager", "") or ""
+        except json.JSONDecodeError:
+            declared = ""
+        if declared:
+            marks[declared.split("@")[0]] = True
+
+    node = [k for k in ("npm", "pnpm", "yarn", "bun") if marks[k]]
+    py = [k for k in ("uv", "poetry", "pdm", "pipenv") if marks[k]]
+    reqs = sorted(root.glob("requirements*.txt"))
+    if reqs and not py:
+        py = ["pip"]
+
+    rep.package_managers = node + py
+    if node:
+        rep.ecosystems.append("node")
+    if py or reqs:
+        rep.ecosystems.append("python")
+
+    # Competing Node lockfiles mean resolution is nondeterministic depending on
+    # who runs what — one of them is stale and unenforced (plan 01 §3).
+    node_locks = [n for n in ("package-lock.json", "pnpm-lock.yaml", "yarn.lock", "bun.lock")
+                  if (root / n).exists()]
+    if len(node_locks) > 1:
+        rep.add("D01", FAIL, "Multiple Node lockfiles present",
+                f"{', '.join(node_locks)} — resolution depends on which tool is run",
+                file=node_locks[0],
+                fix="Keep one lockfile; delete the others and pin `packageManager`")
+    elif node:
+        rep.add("D01", PASS, "Single Node lockfile", ", ".join(node_locks) or "none")
+
+    # Nested projects. This scan is root-scoped, so a repo whose real manifests
+    # live one level down would otherwise report "nothing detected" and read as
+    # clean. Say so explicitly rather than under-report.
+    if not node and not py and not reqs:
+        nested = sorted({
+            str(p.parent.relative_to(root))
+            for name in ("package.json", "pyproject.toml")
+            for p in root.glob(f"*/{name}")
+            if ".venv" not in p.parts and "node_modules" not in p.parts
+        })
+        if nested:
+            rep.add("D03", WARN, "No manifests at the repo root, but nested projects exist",
+                    "This scan is root-scoped and did NOT check them — rerun per directory: "
+                    + ", ".join(nested[:8]) + (" …" if len(nested) > 8 else ""),
+                    fix="depaudit posture <path>/" + nested[0])
+
+    if node and not declared:
+        rep.add("D02", WARN, "No `packageManager` pin in package.json",
+                "Tool selection is inferred from lockfile markers, not declared",
+                file="package.json",
+                fix='Add "packageManager": "pnpm@<version>"')
+    elif declared:
+        rep.add("D02", PASS, "packageManager pinned", declared, file="package.json")
+
+    return {"marks": marks, "declared": declared, "reqs": reqs, "node": node, "py": py}
+
+
+# --------------------------------------------------------------------------
+# Node posture
+# --------------------------------------------------------------------------
+
+def check_node(root: Path, rep: Report, ctx: dict) -> None:
+    if not ctx["node"]:
+        rep.add("N00", NA, "Node toolchain not present", "no Node lockfile or manifest")
+        return
+
+    npmrc = root / ".npmrc"
+    ws = root / "pnpm-workspace.yaml"
+    uses_pnpm = "pnpm" in ctx["node"]
+
+    # --- N01: install scripts blocked -------------------------------------
+    # This is where a slopsquat payload runs, so it outranks the age gate.
+    ignore, ln = ini_get(npmrc, "ignore-scripts")
+    allow_builds, wl = yaml_lookup(ws, "allowBuilds")
+    only_built, ol = yaml_lookup(ws, "onlyBuiltDependencies")
+    if ignore == "true":
+        rep.add("N01", PASS, "Install scripts blocked", "ignore-scripts=true",
+                file=".npmrc", line=ln)
+    elif allow_builds is not None:
+        n = len([x for x in allow_builds.splitlines() if ":" in x])
+        rep.add("N01", PASS, "Install scripts blocked by allowlist",
+                f"pnpm allowBuilds — {n} package(s) permitted; all others blocked",
+                file="pnpm-workspace.yaml", line=wl)
+    elif only_built is not None:
+        rep.add("N01", PASS, "Install scripts blocked by allowlist",
+                "onlyBuiltDependencies set", file="pnpm-workspace.yaml", line=ol)
+    elif uses_pnpm:
+        rep.add("N01", FAIL, "Install scripts NOT blocked",
+                "No allowBuilds / onlyBuiltDependencies allowlist; every package may run "
+                "postinstall — the primary execution vector in npm supply-chain attacks",
+                file="pnpm-workspace.yaml" if ws.exists() else ".npmrc",
+                fix="Add `allowBuilds:` to pnpm-workspace.yaml listing only what truly needs it")
+    else:
+        # npm >= 12 blocks by default via allow-scripts; cannot confirm the
+        # installed version from the repo, so this is genuinely UNKNOWN.
+        rep.add("N01", UNKNOWN, "Install-script policy not declared in-repo",
+                "npm >=12 blocks by default, but nothing here pins that",
+                fix="Set ignore-scripts=true in .npmrc to make it explicit")
+
+    # --- N02 / N02p: resolution age gate ----------------------------------
+    # BOTH locations are valid for this setting, and that is not obvious.
+    # Measured 2026-08-02 with a deliberately absurd 10-year window: the install
+    # failed with the value in .npmrc AND with it in pnpm-workspace.yaml, so both
+    # are enforced. Do NOT generalise from `supportedArchitectures`, which IS
+    # ignored in .npmrc — the difference is scalar vs nested-object settings, and
+    # an earlier draft of this check failed the .npmrc form on that false analogy.
+    # A false FAIL here is worse than no check: it trains people to ignore output.
+    npm_age, nl = ini_get(npmrc, "min-release-age")
+    pnpm_age_rc, pl = ini_get(npmrc, "minimum-release-age")
+    pnpm_age_ws, wl2 = yaml_lookup(ws, "minimumReleaseAge")
+
+    if uses_pnpm:
+        age, src, sl = ((pnpm_age_ws, "pnpm-workspace.yaml", wl2) if pnpm_age_ws is not None
+                        else (pnpm_age_rc, ".npmrc", pl))
+        if age is None:
+            rep.add("N02p", FAIL, "No pnpm resolution quarantine",
+                    "A freshly-published (or freshly-hijacked) version can be installed the "
+                    "minute it appears",
+                    file="pnpm-workspace.yaml" if ws.exists() else ".npmrc",
+                    fix="Add `minimumReleaseAge: 10080` (minutes = 7d) to pnpm-workspace.yaml, "
+                        "or `minimum-release-age=10080` to .npmrc — both are honoured")
+        elif not age.isdigit():
+            # A suffixed value is worse than off: pnpm computes value*60*1e3, so
+            # it yields NaN -> Invalid Date -> every version rejected. Fails
+            # closed and presents as a broken registry.
+            rep.add("N02p", FAIL, "pnpm quarantine value is not a plain integer",
+                    f"{age!r} — pnpm computes value*60*1000, so a suffixed form gives an "
+                    "Invalid Date cutoff and REJECTS EVERY VERSION; nothing will resolve",
+                    file=src, line=sl,
+                    fix="Use plain minutes, e.g. 10080 for 7 days")
+        elif int(age) == 0:
+            rep.add("N02p", FAIL, "pnpm quarantine disabled", "minimumReleaseAge=0",
+                    file=src, line=sl, fix="Set 1440 (24h) at minimum; 10080 = 7d")
+        elif int(age) < 1440:
+            rep.add("N02p", WARN, "pnpm quarantine under one day",
+                    f"{age} minutes — note the unit is MINUTES, so a day-count entered here "
+                    "(e.g. 7) is a 1440x error that fails open",
+                    file=src, line=sl)
+        else:
+            rep.add("N02p", PASS, "pnpm resolution quarantine",
+                    f"{age} minutes ({int(age)//1440}d) via {src}", file=src, line=sl)
+
+    if "npm" in ctx["node"]:
+        if npm_age and npm_age.isdigit() and int(npm_age) >= 1:
+            rep.add("N02", PASS, "npm resolution quarantine",
+                    f"min-release-age={npm_age} day(s)", file=".npmrc", line=nl)
+        elif npm_age is not None:
+            rep.add("N02", FAIL, "npm quarantine disabled or malformed",
+                    f"min-release-age={npm_age} (unit is DAYS; a suffixed value does not parse)",
+                    file=".npmrc", line=nl)
+        else:
+            rep.add("N02", FAIL, "No npm resolution quarantine", "min-release-age unset",
+                    file=".npmrc" if npmrc.exists() else "",
+                    fix="Add `min-release-age=7` to .npmrc (unit is DAYS, unlike pnpm)")
+
+    # --- N04 / N05: registry pinning --------------------------------------
+    reg, rl = ini_get(npmrc, "registry")
+    if reg:
+        rep.add("N04", PASS, "Registry pinned", reg, file=".npmrc", line=rl)
+    else:
+        rep.add("N04", WARN, "Registry not pinned in-repo",
+                "Resolution follows whatever the ambient npm config says",
+                fix="Add `registry=https://registry.npmjs.org/` (or your mirror)")
+
+    scoped = []
+    for n, line in enumerate(read(npmrc).splitlines(), 1):
+        if re.match(r"\s*@[\w.-]+:registry\s*=", line) and not line.strip().startswith("#"):
+            scoped.append((line.strip(), n))
+    if scoped:
+        rep.add("N05", WARN, "Scoped registries configured",
+                "; ".join(s for s, _ in scoped) + " — each is an additional trusted source",
+                file=".npmrc", line=scoped[0][1])
+
+    # --- N06: lockfile committed ------------------------------------------
+    for lock in ("pnpm-lock.yaml", "package-lock.json", "yarn.lock", "bun.lock"):
+        if not (root / lock).exists():
+            continue
+        t = tracked(root, lock)
+        if t is True:
+            rep.add("N06", PASS, "Lockfile committed", lock, file=lock)
+        elif t is False:
+            rep.add("N06", FAIL, "Lockfile present but NOT committed",
+                    f"{lock} is untracked — every install resolves fresh and ungated",
+                    file=lock, fix=f"git add {lock}")
+        else:
+            rep.add("N06", UNKNOWN, "Cannot determine lockfile tracking", "not a git repo",
+                    file=lock)
+
+    # --- N11: exemptions carry a reason -----------------------------------
+    for key in ("min-release-age-exclude", "minimumReleaseAgeExclude"):
+        val, ln2 = ini_get(npmrc, key)
+        if val:
+            lines = read(npmrc).splitlines()
+            prev = lines[ln2 - 2].strip() if ln2 >= 2 else ""
+            if prev.startswith("#"):
+                rep.add("N11", PASS, "Quarantine exemption is justified",
+                        f"{key}={val}", file=".npmrc", line=ln2)
+            else:
+                rep.add("N11", WARN, "Quarantine exemption with no stated reason",
+                        f"{key}={val} — an unexplained exemption outlives the reason for it",
+                        file=".npmrc", line=ln2,
+                        fix="Add a comment line above it saying why")
+
+
+# --------------------------------------------------------------------------
+# Python posture
+# --------------------------------------------------------------------------
+
+def check_python(root: Path, rep: Report, ctx: dict) -> None:
+    reqs, py = ctx["reqs"], ctx["py"]
+    if not py and not reqs and not (root / "pyproject.toml").exists():
+        rep.add("P00", NA, "Python toolchain not present", "no Python manifest or lockfile")
+        return
+
+    pyproject = root / "pyproject.toml"
+    data: dict = {}
+    if pyproject.exists():
+        try:
+            data = tomllib.loads(read(pyproject))
+        except (tomllib.TOMLDecodeError, ValueError) as e:
+            rep.add("P00", UNKNOWN, "pyproject.toml could not be parsed", str(e),
+                    file="pyproject.toml")
+
+    # --- P03: a lockfile exists at all ------------------------------------
+    locks = [n for n in ("uv.lock", "poetry.lock", "pdm.lock", "Pipfile.lock")
+             if (root / n).exists()]
+    if locks:
+        rep.add("P03", PASS, "Python lockfile present", ", ".join(locks), file=locks[0])
+    elif reqs:
+        rep.add("P03", WARN, "requirements.txt without a lockfile",
+                "Bare pip is the weakest posture: no native age gate and no resolution record",
+                file=reqs[0].name)
+    else:
+        rep.add("P03", FAIL, "No Python lockfile", "Resolution is not reproducible")
+
+    # --- P02: hash pinning ------------------------------------------------
+    for r in reqs:
+        text = read(r)
+        entries = [l for l in text.splitlines()
+                   if l.strip() and not l.strip().startswith(("#", "-"))]
+        if not entries:
+            continue
+        if "--hash=" in text:
+            missing = [l for l in entries if "--hash=" not in l and not l.rstrip().endswith("\\")]
+            if missing:
+                rep.add("P02", WARN, "Partial hash pinning", f"{len(missing)} entry(ies) unhashed",
+                        file=r.name)
+            else:
+                rep.add("P02", PASS, "Requirements are hash-pinned", r.name, file=r.name)
+        else:
+            rep.add("P02", WARN, "No hash pinning", f"{r.name} has no --hash entries",
+                    file=r.name, fix="pip-compile --generate-hashes, then --require-hashes")
+
+    # --- P04: uv resolution quarantine ------------------------------------
+    excl = (data.get("tool", {}).get("uv", {}) or {}).get("exclude-newer")
+    if "uv" in py:
+        if excl:
+            rep.add("P04", PASS, "uv resolution pinned by date", f"exclude-newer={excl}",
+                    file="pyproject.toml",
+                    line=find_line(read(pyproject), r"exclude-newer"))
+        else:
+            rep.add("P04", WARN, "No uv resolution quarantine",
+                    "uv has no relative age window; exclude-newer takes a timestamp and must be "
+                    "maintained. Outside a gated network this is the only uv-side control",
+                    file="pyproject.toml")
+    elif reqs:
+        rep.add("P04", NA, "pip has no native age gate",
+                "Must be enforced by the network boundary or a proxy")
+
+    # --- P05 / P06: index configuration -----------------------------------
+    # P06 is the sharp one: extra-index-url is a dependency-confusion vector,
+    # because pip may prefer whichever index offers the higher version.
+    found_index = found_extra = False
+    for cfg in (root / "pip.conf", root / "pip.ini", root / ".pip" / "pip.conf"):
+        if not cfg.exists():
+            continue
+        iu, il = ini_get(cfg, "index-url")
+        eu, el = ini_get(cfg, "extra-index-url")
+        if iu:
+            found_index = True
+            rep.add("P05", PASS, "pip index pinned", iu, file=cfg.name, line=il)
+        if eu:
+            found_extra = True
+            rep.add("P06", FAIL, "extra-index-url is set",
+                    f"{eu} — dependency-confusion vector: pip may prefer whichever index "
+                    "offers the higher version",
+                    file=cfg.name, line=el, fix="Remove it; use a single index or a mirror")
+    if (py or reqs) and not found_index:
+        rep.add("P05", WARN, "pip index not pinned in-repo", "Follows ambient pip config")
+    if (py or reqs) and not found_extra:
+        rep.add("P06", PASS, "No extra-index-url", "No dependency-confusion vector configured")
+
+    # --- P08: sdists resolve to arbitrary code at build time --------------
+    ulock = root / "uv.lock"
+    if ulock.exists():
+        try:
+            u = tomllib.loads(read(ulock))
+            sdists = [p.get("name", "?") for p in u.get("package", []) if "sdist" in p]
+            if sdists:
+                rep.add("P08", WARN, "Dependencies resolving to sdists",
+                        f"{len(sdists)} package(s) build from source, running setup.py at "
+                        f"install time: {', '.join(sorted(sdists)[:8])}"
+                        + (" …" if len(sdists) > 8 else ""),
+                        file="uv.lock",
+                        fix="Prefer wheels; --only-binary :all: where the tree allows it")
+            else:
+                rep.add("P08", PASS, "All dependencies resolve to wheels", "uv.lock",
+                        file="uv.lock")
+        except (tomllib.TOMLDecodeError, ValueError):
+            rep.add("P08", UNKNOWN, "uv.lock could not be parsed", file="uv.lock")
+
+
+# --------------------------------------------------------------------------
+# Cross-cutting
+# --------------------------------------------------------------------------
+
+def check_cross(root: Path, rep: Report, ctx: dict) -> None:
+    # --- X01: manifests under review --------------------------------------
+    co = next((p for p in (root / "CODEOWNERS", root / ".github" / "CODEOWNERS")
+               if p.exists()), None)
+    if co:
+        text = read(co)
+        covered = [m for m in MANIFESTS + (".npmrc", "pnpm-workspace.yaml") if m in text]
+        if covered:
+            rep.add("X01", PASS, "Manifests under CODEOWNERS", ", ".join(covered),
+                    file=str(co.relative_to(root)))
+        else:
+            rep.add("X01", WARN, "CODEOWNERS exists but does not cover manifests",
+                    "A dependency change can merge without a named reviewer",
+                    file=str(co.relative_to(root)))
+    else:
+        rep.add("X01", WARN, "No CODEOWNERS", "No path-based review gate on dependency changes")
+
+    # --- X04: instruction files are executable surfaces -------------------
+    # The check most implementations skip, and the one this estate is most
+    # exposed to: an install command in AGENTS.md is executed by the next agent.
+    hits: list[tuple[str, int, str, str]] = []
+    for name in DOC_TARGETS:
+        for p in list(root.glob(name)) + list(root.glob(f"docs/**/{name}")):
+            text = read(p)
+            in_fence = False
+            for n, line in enumerate(text.splitlines(), 1):
+                if line.lstrip().startswith("```"):
+                    in_fence = not in_fence
+                m = INSTALL_CMD.search(line)
+                if m:
+                    hits.append((str(p.relative_to(root)), n, m.group(1).strip(), m.group(2)))
+    if hits:
+        rep.add("X04", WARN, "Install commands in instruction files",
+                f"{len(hits)} occurrence(s) — these are run by the next agent and pasted by "
+                "the next human; each named package needs the same verification as a manifest "
+                "entry: " + "; ".join(f"{f}:{n} `{c} {pkg}`" for f, n, c, pkg in hits[:6])
+                + (" …" if len(hits) > 6 else ""),
+                file=hits[0][0], line=hits[0][1])
+    else:
+        rep.add("X04", PASS, "No install commands in instruction files",
+                f"checked {', '.join(DOC_TARGETS)}")
+
+    # --- X05: docs name packages the manifests do not have ----------------
+    declared: set[str] = set()
+    pkg = root / "package.json"
+    if pkg.exists():
+        try:
+            j = json.loads(read(pkg)) or {}
+            for k in ("dependencies", "devDependencies", "optionalDependencies"):
+                declared |= set((j.get(k) or {}).keys())
+        except json.JSONDecodeError:
+            pass
+    pyproject = root / "pyproject.toml"
+    if pyproject.exists():
+        try:
+            d = tomllib.loads(read(pyproject))
+            for dep in (d.get("project", {}) or {}).get("dependencies", []) or []:
+                declared.add(re.split(r"[<>=!~\[ ]", dep)[0])
+        except (tomllib.TOMLDecodeError, ValueError):
+            pass
+    phantom = sorted({pkg_ for _, _, _, pkg_ in hits
+                      if pkg_ not in declared and not pkg_.startswith(("-", "."))})
+    if phantom:
+        rep.add("X05", WARN, "Packages named in docs but absent from manifests",
+                "Phantom instruction — a future agent installs a name nothing has vetted: "
+                + ", ".join(phantom[:8]) + (" …" if len(phantom) > 8 else ""),
+                file=hits[0][0] if hits else "")
+    elif hits:
+        rep.add("X05", PASS, "Every package named in docs is a declared dependency")
+
+    # --- X07: how dependencies actually got added -------------------------
+    # Dependency additions bundled into large feature commits are the pattern
+    # that hides an agent-added package.
+    if not (root / ".git").exists():
+        rep.add("X07", UNKNOWN, "Dependency-add provenance unavailable", "not a git repo")
+        return
+    manifest_paths = [m for m in MANIFESTS if (root / m).exists()]
+    if not manifest_paths:
+        rep.add("X07", NA, "No manifests to trace")
+        return
+    log = git(root, "log", "--format=%h|%an|%s", "-n", "40", "--", *manifest_paths)
+    entries = [l for l in log.splitlines() if l.strip()]
+    if not entries:
+        rep.add("X07", UNKNOWN, "No manifest history found", file=manifest_paths[0])
+        return
+    lock_names = [n for n in ("pnpm-lock.yaml", "package-lock.json", "uv.lock", "poetry.lock")
+                  if (root / n).exists()]
+    risky = []
+    for e in entries[:20]:
+        sha = e.split("|", 1)[0]
+        files = git(root, "show", "--name-only", "--format=", sha).split()
+        touched_manifest = any(f.endswith(tuple(manifest_paths)) for f in files)
+        touched_lock = any(f.endswith(tuple(lock_names)) for f in files) if lock_names else True
+        if touched_manifest and not touched_lock and len(files) > 3:
+            risky.append(f"{sha} ({len(files)} files, no lockfile change)")
+    if risky:
+        rep.add("X07", WARN, "Manifest changed without a matching lockfile change",
+                "A manifest edit with no lockfile diff means the next install resolves fresh "
+                "and ungated: " + ", ".join(risky[:5]),
+                file=manifest_paths[0])
+    else:
+        rep.add("X07", PASS, "Manifest changes travel with lockfile changes",
+                f"last {min(20, len(entries))} manifest commits")
+
+
+# --------------------------------------------------------------------------
+# reporting
+# --------------------------------------------------------------------------
+
+ORDER = {FAIL: 0, WARN: 1, UNKNOWN: 2, NA: 3, PASS: 4}
+MARK = {PASS: "PASS", FAIL: "FAIL", WARN: "WARN", NA: " N/A", UNKNOWN: "UNKN"}
+
+
+def render_md(rep: Report) -> str:
+    c = rep.counts()
+    out = [f"# depaudit posture — {rep.root}", ""]
+    out.append("| " + " | ".join(f"{k} {c.get(k,0)}" for k in (FAIL, WARN, UNKNOWN, NA, PASS)) + " |")
+    out.append("|" + "---|" * 5)
+    out.append("")
+    out.append(f"**Ecosystems:** {', '.join(rep.ecosystems) or 'none detected'}  ")
+    out.append(f"**Package managers:** {', '.join(rep.package_managers) or 'none detected'}")
+    out.append("")
+    ranked = sorted(rep.findings, key=lambda f: (ORDER[f.status], f.id))
+    actionable = [f for f in ranked if f.status in (FAIL, WARN)]
+    if actionable:
+        out += ["## Needs attention", ""]
+        for f in actionable:
+            loc = f" — `{f.loc()}`" if f.loc() else ""
+            out.append(f"- **[{f.status}] {f.id} {f.title}**{loc}  ")
+            if f.detail:
+                out.append(f"  {f.detail}  ")
+            if f.fix:
+                out.append(f"  *Fix:* {f.fix}")
+        out.append("")
+    quiet = [f for f in ranked if f.status not in (FAIL, WARN)]
+    if quiet:
+        # A report that reads as all failures is one people stop opening, so
+        # everything that passed collapses to one line each (plan 01 §8).
+        out += ["## Passing / not applicable", ""]
+        for f in quiet:
+            out.append(f"- `[{MARK[f.status]}]` {f.id} {f.title}"
+                       + (f" — {f.detail}" if f.detail else ""))
+        out.append("")
+    return "\n".join(out)
+
+
+def render_json(rep: Report) -> str:
+    return json.dumps({
+        "schema": "depaudit/posture/1",
+        "root": rep.root,
+        "ecosystems": rep.ecosystems,
+        "package_managers": rep.package_managers,
+        "counts": rep.counts(),
+        "findings": [
+            {"id": f.id, "status": f.status, "title": f.title, "detail": f.detail,
+             "file": f.file, "line": f.line, "fix": f.fix}
+            for f in sorted(rep.findings, key=lambda f: (ORDER[f.status], f.id))
+        ],
+    }, indent=2)
+
+
+def posture(root: Path) -> Report:
+    rep = Report(root=str(root))
+    ctx = discover(root, rep)
+    check_node(root, rep, ctx)
+    check_python(root, rep, ctx)
+    check_cross(root, rep, ctx)
+    return rep
+
+
+def main(argv: list[str]) -> int:
+    ap = argparse.ArgumentParser(
+        prog="depaudit",
+        description="Dependency posture scanner — read-only, offline, stdlib-only.")
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    p = sub.add_parser("posture", help="local configuration checks (no network)")
+    p.add_argument("path", nargs="?", default=".")
+    p.add_argument("--format", choices=("md", "json"), default="md")
+    p.add_argument("--fail-on", choices=("fail", "warn", "never"), default="fail",
+                   help="exit non-zero at this severity (default: fail)")
+    args = ap.parse_args(argv)
+
+    root = Path(args.path).resolve()
+    if not root.is_dir():
+        print(f"depaudit: not a directory: {root}", file=sys.stderr)
+        return 2
+
+    rep = posture(root)
+    print(render_json(rep) if args.format == "json" else render_md(rep))
+
+    c = rep.counts()
+    if args.fail_on == "never":
+        return 0
+    if c.get(FAIL):
+        return 1
+    if args.fail_on == "warn" and c.get(WARN):
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
