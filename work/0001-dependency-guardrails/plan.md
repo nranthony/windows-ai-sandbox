@@ -940,12 +940,6 @@ not a degraded one (upstream ADR-0003).
 | ~~T11~~ | ~~uv `exclude-newer` documented~~ — **DONE 07-31** | 2 | — | — |
 | ~~T12~~ | ~~Tier-1 Gate-2 tripwires~~ — **DONE 07-31**, verify 31→**35 passed** | 2 | — | — |
 | ~~T24~~ | ~~Allowlist drift tripwire~~ — **DONE 07-31**, host-side in `profile.sh` | 2 | — | — |
-| T07 | `/usr/etc/npmrc` in Dockerfile | 2 | 1h | T00 |
-| T08 | **Validate autoupdater interaction** | 2 | 30m | T07 |
-| T09 | Allowlist lifecycle + fix stale header | 2 | 2h | — |
-| T10 | pnpm `minimumReleaseAge` in state init | 2 | 1h | T00 |
-| T11 | Document uv `exclude-newer` pattern | 2 | 30m | — |
-| T12 | Tier-1 Gate-2 tripwires | 2 | 2h | T07, T10 |
 | T13 | `depaudit posture` | 2 | 1.5d | — |
 | T14 | `profile.sh deps` + justfile | 2 | 1h | T13 |
 | T15 | Fixtures + corpora | 2 | 0.5d | T13 |
