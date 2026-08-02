@@ -49,6 +49,15 @@
 #                   profile whose agent / egress-proxy / configured DB siblings
 #                   aren't all up together (or all down). Read-only; exit 1 if
 #                   any profile is DEGRADED.
+#   deps            dependency-supply-chain posture for this profile's workspace
+#                   (scripts/depaudit.py). Runs HOST-SIDE and read-only: it
+#                   parses lockfiles, never installs or resolves. Scans the
+#                   workspace root AND each child repo that has a manifest,
+#                   since a workspace holds many repos.
+#                   Flags: --osv (also cross-check every lockfile-pinned package
+#                   against OSV for malicious-package records; needs host
+#                   network, adds no profile egress) | --json | --strict (exit 1
+#                   on FAIL as well as WARN) | --quiet (never exit non-zero)
 #   exec <cmd...>   run arbitrary command inside the container
 #   api [SUB]       manage the pipeline FastAPI (uvicorn :8001) inside the agent
 #                   (detached + idempotent; targets /workspace/pipeline).
@@ -874,6 +883,92 @@ case "$CMD" in
     # NOT `exec` — the host-side result above still has to affect the exit code.
     docker exec -i "$AGENT" bash -s -- "$@" < "$src" || verify_rc=1
     exit "$verify_rc"
+    ;;
+
+  deps)
+    # Dependency posture for the profile's workspace. Runs HOST-SIDE: depaudit is
+    # read-only and spawns nothing, and the OSV cross-check needs api.osv.dev,
+    # which is deliberately NOT in the egress allowlist — keeping it on the host
+    # means the check costs no egress surface inside any profile (plan D1/D6).
+    # Routed through profile.sh anyway, per golden rule 1: discovery of what a
+    # profile can do lives here, not in a script the user has to know about.
+    da="$SCRIPT_DIR/scripts/depaudit.py"
+    [[ -f "$da" ]] || fail "depaudit.py missing: $da"
+    command -v python3 >/dev/null 2>&1 || fail "python3 not found on the host (depaudit needs 3.11+)"
+    python3 -c 'import sys,tomllib' 2>/dev/null \
+      || fail "python3 is too old for depaudit (needs 3.11+ for tomllib): $(python3 -V 2>&1)"
+
+    ws="$REPO_ROOT/$PROFILE"
+    [[ -d "$ws" ]] || fail "Workspace does not exist: $ws"
+
+    dep_osv=0; dep_fmt="md"; dep_failon="warn"
+    for a in "$@"; do
+      case "$a" in
+        --osv)     dep_osv=1 ;;
+        --json)    dep_fmt="json" ;;
+        --strict)  dep_failon="fail" ;;
+        --quiet)   dep_failon="never" ;;
+        *) fail "Unknown flag for deps: $a
+      Usage: scripts/profile.sh $PROFILE deps [--osv] [--json] [--strict|--quiet]" ;;
+      esac
+    done
+
+    # A profile's workspace holds MANY repos (docker-compose.yml: "the profile's
+    # repo parent folder = /workspace"). depaudit is root-scoped by design, so
+    # iterate: the workspace root, plus each immediate child that has a manifest.
+    # Without this the common case reports "no manifests" and reads as clean.
+    dep_roots=""
+    for m in package.json pyproject.toml requirements.txt Pipfile; do
+      [[ -e "$ws/$m" ]] && { dep_roots="$ws"; break; }
+    done
+    for d in "$ws"/*/; do
+      [[ -d "$d" ]] || continue
+      for m in package.json pyproject.toml requirements.txt Pipfile; do
+        [[ -e "$d$m" ]] && { dep_roots="$dep_roots ${d%/}"; break; }
+      done
+    done
+    [[ -n "${dep_roots// /}" ]] || { warn "No manifests found under $ws"; exit 0; }
+
+    dep_rc=0
+    dep_summary=""
+    for r in $dep_roots; do
+      rel="${r#$REPO_ROOT/}"
+      [[ "$dep_fmt" == "md" ]] && info "depaudit posture: $rel"
+      dep_out=$(python3 "$da" posture "$r" --format "$dep_fmt" --fail-on "$dep_failon") || dep_rc=1
+      printf '%s\n' "$dep_out"
+      if [[ "$dep_fmt" == "md" ]]; then
+        counts=$(printf '%s\n' "$dep_out" | grep -m1 '^| FAIL ' | tr -d '|' | tr -s ' ')
+        dep_summary="${dep_summary}${rel}|${counts}
+"
+      fi
+      if [[ "$dep_osv" -eq 1 ]]; then
+        [[ "$dep_fmt" == "md" ]] && info "depaudit OSV malicious-package check: $rel"
+        osv_out=$(python3 "$da" deps "$r" --format "$dep_fmt") || dep_rc=1
+        printf '%s\n' "$osv_out"
+        if [[ "$dep_fmt" == "md" ]]; then
+          blocked=$(printf '%s\n' "$osv_out" | grep -c '^\- \*\*\[BLOCK\]' || true)
+          [[ "${blocked:-0}" -gt 0 ]] && dep_summary="${dep_summary}${rel}|  OSV BLOCK ${blocked}
+"
+        fi
+      fi
+    done
+
+    # A nine-repo workspace produces nine reports; without a roll-up the reader
+    # has to scroll and diff them by eye, which is how a FAIL gets missed.
+    if [[ "$dep_fmt" == "md" && -n "$dep_summary" ]]; then
+      printf '\n%s\n' "=========================================================="
+      printf '%s\n' "SUMMARY — $PROFILE workspace ($REPO_ROOT/$PROFILE)"
+      printf '%s\n' "=========================================================="
+      printf '%s' "$dep_summary" | while IFS='|' read -r name counts; do
+        [[ -z "$name" ]] && continue
+        printf '  %-32s %s\n' "$name" "$counts"
+      done
+      printf '%s\n' "----------------------------------------------------------"
+      printf '%s\n' "  depaudit is READ-ONLY and reports on configuration; it does"
+      printf '%s\n' "  not enforce anything. FAIL = a control that is absent, not"
+      printf '%s\n' "  a vulnerability. Fixes belong in the repo it names."
+    fi
+    exit "$dep_rc"
     ;;
 
   audit)

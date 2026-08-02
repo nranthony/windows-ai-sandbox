@@ -78,6 +78,7 @@ Guides in [`host_setup/`](../host_setup/):
 
 - [`scripts/profile.sh`](../scripts/profile.sh) — profile lifecycle (up, down, attach, auth, verify, audit, rebuild, clean)
 - [`scripts/with-egress.sh`](../scripts/with-egress.sh) — temporarily widen Squid allowlist for installs
+- [`scripts/depaudit.py`](../scripts/depaudit.py) — dependency-supply-chain posture scanner (stdlib-only, read-only; `posture` is offline, `pkg`/`deps` cross-check OSV for malicious-package records). Surfaced as `scripts/profile.sh <p> deps`
 - [`scripts/run-ephemeral.sh`](../scripts/run-ephemeral.sh) — disposable one-shot containers
 - [`scripts/init-profile-state.sh`](../scripts/init-profile-state.sh) — idempotent state bootstrap per profile
 - [`scripts/sync-agent-notice.sh`](../scripts/sync-agent-notice.sh) — inject/refresh the managed sandbox-notice block into repo `AGENTS.md` / global `CLAUDE.md` (source: `sandbox_templates/common/agent-notice.md`)

@@ -941,7 +941,7 @@ not a degraded one (upstream ADR-0003).
 | ~~T12~~ | ~~Tier-1 Gate-2 tripwires~~ — **DONE 07-31**, verify 31→**35 passed** | 2 | — | — |
 | ~~T24~~ | ~~Allowlist drift tripwire~~ — **DONE 07-31**, host-side in `profile.sh` | 2 | — | — |
 | ~~T13~~ | ~~`depaudit posture`~~ — **DONE 08-02**, `scripts/depaudit.py` | 2 | — | — |
-| T14 | `profile.sh deps` + justfile | 2 | 1h | T13 |
+| ~~T14~~ | ~~`profile.sh deps` + justfile~~ — **DONE 08-02** | 2 | — | — |
 | T15 | Fixtures + corpora | 2 | 0.5d | T13 |
 | ~~T16~~ | ~~`depaudit pkg` + OSV `MAL-`~~ — **DONE 08-02**, + `deps` lockfile mode | 2 | — | — |
 | ~~T17~~ | ~~Fix `reload_proxy`~~ — **DROPPED**, G1 refuted | 3 | — | — |
@@ -1148,3 +1148,34 @@ the strongest evidence the enumeration is right.
 platform variant regardless of `supportedArchitectures`, so one `depaudit deps`
 run on any machine covers what every other machine would install. There is no
 per-device scanning to do.
+
+
+---
+
+## 18. T14 result (2026-08-02)
+
+`scripts/profile.sh <profile> deps [--osv] [--json] [--strict|--quiet]`, plus a
+`just deps <profile>` alias. Routed through `profile.sh` per golden rule 1 even
+though `depaudit` is a standalone read-only script — discovery of what a profile
+can do belongs there, not in a script the user has to already know about.
+
+**It iterates the workspace, and that turned out to be the whole point.** A
+profile's workspace holds MANY repos (`docker-compose.yml`: "the profile's repo
+parent folder = /workspace"), and `depaudit` is root-scoped. `therapod` has
+**nine** projects under it. Scanning only the root would have reported "no
+manifests" and read as clean. `deps` scans the root plus each child carrying a
+manifest, then prints a roll-up — nine reports with no summary is how a FAIL gets
+scrolled past.
+
+**Real finding on first run: `app_zero` FAILs `N01`** — it has no `allowBuilds` /
+`onlyBuiltDependencies` allowlist, so **every** package there may run install
+scripts. `app_blast` and `engine` both have one. This is the control the sibling
+audit's §6 calls "doing more for you than every CVE bump in §5 combined", and one
+of the three repos is missing it. Not fixed here: choosing the allowlist requires
+knowing which packages legitimately build, and getting it wrong breaks installs.
+
+`--osv` across the whole workspace covered **1,974 lockfile-pinned packages** in
+nine projects, all `NO-KNOWN-MAL`. Host-side, so no profile egress is involved.
+
+Phase 2 is complete apart from T15 (fixtures), which would let the corpus test
+run without network as a regression test rather than a live check.

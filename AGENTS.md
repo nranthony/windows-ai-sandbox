@@ -130,6 +130,7 @@ scripts/profile.sh <profile> up|down|attach|verify|audit
 scripts/profile.sh list
 scripts/profile.sh build --refresh-ai        # bump AI CLIs (tail layer only)
 scripts/with-egress.sh <p> --with pypi -- '<cmd>'   # temporary egress widening
+scripts/profile.sh <p> deps [--osv]           # dependency posture (host-side, read-only)
 scripts/docker-gc.sh --dry-run               # host Docker hygiene (see above)
 ```
 
