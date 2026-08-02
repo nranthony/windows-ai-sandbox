@@ -943,7 +943,7 @@ not a degraded one (upstream ADR-0003).
 | ~~T13~~ | ~~`depaudit posture`~~ — **DONE 08-02**, `scripts/depaudit.py` | 2 | — | — |
 | T14 | `profile.sh deps` + justfile | 2 | 1h | T13 |
 | T15 | Fixtures + corpora | 2 | 0.5d | T13 |
-| T16 | `depaudit pkg` + OSV `MAL-` | 2 | 0.5d | T13, T07, T10 |
+| ~~T16~~ | ~~`depaudit pkg` + OSV `MAL-`~~ — **DONE 08-02**, + `deps` lockfile mode | 2 | — | — |
 | ~~T17~~ | ~~Fix `reload_proxy`~~ — **DROPPED**, G1 refuted | 3 | — | — |
 | T18 | Window pre-flight | 3 | 0.5d | T16 |
 | T19 | Bracket + snapshot | 3 | 3h | — |
@@ -1106,3 +1106,45 @@ ignore the output.
 
 **Scope honestly stated:** root-scoped, one directory per run. Monorepo recursion
 is not implemented; D03 exists so that limitation is visible rather than silent.
+
+
+---
+
+## 17. T16 result (2026-08-02)
+
+`depaudit pkg <eco> <name> [version]` and `depaudit deps <path>`, sharing one OSV
+client — the same code path phase 3's install-window pre-flight will call, per
+plan 01 §9. Host-side: `api.osv.dev` is deliberately NOT in the allowlist, so the
+cross-check adds no egress surface to any profile.
+
+**`MAL-` only.** `GHSA-`/`PYSEC-`/`CVE-` are a different question (this version
+has a vulnerability) from the one this gate asks (this package is malicious).
+Mixing them turns a supply-chain gate into a CVE treadmill nobody reads.
+
+**Corpus, verified live:** `unused-imports` → **BLOCK** (`MAL-2025-48781`, exit 1).
+Known-good `express@4.18.0`, `requests@2.31.0`, `lodash`, and the three wrongly
+flagged in the reported May 2026 withdrawal — `fastapi`, `rdflib`,
+`strawberry-graphql` — all `NO-KNOWN-MAL`. `--offline` yields `UNKNOWN`, never a
+pass. Cache keyed `(purl, UTC date)`: 748 packages take 3.7s cold, 0.08s warm.
+
+**Correction to D6:** the plan recorded `withdrawn: null` on a live `MAL-` record.
+The field is **absent**, not null. `.get()` returns `None` either way so the logic
+is unchanged, but the claim was wrong.
+
+**A bug the validation caught, and the reason to keep validating.** The first
+lockfile parser split `name@version` on the LAST `@`. pnpm v9 keys carry a
+peer-dependency suffix — `@anthropic-ai/sdk@0.104.1(zod@4.4.3)` — whose own `@`
+won that split, producing the garbage name `@anthropic-ai/sdk@0.104.1(zod`.
+**121 of 869 entries were affected, and a name OSV cannot match returns no
+records, so every one of them reported clean.** A false all-clear, silently, on
+14% of the tree. Fixed by stripping the parenthesised suffix before splitting.
+
+Post-fix the parser independently reproduces the sibling audit's own figures for
+`app_blast` — **748 versioned entries, 695 distinct packages**, matching its §1
+table exactly. That agreement, derived from a different tool on a different OS, is
+the strongest evidence the enumeration is right.
+
+**Cross-platform question this settles:** the lockfile records every optional
+platform variant regardless of `supportedArchitectures`, so one `depaudit deps`
+run on any machine covers what every other machine would install. There is no
+per-device scanning to do.

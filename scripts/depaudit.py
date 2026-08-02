@@ -12,8 +12,13 @@ Design constraints (work/0001-dependency-guardrails/plan.md D1, D2 and plan 01 �
   * **Read-only.** Never writes to the target, never installs, never runs a
     package manager. Lockfiles are PARSED, not executed: building an environment
     to enumerate one is the dangerous act this is meant to avoid.
-  * **Offline.** Every check here is local. Registry enrichment is a separate
-    phase (T16) and is deliberately not in this file.
+  * **`posture` is offline. `pkg` and `deps` are not.** The posture command makes
+    no network call at all and must stay that way — it runs from tier-1 `verify`,
+    which has to work with egress down. The `pkg`/`deps` commands query OSV and
+    say so; `--offline` degrades them to UNKNOWN rather than silently passing.
+    They are host-side by design: `api.osv.dev` is deliberately NOT in
+    `proxy/allowed_domains.txt`, so this costs no egress surface inside any
+    profile. If it ever moves in-container, that stops being true.
   * **Evidence with every verdict.** A finding carries the file and line that
     produced it, so it is actionable without re-investigation.
 
@@ -685,6 +690,221 @@ def render_json(rep: Report) -> str:
     }, indent=2)
 
 
+# --------------------------------------------------------------------------
+# OSV malicious-package cross-check (T16)
+#
+# Why only `MAL-`: plan 01 §6 lists OSV as an enrichment source, while §7 lists
+# CVE output as an explicit NON-signal that generates noise and false confidence.
+# Both are right, and the ID prefix is what reconciles them. `MAL-` records are
+# "this package is malicious"; `GHSA-`/`PYSEC-`/`CVE-` are "this version has a
+# vulnerability" — a different question, belonging in a different report. Mixing
+# them is how a supply-chain gate becomes a CVE treadmill nobody reads.
+#
+# Reactive by construction: a miss means "nothing known yet", never "safe". The
+# resolution quarantine (min-release-age) is what covers the window where every
+# intel feed structurally fails — the hours between publication and detection.
+# This is the complement, not the primary control.
+# --------------------------------------------------------------------------
+
+OSV_BATCH = "https://api.osv.dev/v1/querybatch"
+OSV_VULN = "https://api.osv.dev/v1/vulns/"
+OSV_ECOSYSTEM = {"npm": "npm", "node": "npm", "pypi": "PyPI", "python": "PyPI",
+                 "pip": "PyPI", "cargo": "crates.io", "crates.io": "crates.io", "go": "Go"}
+
+BLOCK, INFO, CLEAN = "BLOCK", "INFO", "NO-KNOWN-MAL"
+
+
+def purl(eco: str, name: str, version: str | None) -> str:
+    e = OSV_ECOSYSTEM.get(eco.lower(), eco)
+    return f"pkg:{e}/{name}" + (f"@{version}" if version else "")
+
+
+class Cache:
+    """Content-addressed metadata cache, keyed (purl, UTC date), 24h by design.
+
+    Caches the METADATA, never an artifact. A repeat scan of the same workspace
+    must not re-query a shared public API (plan 01 §6).
+    """
+
+    def __init__(self, path: Path | None):
+        self.path = path
+        self.data: dict = {}
+        if path and path.exists():
+            try:
+                self.data = json.loads(path.read_text())
+            except (OSError, json.JSONDecodeError):
+                self.data = {}
+
+    @staticmethod
+    def _today() -> str:
+        import datetime
+        return datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%d")
+
+    def get(self, key: str):
+        return self.data.get(f"{key}|{self._today()}")
+
+    def put(self, key: str, value) -> None:
+        self.data[f"{key}|{self._today()}"] = value
+
+    def flush(self) -> None:
+        if not self.path:
+            return
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            today = self._today()
+            fresh = {k: v for k, v in self.data.items() if k.endswith(f"|{today}")}
+            self.path.write_text(json.dumps(fresh))
+        except OSError:
+            pass
+
+
+def osv_query(pkgs: list[tuple[str, str, str | None]], timeout: int = 20) -> dict:
+    """Batch-query OSV. Returns {purl: [ids]}; raises OSError on network failure.
+
+    Two-step by necessity: querybatch returns only {id, modified} per vuln, so a
+    `MAL-` hit must be hydrated via /v1/vulns/{id} to see `withdrawn`. Hits are
+    rare, so the second hop costs nothing in practice.
+    """
+    import urllib.request
+
+    out: dict[str, list[str]] = {}
+    for i in range(0, len(pkgs), 100):
+        chunk = pkgs[i:i + 100]
+        queries = []
+        for eco, name, ver in chunk:
+            q: dict = {"package": {"name": name,
+                                   "ecosystem": OSV_ECOSYSTEM.get(eco.lower(), eco)}}
+            if ver:
+                q["version"] = ver
+            queries.append(q)
+        req = urllib.request.Request(
+            OSV_BATCH, data=json.dumps({"queries": queries}).encode(),
+            headers={"Content-Type": "application/json",
+                     "User-Agent": "depaudit (windows-ai-sandbox)"})
+        with urllib.request.urlopen(req, timeout=timeout) as f:
+            res = json.load(f)
+        for (eco, name, ver), r in zip(chunk, res.get("results", [])):
+            out[purl(eco, name, ver)] = [v["id"] for v in (r.get("vulns") or [])]
+    return out
+
+
+def osv_hydrate(vuln_id: str, timeout: int = 20) -> dict:
+    import urllib.request
+    req = urllib.request.Request(
+        OSV_VULN + vuln_id,
+        headers={"User-Agent": "depaudit (windows-ai-sandbox)"})
+    with urllib.request.urlopen(req, timeout=timeout) as f:
+        return json.load(f)
+
+
+def assess(ids: list[str], cache: Cache) -> tuple[str, str]:
+    """Verdict + human detail from a list of OSV ids.
+
+    Deliberately narrower than "a MAL- id means block". A wrongly-published
+    malicious-package record wired to a hard failure breaks the build for a
+    legitimate dependency — the reported May 2026 withdrawal of 157 records
+    (FastAPI, Strawberry GraphQL, rdflib) is the worked example. So a withdrawn
+    record is INFO: evidence the corpus self-corrected, not a reason to act.
+    """
+    mal = [i for i in ids if i.startswith("MAL-")]
+    if not mal:
+        others = len(ids)
+        return CLEAN, (f"no malicious-package record"
+                       + (f" ({others} non-MAL advisory/ies — a different question, "
+                          "see a CVE report)" if others else ""))
+    live, withdrawn = [], []
+    for mid in mal:
+        rec = cache.get(f"vuln:{mid}")
+        if rec is None:
+            try:
+                v = osv_hydrate(mid)
+                rec = {"withdrawn": v.get("withdrawn"), "summary": v.get("summary", "")}
+                cache.put(f"vuln:{mid}", rec)
+            except (OSError, ValueError, json.JSONDecodeError):
+                rec = {"withdrawn": None, "summary": ""}
+        # NOTE: `withdrawn` is ABSENT on a live record, not null — .get() gives
+        # None either way, so absence and null are treated identically here.
+        (withdrawn if rec.get("withdrawn") else live).append(
+            f"{mid}" + (f" — {rec['summary']}" if rec.get("summary") else ""))
+    if live:
+        return BLOCK, "; ".join(live)
+    return INFO, "withdrawn record(s), not acted on: " + "; ".join(withdrawn)
+
+
+# --------------------------------------------------------------------------
+# lockfile enumeration — parsed, never executed
+# --------------------------------------------------------------------------
+
+def enumerate_locked(root: Path) -> list[tuple[str, str, str | None]]:
+    """(ecosystem, name, version) for every package a lockfile pins.
+
+    The lockfile is platform-complete: it records EVERY optional platform
+    variant regardless of supportedArchitectures. That is what makes one scan,
+    run on any machine, cover all of them — there is no per-device scanning to do.
+    """
+    found: list[tuple[str, str, str | None]] = []
+
+    pnpm = root / "pnpm-lock.yaml"
+    if pnpm.exists():
+        in_pkgs = False
+        for line in read(pnpm).splitlines():
+            if re.match(r"^(packages|snapshots):\s*$", line):
+                in_pkgs = True
+                continue
+            if in_pkgs and line and not line.startswith((" ", "\t")):
+                in_pkgs = False
+            if in_pkgs:
+                m = re.match(r"^  '?([^']+?)'?:\s*$", line)
+                if m and "@" in m.group(1):
+                    spec = m.group(1)
+                    # Strip the peer-dependency suffix FIRST. pnpm v9 keys look
+                    # like `@scope/pkg@1.2.3(peer@4.5.6)`, and that suffix
+                    # contains its own '@' — splitting on the last '@' before
+                    # removing it yields the garbage name
+                    # `@scope/pkg@1.2.3(peer`, which OSV cannot match, so the
+                    # package silently reports as clean. 121 of 869 entries in a
+                    # real lockfile hit this.
+                    spec = spec.split("(", 1)[0]
+                    at = spec.rfind("@")
+                    if at > 0:
+                        found.append(("npm", spec[:at], spec[at + 1:]))
+
+    plock = root / "package-lock.json"
+    if plock.exists():
+        try:
+            for path_, meta in (json.loads(read(plock)).get("packages") or {}).items():
+                if not path_ or "node_modules/" not in path_:
+                    continue
+                found.append(("npm", path_.split("node_modules/")[-1], meta.get("version")))
+        except json.JSONDecodeError:
+            pass
+
+    for lock, eco in ((root / "uv.lock", "PyPI"), (root / "poetry.lock", "PyPI")):
+        if lock.exists():
+            try:
+                for p in tomllib.loads(read(lock)).get("package", []):
+                    if p.get("name"):
+                        found.append((eco, p["name"], p.get("version")))
+            except (tomllib.TOMLDecodeError, ValueError):
+                pass
+
+    for r in sorted(root.glob("requirements*.txt")):
+        for line in read(r).splitlines():
+            s = line.strip()
+            if not s or s.startswith(("#", "-")):
+                continue
+            m = re.match(r"([A-Za-z0-9._-]+)\s*==\s*([^\s;]+)", s)
+            if m:
+                found.append(("PyPI", m.group(1), m.group(2)))
+
+    seen, uniq = set(), []
+    for e, n, v in found:
+        if (e, n, v) not in seen:
+            seen.add((e, n, v))
+            uniq.append((e, n, v))
+    return uniq
+
+
 def posture(root: Path) -> Report:
     rep = Report(root=str(root))
     ctx = discover(root, rep)
@@ -699,29 +919,108 @@ def main(argv: list[str]) -> int:
         prog="depaudit",
         description="Dependency posture scanner — read-only, offline, stdlib-only.")
     sub = ap.add_subparsers(dest="cmd", required=True)
-    p = sub.add_parser("posture", help="local configuration checks (no network)")
+    p = sub.add_parser("posture", help="local configuration checks (NO network)")
     p.add_argument("path", nargs="?", default=".")
     p.add_argument("--format", choices=("md", "json"), default="md")
     p.add_argument("--fail-on", choices=("fail", "warn", "never"), default="fail",
                    help="exit non-zero at this severity (default: fail)")
+
+    default_cache = Path.home() / ".cache" / "depaudit" / "osv.json"
+    for name, helptext in (("pkg", "check one package against OSV (network)"),
+                           ("deps", "check every lockfile-pinned package (network)")):
+        q = sub.add_parser(name, help=helptext)
+        if name == "pkg":
+            q.add_argument("ecosystem", help="npm | pypi | cargo | go")
+            q.add_argument("name")
+            q.add_argument("version", nargs="?", default=None)
+        else:
+            q.add_argument("path", nargs="?", default=".")
+        q.add_argument("--format", choices=("md", "json"), default="md")
+        q.add_argument("--offline", action="store_true",
+                       help="make no network call; report UNKNOWN instead of guessing")
+        q.add_argument("--cache", default=str(default_cache))
+
     args = ap.parse_args(argv)
 
-    root = Path(args.path).resolve()
-    if not root.is_dir():
-        print(f"depaudit: not a directory: {root}", file=sys.stderr)
-        return 2
-
-    rep = posture(root)
-    print(render_json(rep) if args.format == "json" else render_md(rep))
-
-    c = rep.counts()
-    if args.fail_on == "never":
+    if args.cmd == "posture":
+        root = Path(args.path).resolve()
+        if not root.is_dir():
+            print(f"depaudit: not a directory: {root}", file=sys.stderr)
+            return 2
+        rep = posture(root)
+        print(render_json(rep) if args.format == "json" else render_md(rep))
+        c = rep.counts()
+        if args.fail_on == "never":
+            return 0
+        if c.get(FAIL):
+            return 1
+        if args.fail_on == "warn" and c.get(WARN):
+            return 1
         return 0
-    if c.get(FAIL):
-        return 1
-    if args.fail_on == "warn" and c.get(WARN):
-        return 1
-    return 0
+
+    # ---- pkg / deps: the SAME code path phase 3's install-window pre-flight
+    # calls. One implementation of "is this package trustworthy", two invocation
+    # contexts — otherwise the scanner and the gate drift and start disagreeing,
+    # which is worse than having only one of them (plan 01 §9).
+    cache = Cache(Path(args.cache) if args.cache else None)
+    if args.cmd == "pkg":
+        targets = [(args.ecosystem, args.name, args.version)]
+        label = purl(args.ecosystem, args.name, args.version)
+    else:
+        root = Path(args.path).resolve()
+        if not root.is_dir():
+            print(f"depaudit: not a directory: {root}", file=sys.stderr)
+            return 2
+        targets = enumerate_locked(root)
+        label = str(root)
+        if not targets:
+            print(f"depaudit: no lockfile-pinned packages found under {root}",
+                  file=sys.stderr)
+            return 0
+
+    results: list[tuple[str, str, str]] = []
+    if args.offline:
+        # An unreachable OSV must never read as PASS (plan 01 §1).
+        results = [(purl(e, n, v), UNKNOWN, "offline: not checked") for e, n, v in targets]
+    else:
+        uncached = [t for t in targets if cache.get(purl(*t)) is None]
+        try:
+            fresh = osv_query(uncached) if uncached else {}
+            for k, ids in fresh.items():
+                cache.put(k, ids)
+        except (OSError, ValueError, json.JSONDecodeError) as e:
+            for t in targets:
+                results.append((purl(*t), UNKNOWN, f"OSV unreachable: {e}"))
+        if not results:
+            for t in targets:
+                ids = cache.get(purl(*t)) or []
+                verdict, detail = assess(ids, cache)
+                results.append((purl(*t), verdict, detail))
+    cache.flush()
+
+    blocked = [r for r in results if r[1] == BLOCK]
+    unknown = [r for r in results if r[1] == UNKNOWN]
+    info = [r for r in results if r[1] == INFO]
+
+    if args.format == "json":
+        print(json.dumps({"schema": "depaudit/pkg/1", "target": label,
+                          "checked": len(results),
+                          "results": [{"purl": p_, "verdict": v, "detail": d}
+                                      for p_, v, d in results]}, indent=2))
+    else:
+        print(f"# depaudit — OSV malicious-package check\n\n**Target:** {label}  ")
+        print(f"**Checked:** {len(results)} package(s)  ")
+        print(f"**BLOCK {len(blocked)} · INFO {len(info)} · UNKNOWN {len(unknown)} · "
+              f"{CLEAN} {len(results)-len(blocked)-len(info)-len(unknown)}**\n")
+        for p_, v, d in results:
+            if v != CLEAN or len(results) == 1:
+                print(f"- **[{v}]** `{p_}`  \n  {d}")
+        if not blocked and not unknown and not info and len(results) > 1:
+            print(f"No malicious-package records. Note this is REACTIVE: "
+                  f"{CLEAN} means nothing is known yet, not that these are safe. "
+                  f"The resolution quarantine is what covers the undetected window.")
+
+    return 1 if blocked else 0
 
 
 if __name__ == "__main__":
