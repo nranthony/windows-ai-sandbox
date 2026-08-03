@@ -549,17 +549,30 @@ def check_python(root: Path, rep: Report, ctx: dict) -> None:
     if ulock.exists():
         try:
             u = tomllib.loads(read(ulock))
-            sdists = [p.get("name", "?") for p in u.get("package", []) if "sdist" in p]
+            # A package that merely PUBLISHES an sdist is not a finding — almost
+            # every package on PyPI does, alongside its wheels, and uv installs
+            # the wheel. Only an entry with an sdist and NO wheels actually
+            # builds from source. The first version of this check tested
+            # `"sdist" in p` and over-reported by ~87x: measured across 16 real
+            # lockfiles, 522 of 565 distinct packages "have an sdist" while just
+            # 6 are sdist-only. That wrong number is what gated T23 for days —
+            # `dashboard` was cited as having "45 sdists" when its true count is
+            # zero. No wheels AND no source = a local/editable/virtual entry,
+            # which is not a download at all.
+            sdists = sorted({p.get("name", "?") for p in u.get("package", [])
+                             if "sdist" in p and not p.get("wheels") and p.get("source")})
             if sdists:
-                rep.add("P08", WARN, "Dependencies resolving to sdists",
-                        f"{len(sdists)} package(s) build from source, running setup.py at "
-                        f"install time: {', '.join(sorted(sdists)[:8])}"
+                rep.add("P08", WARN, "Dependencies that can ONLY build from source",
+                        f"{len(sdists)} package(s) have no wheel, so installing them runs "
+                        f"setup.py/PEP-517 build code: {', '.join(sdists[:8])}"
                         + (" …" if len(sdists) > 8 else ""),
                         file="uv.lock",
-                        fix="Prefer wheels; --only-binary :all: where the tree allows it")
+                        fix="These are what a wheels-only policy blocks. Either vendor a "
+                            "wheel, drop the dependency, or declare `no-build = false` in "
+                            "this project's uv.toml with a stated reason (ADR-0004)")
             else:
-                rep.add("P08", PASS, "All dependencies resolve to wheels", "uv.lock",
-                        file="uv.lock")
+                rep.add("P08", PASS, "Every dependency has a wheel",
+                        "nothing builds from source at install time", file="uv.lock")
         except (tomllib.TOMLDecodeError, ValueError):
             rep.add("P08", UNKNOWN, "uv.lock could not be parsed", file="uv.lock")
 

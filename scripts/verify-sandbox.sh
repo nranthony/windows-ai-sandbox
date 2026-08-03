@@ -363,6 +363,36 @@ else
   warn "/etc/pip.conf absent — pip index not pinned (see Dockerfile 'Gate 2')"
 fi
 
+# Gate 3 (Python): wheels only. An sdist runs setup.py at INSTALL time — the
+# Python analogue of the npm lifecycle scripts already blocked above. Both tools
+# need asserting because they share no configuration: uv reads /etc/uv/uv.toml
+# and no pip config at all; pip reads /etc/pip.conf. Checking one would leave the
+# other silently open, and uv is the primary installer on this image.
+if [[ -f /etc/uv/uv.toml ]]; then
+  if grep -qE '^[[:space:]]*no-build[[:space:]]*=[[:space:]]*true' /etc/uv/uv.toml; then
+    pass "uv wheels-only (no-build=true) — source builds refused"
+  else
+    fail "/etc/uv/uv.toml exists but does not set no-build=true — uv will build sdists, running setup.py at install time (Dockerfile 'Gate 3')"
+  fi
+else
+  fail "/etc/uv/uv.toml absent — uv will build source distributions (Dockerfile 'Gate 3'). uv reads NO pip config, so /etc/pip.conf does not cover it"
+fi
+
+if [[ -f /etc/pip.conf ]]; then
+  if grep -qE '^[[:space:]]*only-binary[[:space:]]*=[[:space:]]*:all:' /etc/pip.conf; then
+    # An exemption is legitimate but must be visible — same discipline as npm's
+    # allow-scripts allowlist (depaudit N11: an exemption needs a stated reason).
+    pip_exempt=$(grep -E '^[[:space:]]*no-binary[[:space:]]*=' /etc/pip.conf | sed 's/.*=[[:space:]]*//')
+    if [[ -n "$pip_exempt" ]]; then
+      warn "pip wheels-only, but exempts: $pip_exempt — each exemption builds from source; confirm the reason is recorded"
+    else
+      pass "pip wheels-only (only-binary=:all:), no exemptions"
+    fi
+  else
+    fail "/etc/pip.conf does not set only-binary=:all: — pip will build sdists (Dockerfile 'Gate 3')"
+  fi
+fi
+
 echo ""
 echo "== $PASS passed | $FAIL failed | $WARN warnings =="
 [[ $FAIL -eq 0 ]]

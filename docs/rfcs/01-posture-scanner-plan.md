@@ -21,7 +21,7 @@ read `scripts/depaudit.py --help` for what the tool actually does.
 | `osv-scanner` binary / local OSV mirror | **Refused** — ADR-0002 |
 | Its own repo / package | **Deferred** — lives in `scripts/` until a second repo needs it (plan §13 D3) |
 
-Regression suite: `bash scripts/depaudit.test.sh` (26 offline / 27 `--online`). Three of its
+Regression suite: `bash scripts/depaudit.test.sh` (27 offline / 28 `--online`). Four of its
 assertions are locks for checks that shipped **inverted** — read that file's header before
 changing a rule. Reasoning is what got them wrong; measurement is what caught them.
 
