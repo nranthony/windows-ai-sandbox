@@ -274,19 +274,71 @@ esac
 # cli > env > project > user > global), so any repo under /workspace can switch
 # the quarantine off for itself — silently, and without touching anything this
 # sandbox owns. Verified 2026-07-31: a project file with min-release-age=0 takes
-# `npm config get min-release-age` from 7 to 0. Report it; do not fail, because
-# the workspace is the user's own repo and may have a considered reason.
+# `npm config get min-release-age` from 7 to 0.
+#
+# COMPARE, do not merely report. The first version of this check warned on the
+# PRESENCE of any project release-age setting, which made it unactionable: a repo
+# doing the right thing (committing a window so it also applies outside this
+# sandbox, per plan 04) got the same warning as one switching the gate off, so
+# the line became permanent furniture. Warn only when the project value is
+# WEAKER than the global; a value that meets or beats it is the wanted state.
+#
+# Still never FAIL: the workspace is the user's own repo and may have a
+# considered reason. This reports; the human decides.
 if [[ -d /workspace ]]; then
-  OVERRIDES=""
+  # Baselines in MINUTES. Read with the explicit global flags — a plain
+  # `npm config get` is CWD-sensitive and a project .npmrc overrides it, so a
+  # weak file would end up compared against itself and pass. Verified 2026-08-02:
+  # inside a dir with min-release-age=1, `config get` says 1 and
+  # `config get --location=global` still says 7.
+  # npm counts DAYS, pnpm counts MINUTES (see the block above) — normalise.
+  g_npm_d="$(npm config get --location=global min-release-age 2>/dev/null || echo '')"
+  g_pnpm_m="$(pnpm config get --global minimum-release-age 2>/dev/null || echo '')"
+  if [[ -n "$g_npm_d" && "$g_npm_d" != *[!0-9]* ]]; then g_npm_m=$(( g_npm_d * 1440 )); else g_npm_m=""; fi
+  [[ -n "$g_pnpm_m" && "$g_pnpm_m" != *[!0-9]* ]] || g_pnpm_m=""
+
+  fmt_window() {  # minutes -> human-readable window
+    if   (( $1 == 0 ));    then printf 'OFF'
+    elif (( $1 < 60 ));    then printf '%dmin' "$1"
+    elif (( $1 < 1440 ));  then printf '%dh'   "$(( $1 / 60 ))"
+    else                        printf '%dd'   "$(( $1 / 1440 ))"; fi
+  }
+
+  weaker=""; malformed=""; uncomparable=""; ok_count=0
   while IFS= read -r rc; do
-    val=$(grep -hE '^[[:space:]]*(min-release-age|minimum-release-age)[[:space:]]*=' "$rc" 2>/dev/null | tail -1)
-    [[ -n "$val" ]] && OVERRIDES="${OVERRIDES}${rc#/workspace/} [${val// /}]  "
+    while IFS= read -r line; do
+      key="${line%%=*}"; key="${key//[[:space:]]/}"
+      val="${line#*=}";  val="${val//[[:space:]]/}"
+      case "$key" in
+        min-release-age)     base="$g_npm_m"
+                             if [[ -n "$val" && "$val" != *[!0-9]* ]]; then mins=$(( val * 1440 )); else mins=""; fi ;;
+        minimum-release-age) base="$g_pnpm_m"
+                             if [[ -n "$val" && "$val" != *[!0-9]* ]]; then mins="$val"; else mins=""; fi ;;
+        *) continue ;;
+      esac
+      label="${rc#/workspace/} [$key=$val]"
+      if   [[ -z "$mins" ]]; then malformed="${malformed}${label}  "
+      elif [[ -z "$base" ]]; then uncomparable="${uncomparable}${label}  "
+      elif (( mins < base )); then
+        weaker="${weaker}${label} = $(fmt_window "$mins") vs global $(fmt_window "$base");  "
+      else ok_count=$(( ok_count + 1 ))
+      fi
+    done < <(grep -hE '^[[:space:]]*(min-release-age|minimum-release-age)[[:space:]]*=' "$rc" 2>/dev/null)
   done < <(find /workspace -maxdepth 4 -name .npmrc -not -path '*/node_modules/*' 2>/dev/null)
-  if [[ -n "$OVERRIDES" ]]; then
-    warn "project .npmrc overrides the global quarantine (project > global): $OVERRIDES"
-  else
-    pass "no project .npmrc overriding the release-age quarantine under /workspace"
+
+  # A non-integer is worse than a weak value: pnpm computes value*60*1e3, so a
+  # suffixed form yields NaN -> Invalid Date -> every version rejected.
+  [[ -n "$malformed" ]] && warn "project .npmrc has a NON-INTEGER release-age — pnpm computes value*60*1e3, so this yields Invalid Date and REJECTS EVERY VERSION (presents as a broken registry): $malformed"
+  [[ -n "$weaker" ]] && warn "project .npmrc WEAKENS the global quarantine (project > global): $weaker"
+  [[ -n "$uncomparable" ]] && warn "project .npmrc sets a release-age but the global baseline is unreadable, so it cannot be compared: $uncomparable"
+  if [[ -z "$malformed$weaker$uncomparable" ]]; then
+    if (( ok_count > 0 )); then
+      pass "$ok_count project .npmrc release-age setting(s) under /workspace meet or beat the global quarantine"
+    else
+      pass "no project .npmrc overriding the release-age quarantine under /workspace"
+    fi
   fi
+  unset -f fmt_window
 fi
 
 # npm 12 blocks lifecycle scripts by default via the allow-scripts allowlist.
