@@ -38,75 +38,94 @@ Tmpfs-backed `proxy:proxy 0640` — forensic trail of every request, resets on `
 
 ## Applying an allowlist edit
 
-**Use a restart. `squid -k reconfigure` silently no-ops on the most common kind of edit.**
-
-Preferred, in order:
+**An edit does nothing until a reload. Either reload mechanism works.**
 
 1. **Dashboard → "Save & Reload Proxies"** (`just dashboard`) — writes the file and restarts
    every running proxy, then asserts a non-zero domain count. The supported path.
 2. `docker restart egress-proxy-<p>` — same effect, one profile, no UI.
-3. `scripts/profile.sh <p> up` after `docker rm -f egress-proxy-<p>` — for a wedged proxy.
+3. `docker exec egress-proxy-<p> squid -k reconfigure` — zero-downtime, and trustworthy
+   again as of 2026-08-03. See below; this line has flipped twice, so read the reasoning
+   rather than taking the instruction.
 
-### Why not `squid -k reconfigure` (measured 2026-07-31)
+Squid parses the allowlist into memory at start, so a container-side `grep` shows the
+*file*, not what is being *enforced*. Only a reload (or an egress probe) settles that.
+This is the benign staleness mode: it self-resolves on any reload, and `verify` warns when
+the file's mtime is newer than the proxy's start.
 
-There are **two independent staleness modes**, and reconfigure only fixes one:
+### The mount is what made reconfigure unreliable — fixed 2026-08-03
 
-| Edit style | Container sees new bytes? | `squid -k reconfigure` | `docker restart` |
+For most of this repo's life `proxy/allowed_domains.txt` was bind-mounted as a **single
+file**. A file bind mount resolves to an inode once, at container start. So any host-side
+operation that *replaces* the file rather than truncating it in place left the container
+pinned to the old, deleted inode — unable to see host edits at all, with
+`squid -k reconfigure` faithfully re-reading the stale copy and exiting 0.
+
+| Edit style | Container saw new bytes? | `reconfigure` | `restart` |
 |---|---|---|---|
-| **In-place** (dashboard save, `>` truncate) | yes — inode preserved | ✅ applies | ✅ applies |
-| **Atomic replace** (`vim`, `sed -i`, `git checkout`, most editors) | **no — inode swapped** | ❌ **silently no-ops** | ✅ applies |
+| In-place (dashboard save, `>` truncate) | yes | ✅ applied | ✅ applied |
+| **Atomic replace** (`vim`, `sed -i`, **every git checkout/merge/pull/stash**) | **no** | ❌ **silent no-op** | ✅ applied |
 
-The trap is that **reconfigure exits 0 and logs "Processing Configuration File" in both
-cases.** Measured: after an atomic-replace edit commenting out `arxiv.org`, reconfigure
-returned 0 and `arxiv.org` still tunnelled (`200`). The container was pinned to inode
-275839 while the host file had become 275707. A restart re-runs the entrypoint and
-re-resolves the bind mount, so it is correct for both modes.
+Measured twice, a week apart, in production: an atomic-replace edit commenting out
+`arxiv.org` left it tunnelling `200` with the container on inode 275839 against a host file
+of 275707; and on 2026-08-03 a **comment-only merge** left two of three proxies on inode
+275834 against 81188, which `verify` reported as "in sync" (its content diff strips
+comments) while `with-egress.sh` — the only install route — failed with
+`tunnel error: unsuccessful`, naming nothing.
 
-Note also that squid parses the allowlist into memory at start. Even with a live inode, an
-edit is not enforced until a reconfigure or restart — so a container-side `grep` of
-`allowed_domains.txt` shows the *file*, not what is being *enforced*. Only an egress probe
-(or a reload) settles it.
+**The real cost was not the confusion. It was that the repo's allowlist became advisory:
+tightening it in git did not take effect on a running proxy.** That is the G9 finding, where
+all three proxies kept tunnelling a domain the repo had already gated.
 
-**Correction:** this file previously called reconfigure "preferred (zero-downtime)". It is
-not preferred. It also previously appeared that reconfigure *killed* the proxy (SIGHUP →
-exit 129); that is refuted — squid runs as a child of `entrypoint.sh` (PID 1), handles
-SIGHUP as a reconfigure, and the container survives. The real defect is the silent no-op
-above, not a crash.
+**The fix: `docker-compose.yml` now mounts `./proxy` as a DIRECTORY** (`:/etc/squid/host:ro`).
+Directory mounts resolve the path on every `open()`, so the container always sees current
+bytes and the entire class disappears. Verified end-to-end: a `sed -i` moved the host inode
+81188 → 368375, the container saw the change **with no restart**, and `squid -k reconfigure`
+took a probe of `pypi.org` from `000` (denied) to `200` (allowed). The same sequence under
+the file mount changed nothing at all.
 
-### The trigger is ordinary git workflow (measured 2026-08-03)
+Consequences worth knowing:
 
-The table above lists `git checkout` under "atomic replace", which undersells it. **Every
-branch switch, merge, pull, rebase or stash that touches `proxy/allowed_domains.txt`
-replaces the inode** and blinds every running proxy. This is not an editor quirk to
-remember — it is the normal development loop of this repo, and it fires without anyone
-editing the allowlist deliberately.
+- `squid -k reconfigure` is sound again, and for the first time its exit code means
+  something — there is no longer a mode where it reports success having applied nothing.
+- `verify`'s inode comparison is now a **regression lock** rather than a live tripwire. It
+  should never fire; if it does, someone reverted the mount to a file.
+- `with-egress.sh`'s visibility check stopped being load-bearing for staleness. It is kept
+  for a botched mount target and for profiles that predate the change.
+- `squid.conf` stays a file mount deliberately: it needs a restart to be parsed anyway, and
+  it was touched by 0 of the last 49 commits against the allowlist's 10. Same mount style,
+  opposite edit profiles — which is why only one of them ever caused trouble.
+- Mount at a **sub-path**. Never overmount `/etc/squid` wholesale; the image keeps
+  `errorpage.css` and `conf.d/` there.
 
-Observed: merging a branch whose only allowlist change was the **comment header** left two
-of three proxies bound to inode 275834 against a host file of 81188. Consequences, in the
-order they were noticed:
+**Two earlier corrections, kept so they are not re-derived:** this file once called
+reconfigure "preferred (zero-downtime)", then reversed to "never use it" — the truth was
+that the command was always fine and the mount was broken. And it once appeared that
+reconfigure *killed* the proxy (SIGHUP → exit 129); that is refuted, squid runs as a child
+of `entrypoint.sh` (PID 1), handles SIGHUP as a reconfigure, and the container survives.
 
-1. `verify` reported **"allowlist in sync"**. Its content diff strips comments, and only
-   comments had changed — so the domain lists matched while the proxy was blind. A content
-   comparison cannot detect this mode on its own.
-2. `with-egress.sh --with pypi` appeared to work: the section opened, `reconfigure`
-   returned 0, and the audit record logged a window.
-3. The install died with `tunnel error: unsuccessful`, naming nothing. Because
-   [ADR-0003](adr/0003-strict-egress-default.md) makes `with-egress.sh` the only install
-   route, that is the entire dependency pipeline failing with an error that points nowhere
-   near the cause.
+### Why it took two incidents to see it
 
-Two defences were added, and the split matters:
+The mechanism was documented after the first incident and the class still recurred, which is
+the part worth remembering.
 
-- **`verify` compares inodes** (`stat -c %i` host vs container) and hard-FAILs on a
-  mismatch. Decisive rather than heuristic — unlike the mtime check, which only
-  approximates the *other* staleness mode.
-- **`with-egress.sh` self-heals.** After opening a section it confirms the proxy is serving
-  the widened list, and restarts the proxy if not. A window that cannot be verified as open
-  refuses to run the command, because an audit record for an install that could never have
-  reached a registry is worse than no record.
+The 2026-07-31 write-up listed `git checkout` in a row alongside `vim` and `sed -i`, framed
+as *editor* behaviour — a thing you do deliberately to the allowlist. That framing hid the
+real exposure: **every branch switch, merge, pull, rebase or stash that touches the file
+replaces the inode**, and that is the normal development loop of this repo, firing when
+nobody has gone near an allowlist. Ten of the last 49 commits touched it, three proxies run
+concurrently, and `restart: "no"` means they live for days — so one merge blinded all three
+at once.
 
-The general rule this is an instance of: **a bind-mounted file is a snapshot; a
-bind-mounted directory is a view.** Mounting `./proxy/` as a directory instead would make
-the whole class disappear, at the cost of exposing `squid.conf` to the same edit path.
-That trade has not been taken — [ADR-0002](adr/0002-dependency-guardrail-scope.md)'s
-minimalism argument cuts both ways here — but it is the obvious lever if this recurs.
+Diagnosis was slow because every signal pointed away from the cause:
+
+1. `verify` said **"allowlist in sync"** — the comment-only merge left the stripped domain
+   lists identical.
+2. `with-egress.sh --with pypi` looked healthy: section opened, `reconfigure` returned 0,
+   audit record written.
+3. The install died with `tunnel error: unsuccessful`, which names nothing and points at
+   the network.
+
+The lesson is not "remember to restart after git operations". It is that a mitigation
+requiring a human to remember an invisible coupling is not a mitigation. The general rule
+underneath: **a bind-mounted file is a snapshot; a bind-mounted directory is a view.**
+Taking that (above) removed the class instead of documenting it better.

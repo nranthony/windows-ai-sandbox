@@ -712,9 +712,11 @@ G1. `with-egress.sh`'s reload path is left exactly as it is.
 (tier 1). Assert that what the proxy loaded equals what the repo says:
 
 ```sh
+# Container path is /etc/squid/host/... as of 2026-08-03 (§21) — proxy/ is now a
+# directory mount. Older revisions of this command used /etc/squid/.
 diff <(grep -vE '^[[:space:]]*#|^[[:space:]]*$' proxy/allowed_domains.txt | sort) \
      <(docker exec -u proxy egress-proxy-$p \
-         grep -vE '^[[:space:]]*#|^[[:space:]]*$' /etc/squid/allowed_domains.txt | sort)
+         grep -vE '^[[:space:]]*#|^[[:space:]]*$' /etc/squid/host/allowed_domains.txt | sort)
 ```
 
 `fail` on any delta, naming the domains and directing to `docker restart
@@ -832,7 +834,7 @@ instruction was to drop T17 in exactly this case, and it has been dropped. **[C 
 ```bash
 diff <(grep -vE '^[[:space:]]*#|^[[:space:]]*$' proxy/allowed_domains.txt | sort) \
      <(docker exec -u proxy egress-proxy-<p> \
-         grep -vE '^[[:space:]]*#|^[[:space:]]*$' /etc/squid/allowed_domains.txt | sort)
+         grep -vE '^[[:space:]]*#|^[[:space:]]*$' /etc/squid/host/allowed_domains.txt | sort)
 ```
 Expect empty. A `>` line is a domain the proxy permits and the repo does not — the
 dangerous direction. Note `-u proxy`; root cannot read the file.
@@ -1340,3 +1342,69 @@ verdict per window, so the "does OSV ever fire?" question has somewhere to read 
 decide it before a month of real installs.
 
 **Phase 3 is complete.** Remaining: T23 (phase 4), still gated on sdist data.
+
+---
+
+## 21. T26 — the allowlist mount, root-caused and removed (2026-08-03)
+
+Phase 3's §20 recorded the stale-inode incident and added two *detections* for it: an inode
+comparison in `verify` and a self-heal in `with-egress.sh`. Both work. Neither addressed why
+the condition kept arising, and a second opinion (Fable) correctly pushed on that.
+
+**Root cause.** `docker-compose.yml` bind-mounted `proxy/allowed_domains.txt` as a single
+**file**. A file bind mount resolves to an inode once, at container start, so every
+host-side *replace* — `git checkout`/`merge`/`pull`/`stash`, `vim`, `sed -i`, VS Code —
+stranded the container on a deleted inode.
+
+Three multipliers made it constant rather than occasional: 10 of the last 49 commits touched
+that file (0 touched `squid.conf` — same mount style, opposite edit profile), three proxies
+run concurrently so one git operation blinds all three, and `restart: "no"` keeps them alive
+for days.
+
+**The framing that matters.** This was not an operational annoyance. It meant **the repo's
+allowlist was advisory, not authoritative** — tightening it in git did not take effect on a
+running proxy. That is G9, observed live on 2026-07-31 with all three proxies still
+tunnelling a domain the repo had gated.
+
+**Fix: mount `./proxy` as a DIRECTORY** at `/etc/squid/host:ro`. Directory mounts resolve the
+path on every `open()`. Cost is nil — the directory holds only `squid.conf` and
+`allowed_domains.txt`, both already exposed, so there is no new read surface. `squid.conf`
+stays a file mount: it needs a restart to parse anyway.
+
+Measured end-to-end, which is the only reason to believe it:
+
+| Step | Under the old file mount | Under the directory mount |
+|---|---|---|
+| `sed -i` (atomic replace) on the host | inode 81188 → 368375 | same |
+| Container sees the change, no restart | **no** | **yes** |
+| `squid -k reconfigure` | exits 0, applies nothing | applies |
+| Probe `pypi.org` from the agent | stays denied | `000` → `200` |
+
+**The gap Fable caught, which would have broken the install route.** The container-side path
+appears in FIVE places — compose, `proxy/squid.conf`, `profile.sh`, `with-egress.sh`,
+`dashboard/src/lib/docker_client.py` — and **every consumer fails silently on a mismatch**:
+the inode check `stat`s nothing and skips itself forever, the content diff degrades to a
+warn, the dashboard's post-reload assertion stops asserting, and `with-egress.sh` refuses
+every install. A typo would not crash anything; it would quietly switch controls off. Each
+now reads a named `PROXY_ALLOWLIST` constant, and `with-egress.test.sh` locks all five
+together (38 assertions, up from 29).
+
+**Consequences to carry forward.**
+
+- `squid -k reconfigure` is trustworthy again, and its exit code means something for the
+  first time. Docs that said "never use it" have been rewritten to explain *why* — that
+  claim has now flipped twice, and the underlying truth was always that the command was
+  fine and the mount was broken.
+- The inode check in `verify` is now a **regression lock**, not a live tripwire. It should
+  never fire; if it does, the mount was reverted to a file.
+- `with-egress.sh`'s visibility check is no longer load-bearing for staleness. Kept for a
+  botched mount target and for profiles predating the change. The definitive check would be
+  an egress probe against a just-opened host; deliberately not built, since the silent-no-op
+  mode it would guard against no longer exists.
+- Rollout needs `down`/`up`, not `restart` — volume changes require recreation. Done on all
+  three profiles; `postgres-therapod` came back without the known network wedge.
+
+**The general lesson, which is not about squid:** a bind-mounted file is a snapshot; a
+bind-mounted directory is a view. The first incident produced better documentation of the
+trap; the class only went away when the trap did. A mitigation that requires a human to
+remember an invisible coupling is not a mitigation.

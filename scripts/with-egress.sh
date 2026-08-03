@@ -177,6 +177,11 @@ open_section() {
 # =============================================================================
 AGENT="ai-sandbox-$profile"
 PROXY="egress-proxy-$profile"
+# Container-side allowlist path. MUST agree with the mount target in
+# docker-compose.yml, the acl in proxy/squid.conf, and the same constant in
+# scripts/profile.sh and dashboard/src/lib/docker_client.py.
+# `bash scripts/with-egress.test.sh` locks all five together.
+PROXY_ALLOWLIST="/etc/squid/host/allowed_domains.txt"
 DEPAUDIT="$REPO_ROOT/scripts/depaudit.py"
 AUDIT_DIR="$PROFILES_ROOT/$profile/audit"
 AUDIT_LOG="$AUDIT_DIR/depgate.jsonl"
@@ -294,53 +299,57 @@ print(json.dumps(out))
   return 0
 }
 
-# Confirm the proxy is actually serving the bytes we just wrote, and repair it
-# if not.
+# Confirm the proxy can READ the widened allowlist at the expected path.
 #
-# docker-compose.yml:245 bind-mounts the allowlist as a FILE. A file bind mount
-# resolves to an inode at container start, so any host-side operation that
-# REPLACES the file rather than truncating it in place leaves the container
-# bound to the old, now-deleted inode. From then on the container cannot see
-# host writes at all, and `squid -k reconfigure` re-reads its stale copy and
-# exits 0 — a silent no-op, indistinguishable from success.
+# BE CLEAR ABOUT WHAT THIS DOES AND DOES NOT PROVE. It compares file contents,
+# so it proves the mount is healthy and the path is right. It does NOT prove
+# squid has re-parsed the list — squid reads it into memory at start, so
+# enforcement follows the reload, not the file. Enforcement is inferred from
+# reload_proxy returning 0, and that inference is now sound in a way it was not
+# before: under the directory mount there is no longer a mode in which
+# `squid -k reconfigure` silently re-reads a stale copy and reports success.
 #
-# open_section() writes in place specifically to avoid this. What it CANNOT
-# avoid is the file having been replaced earlier by something else:
+# Under the previous single-FILE bind mount this function was load-bearing for a
+# different reason — it was the only thing catching a container pinned to a
+# replaced inode (git checkout/merge/pull/stash, editor atomic saves, sed -i).
+# That class is gone: docker-compose.yml now mounts ./proxy as a DIRECTORY, so
+# the path resolves on every open() and the container always sees current bytes.
 #
-#     git checkout / git merge / git pull / git stash   <-- the common one
-#     an editor's atomic save (vim, VS Code), sed -i, mktemp && mv
+# What it still earns its place for:
+#   - a botched mount target (this path and compose disagreeing)
+#   - a profile that predates the directory mount and has not been recreated
+# Both are real during rollout, and both otherwise present as an install failing
+# with an error that names nothing — which is exactly how the 2026-08-03
+# incident presented.
 #
-# MEASURED 2026-08-03, and this is why the check exists rather than a comment:
-# merging a branch that touched proxy/allowed_domains.txt left two running
-# proxies on inode 275834 while the host file was 81188. `--with pypi` then
-# appeared to work — allowlist opened, reconfigure returned 0 — and the install
-# died with `tunnel error: unsuccessful`, naming nothing. The phase-3 audit
-# record would have logged an install window that could never have installed.
-#
-# `verify`'s content diff does NOT catch this on its own: if the replacement
-# only changed comments, the stripped domain lists still match.
-assert_proxy_sees() {
+# The definitive check would be an egress probe against a just-opened host.
+# Deliberately not built: it needs a section -> canonical-host mapping, and with
+# the silent-no-op mode removed the marginal value is small. Revisit if a window
+# is ever observed opening without taking effect.
+assert_allowlist_visible() {
   local host_doms ctr_doms
   host_doms="$(grep -vE '^[[:space:]]*#|^[[:space:]]*$' "$ALLOWLIST" | sort)"
   ctr_doms="$(docker exec -u proxy "$PROXY" \
-    grep -vE '^[[:space:]]*#|^[[:space:]]*$' /etc/squid/allowed_domains.txt 2>/dev/null | sort)" || return 1
+    grep -vE '^[[:space:]]*#|^[[:space:]]*$' "$PROXY_ALLOWLIST" 2>/dev/null | sort)" || return 1
   [[ "$host_doms" == "$ctr_doms" ]]
 }
 
-require_proxy_sees_window() {
-  assert_proxy_sees && return 0
-  echo "WARN: $PROXY is not serving this allowlist — its bind mount is bound to a" >&2
-  echo "      replaced (deleted) inode, so the widened file is invisible to it." >&2
-  echo "      Restarting the proxy to re-resolve the mount." >&2
+require_allowlist_visible() {
+  assert_allowlist_visible && return 0
+  echo "WARN: $PROXY is not serving this allowlist at $PROXY_ALLOWLIST." >&2
+  echo "      Most likely this profile predates the directory mount and still has the" >&2
+  echo "      old single-file bind mount. Restarting to re-resolve; if that does not" >&2
+  echo "      fix it, recreate the profile with 'scripts/profile.sh $profile up'." >&2
   docker restart "$PROXY" >/dev/null 2>&1 || { echo "ERROR: could not restart $PROXY" >&2; return 1; }
   local i
   for i in 1 2 3 4 5 6 7 8 9 10; do
-    assert_proxy_sees && { echo "→ $PROXY restarted and now serving the widened allowlist" >&2; return 0; }
+    assert_allowlist_visible && { echo "→ $PROXY restarted and serving the widened allowlist" >&2; return 0; }
     sleep 1
   done
-  echo "ERROR: $PROXY still is not serving this allowlist after a restart." >&2
-  echo "       Refusing to run the command: the window is not actually open, and an" >&2
-  echo "       audit record for it would be false." >&2
+  echo "ERROR: $PROXY still cannot serve this allowlist after a restart." >&2
+  echo "       Refusing to run the command: the window may not be open, and an audit" >&2
+  echo "       record for an install that could not reach a registry is worse than none." >&2
+  echo "       Fix: scripts/profile.sh $profile up   (recreates with the directory mount)" >&2
   return 1
 }
 
@@ -466,9 +475,9 @@ echo "→ opening egress sections: ${SECTIONS[*]}" >&2
 for s in "${SECTIONS[@]}"; do open_section "$s"; done
 reload_proxy
 
-# The window is not open until the proxy says it is. Without this the command
+# The window is not open until the proxy can serve it. Without this the command
 # runs against the OLD allowlist and fails in a way that names nothing.
-require_proxy_sees_window || exit 5
+require_allowlist_visible || exit 5
 
 echo "→ exec $AGENT: ${cmd[*]}" >&2
 rc=0
