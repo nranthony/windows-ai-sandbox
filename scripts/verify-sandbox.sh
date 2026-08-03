@@ -305,14 +305,24 @@ if [[ -d /workspace ]]; then
   }
 
   weaker=""; malformed=""; uncomparable=""; ok_count=0
+  # Both file kinds carry the same setting under different spellings and units:
+  #   .npmrc              min-release-age=<DAYS> | minimum-release-age=<MINUTES>
+  #   pnpm-workspace.yaml minimumReleaseAge: <MINUTES>
+  # A pnpm workspace file in a monorepo CHILD is as effective an override as an
+  # .npmrc, and was invisible here until 2026-08-03.
   while IFS= read -r rc; do
+    case "$rc" in
+      *pnpm-workspace.yaml) pat='^[[:space:]]*minimumReleaseAge[[:space:]]*:' ; sep=':' ;;
+      *)                    pat='^[[:space:]]*(min-release-age|minimum-release-age)[[:space:]]*=' ; sep='=' ;;
+    esac
     while IFS= read -r line; do
-      key="${line%%=*}"; key="${key//[[:space:]]/}"
-      val="${line#*=}";  val="${val//[[:space:]]/}"
+      key="${line%%${sep}*}"; key="${key//[[:space:]]/}"
+      val="${line#*${sep}}";  val="${val//[[:space:]]/}"
       case "$key" in
         min-release-age)     base="$g_npm_m"
                              if [[ -n "$val" && "$val" != *[!0-9]* ]]; then mins=$(( val * 1440 )); else mins=""; fi ;;
-        minimum-release-age) base="$g_pnpm_m"
+        minimum-release-age|minimumReleaseAge)
+                             base="$g_pnpm_m"
                              if [[ -n "$val" && "$val" != *[!0-9]* ]]; then mins="$val"; else mins=""; fi ;;
         *) continue ;;
       esac
@@ -323,19 +333,20 @@ if [[ -d /workspace ]]; then
         weaker="${weaker}${label} = $(fmt_window "$mins") vs global $(fmt_window "$base");  "
       else ok_count=$(( ok_count + 1 ))
       fi
-    done < <(grep -hE '^[[:space:]]*(min-release-age|minimum-release-age)[[:space:]]*=' "$rc" 2>/dev/null)
-  done < <(find /workspace -maxdepth 4 -name .npmrc -not -path '*/node_modules/*' 2>/dev/null)
+    done < <(grep -hE "$pat" "$rc" 2>/dev/null)
+  done < <(find /workspace -maxdepth 4 \( -name .npmrc -o -name pnpm-workspace.yaml \) \
+             -not -path '*/node_modules/*' 2>/dev/null)
 
   # A non-integer is worse than a weak value: pnpm computes value*60*1e3, so a
   # suffixed form yields NaN -> Invalid Date -> every version rejected.
-  [[ -n "$malformed" ]] && warn "project .npmrc has a NON-INTEGER release-age — pnpm computes value*60*1e3, so this yields Invalid Date and REJECTS EVERY VERSION (presents as a broken registry): $malformed"
-  [[ -n "$weaker" ]] && warn "project .npmrc WEAKENS the global quarantine (project > global): $weaker"
-  [[ -n "$uncomparable" ]] && warn "project .npmrc sets a release-age but the global baseline is unreadable, so it cannot be compared: $uncomparable"
+  [[ -n "$malformed" ]] && warn "project config has a NON-INTEGER release-age — pnpm computes value*60*1e3, so this yields Invalid Date and REJECTS EVERY VERSION (presents as a broken registry): $malformed"
+  [[ -n "$weaker" ]] && warn "project config WEAKENS the global quarantine (project > global): $weaker"
+  [[ -n "$uncomparable" ]] && warn "project config sets a release-age but the global baseline is unreadable, so it cannot be compared: $uncomparable"
   if [[ -z "$malformed$weaker$uncomparable" ]]; then
     if (( ok_count > 0 )); then
-      pass "$ok_count project .npmrc release-age setting(s) under /workspace meet or beat the global quarantine"
+      pass "$ok_count project release-age setting(s) under /workspace meet or beat the global quarantine"
     else
-      pass "no project .npmrc overriding the release-age quarantine under /workspace"
+      pass "no project .npmrc / pnpm-workspace.yaml overriding the release-age quarantine under /workspace"
     fi
   fi
   unset -f fmt_window

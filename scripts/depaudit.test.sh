@@ -48,6 +48,32 @@ print(f[0]['status'] if f else 'MISSING')
 " "$2"
 }
 
+# status_path <abs-path> <check-id> — same as status() for a tree outside
+# depaudit-fixtures/ (used where a case needs a file the fixture dir must not
+# carry permanently, e.g. a child rc that would change other assertions).
+status_path() {
+  python3 "$DA" posture "$1" --format json --fail-on never 2>/dev/null \
+    | python3 -c "
+import sys, json
+want = sys.argv[1]
+try:
+    f = [x for x in json.load(sys.stdin)['findings'] if x['id'] == want]
+except Exception:
+    print('PARSE-ERROR'); sys.exit()
+print(f[0]['status'] if f else 'MISSING')
+" "$2"
+}
+
+# expect_path <abs-path> <check-id> <expected-status> <why>
+expect_path() {
+  local got; got=$(status_path "$1" "$2")
+  if [[ "$got" == "$3" ]]; then
+    PASS=$((PASS+1)); printf "  ok   %-16s %-5s %-8s %s\n" "(tmp)" "$2" "$3" "$4"
+  else
+    FAIL=$((FAIL+1)); printf "  FAIL %-16s %-5s want=%s got=%s  %s\n" "(tmp)" "$2" "$3" "$got" "$4"
+  fi
+}
+
 # expect <fixture> <check-id> <expected-status> <why>
 expect() {
   local got; got=$(status "$1" "$2")
@@ -79,6 +105,35 @@ expect zero-posture   D02  WARN "no packageManager pin"
 
 # --- multi-lockfile: resolution is nondeterministic ---
 expect multi-lockfile D01  FAIL "two Node lockfiles present"
+
+# --- monorepo with a child that switches the age gate off for itself ---
+# The root is healthy (10080 in pnpm-workspace.yaml), so every root-scoped check
+# reports clean — which is exactly why N03 exists. A malformed value outranks a
+# merely-weak one because it fails CLOSED and presents as a broken registry.
+expect monorepo-weak-child N02p PASS "root quarantine is strong — the point is that this is not enough"
+expect monorepo-weak-child N03  FAIL "a child .npmrc/pnpm-workspace.yaml weakens or breaks the gate"
+expect monorepo-weak-child D03  WARN "children exist and were NOT covered by this root-scoped scan"
+
+# N03 must stay silent on a child with no override — it inherits the global
+# window, which is the wanted state. A finding there would fire on every healthy
+# monorepo member, and a permanently-firing check is furniture (see G10).
+CLEANFIX="$(mktemp -d "${TMPDIR:-/tmp}/n03clean.XXXXXX")"
+mkdir -p "$CLEANFIX/packages/inherits"
+printf '{ "name": "r", "packageManager": "pnpm@10.34.5" }\n' > "$CLEANFIX/package.json"
+printf "lockfileVersion: '9.0'\n"                            > "$CLEANFIX/pnpm-lock.yaml"
+printf 'minimumReleaseAge: 10080\n'                          > "$CLEANFIX/pnpm-workspace.yaml"
+printf '{ "name": "inherits" }\n' > "$CLEANFIX/packages/inherits/package.json"
+got="$(cd "$HERE/.." && python3 scripts/depaudit.py posture "$CLEANFIX" --format json --fail-on never \
+        | python3 -c 'import json,sys; print(",".join(f["id"] for f in json.load(sys.stdin)["findings"]))')"
+if [[ ",$got," == *",N03,"* ]]; then
+  bad "N03 silent when a child has no override" "no N03 finding" "N03 present"
+else
+  ok "N03 silent when a child has no override (inheritance is the wanted state)"
+fi
+# ...but a child that DOES override, at full strength, is a PASS not silence.
+printf 'minimum-release-age=10080\n' > "$CLEANFIX/packages/inherits/.npmrc"
+expect_path "$CLEANFIX" N03 PASS "a child override at full strength passes"
+rm -rf "$CLEANFIX"
 
 # --- docs-only injection: the X04 case most scanners skip ---
 expect docs-injection X04  WARN "install command lives only in AGENTS.md"

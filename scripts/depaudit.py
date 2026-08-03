@@ -256,21 +256,37 @@ def discover(root: Path, rep: Report) -> dict:
     elif node:
         rep.add("D01", PASS, "Single Node lockfile", ", ".join(node_locks) or "none")
 
-    # Nested projects. This scan is root-scoped, so a repo whose real manifests
-    # live one level down would otherwise report "nothing detected" and read as
-    # clean. Say so explicitly rather than under-report.
-    if not node and not py and not reqs:
-        nested = sorted({
-            str(p.parent.relative_to(root))
-            for name in ("package.json", "pyproject.toml")
-            for p in root.glob(f"*/{name}")
-            if ".venv" not in p.parts and "node_modules" not in p.parts
-        })
-        if nested:
-            rep.add("D03", WARN, "No manifests at the repo root, but nested projects exist",
-                    "This scan is root-scoped and did NOT check them — rerun per directory: "
-                    + ", ".join(nested[:8]) + (" …" if len(nested) > 8 else ""),
-                    fix="depaudit posture <path>/" + nested[0])
+    # Nested projects. This scan is root-scoped, so anything one level down is
+    # unchecked and would otherwise read as clean.
+    #
+    # This used to fire only when the root had NO manifests at all, which made it
+    # blind to the shape it matters most for: a monorepo WITH a root manifest and
+    # real projects underneath. Those children were never reported as unchecked,
+    # so "posture: clean" meant only "the root is clean". The gate now keys on
+    # whether nested manifests exist, not on whether the root is empty; the
+    # wording distinguishes the two cases because the advice differs.
+    # Depth 1 AND 2: `packages/<name>/package.json` is the standard pnpm/npm
+    # workspace layout, and a depth-1-only glob (`*/package.json`) misses every
+    # one of them — it only ever matched `apps/package.json`, which nobody writes.
+    nested = sorted({
+        str(p.parent.relative_to(root))
+        for name in ("package.json", "pyproject.toml")
+        for pat in (f"*/{name}", f"*/*/{name}")
+        for p in root.glob(pat)
+        if not (SKIP_DIRS & set(p.parts))
+    })
+    if nested and not node and not py and not reqs:
+        rep.add("D03", WARN, "No manifests at the repo root, but nested projects exist",
+                "This scan is root-scoped and did NOT check them — rerun per directory: "
+                + ", ".join(nested[:8]) + (" …" if len(nested) > 8 else ""),
+                fix="depaudit posture <path>/" + nested[0])
+    elif nested:
+        rep.add("D03", WARN, "Nested projects were not checked by this root-scoped scan",
+                "The root has its own manifest, so the checks above describe the ROOT ONLY. "
+                "These children carry their own dependency sets: "
+                + ", ".join(nested[:8]) + (" …" if len(nested) > 8 else ""),
+                fix="depaudit posture <path>/" + nested[0]
+                    + "   (or `profile.sh <p> deps`, which iterates children)")
 
     if node and not declared:
         rep.add("D02", WARN, "No `packageManager` pin in package.json",
@@ -287,9 +303,109 @@ def discover(root: Path, rep: Report) -> dict:
 # Node posture
 # --------------------------------------------------------------------------
 
+SKIP_DIRS = {"node_modules", ".venv", ".git", "venv", "__pycache__"}
+
+
+def _child_rc_files(root: Path, max_depth: int = 4) -> list[Path]:
+    """Config files below the root that can override the quarantine.
+
+    Depth cap mirrors the container-side sweep in verify-sandbox.sh, which uses
+    `find -maxdepth 4`; the two are meant to see the same set.
+    """
+    out: list[Path] = []
+    for name in (".npmrc", "pnpm-workspace.yaml"):
+        for p in root.rglob(name):
+            rel = p.relative_to(root)
+            if len(rel.parts) < 2 or len(rel.parts) > max_depth:
+                continue  # root-level file is N02/N02p's job
+            if SKIP_DIRS & set(rel.parts) or any(q.is_symlink() for q in p.parents
+                                                 if q != root and root in q.parents):
+                continue
+            out.append(p)
+    return sorted(out)
+
+
+def check_child_quarantine(root: Path, rep: Report) -> None:
+    """N03 — a child directory can switch the age gate off for itself.
+
+    npm/pnpm config precedence is `cli > env > project > user > global`, so a
+    per-member `.npmrc` or `pnpm-workspace.yaml` inside a monorepo child silently
+    overrides the sandbox-wide quarantine for installs run from that directory.
+    Nothing else sees this: the deny-list and the hook rules key on COMMANDS and
+    on root manifests, and N02/N02p only read the root.
+
+    Thresholds are absolute rather than compared against a live baseline. This
+    runs host-side against arbitrary repos, where no baseline exists; the
+    live-comparison form of this check is the G10 block in verify-sandbox.sh,
+    which reads the real `npm config get --location=global` inside the container.
+    Treat the two as the static and dynamic halves of one control.
+
+    ABSENCE IS NOT A FINDING, unlike root N02/N02p. A child with no rc file
+    inherits the global window, which is the wanted state — flagging it would
+    fire on every healthy monorepo member and teach people to ignore N03.
+    """
+    weak: list[tuple[str, int, str]] = []
+    broken: list[tuple[str, int, str]] = []
+    fine = 0
+
+    for p in _child_rc_files(root):
+        rel = str(p.relative_to(root))
+        if p.name == ".npmrc":
+            # npm counts DAYS, pnpm counts MINUTES; normalise to minutes so one
+            # threshold serves both. Getting this backwards is a 1440x error.
+            for key, mult in (("min-release-age", 1440), ("minimum-release-age", 1)):
+                val, ln = ini_get(p, key)
+                if val is None:
+                    continue
+                if not val.isdigit():
+                    broken.append((rel, ln, f"{key}={val}"))
+                elif int(val) == 0:
+                    weak.append((rel, ln, f"{key}=0 (quarantine off)"))
+                elif int(val) * mult < 1440:
+                    weak.append((rel, ln, f"{key}={val} (under 24h)"))
+                else:
+                    fine += 1
+        else:
+            val, ln = yaml_lookup(p, "minimumReleaseAge")
+            if val is None:
+                continue
+            val = val.strip()
+            if not val.isdigit():
+                broken.append((rel, ln, f"minimumReleaseAge: {val}"))
+            elif int(val) == 0:
+                weak.append((rel, ln, "minimumReleaseAge: 0 (quarantine off)"))
+            elif int(val) < 1440:
+                weak.append((rel, ln, f"minimumReleaseAge: {val} (under 24h)"))
+            else:
+                fine += 1
+
+    if broken:
+        rel, ln, what = broken[0]
+        rep.add("N03", FAIL, "Child quarantine value is not a plain integer",
+                f"{what} in {rel} — a suffixed value gives an Invalid Date cutoff and "
+                "REJECTS EVERY VERSION, which fails closed and presents as a broken "
+                "registry" + (f"; {len(broken)} such files" if len(broken) > 1 else ""),
+                file=rel, line=ln, fix="Use plain minutes, e.g. 10080 for 7 days")
+    elif weak:
+        rel, ln, what = weak[0]
+        rep.add("N03", FAIL, "A child directory weakens the resolution quarantine",
+                f"{what} in {rel} — config precedence is cli > env > project > user > "
+                "global, so this overrides the global window for installs run from that "
+                "directory" + (f"; {len(weak)} such files" if len(weak) > 1 else ""),
+                file=rel, line=ln,
+                fix="Remove the override so the child inherits the global window, or raise "
+                    "it to at least 1440 minutes (10080 = 7d)")
+    elif fine:
+        rep.add("N03", PASS, "Child quarantine overrides are at least as strong",
+                f"{fine} nested override(s) checked, none weaker than 24h")
+
+
 def check_node(root: Path, rep: Report, ctx: dict) -> None:
     if not ctx["node"]:
         rep.add("N00", NA, "Node toolchain not present", "no Node lockfile or manifest")
+        # A child .npmrc can still switch the gate off for a nested project even
+        # when the ROOT has no Node toolchain, so this runs before the bail.
+        check_child_quarantine(root, rep)
         return
 
     npmrc = root / ".npmrc"
@@ -406,6 +522,8 @@ def check_node(root: Path, rep: Report, ctx: dict) -> None:
             rep.add("N02", FAIL, "No npm resolution quarantine", "min-release-age unset",
                     file=".npmrc" if npmrc.exists() else "",
                     fix="Add `min-release-age=7` to .npmrc (unit is DAYS, unlike pnpm)")
+
+    check_child_quarantine(root, rep)
 
     # --- N04 / N05: registry pinning --------------------------------------
     reg, rl = ini_get(npmrc, "registry")
