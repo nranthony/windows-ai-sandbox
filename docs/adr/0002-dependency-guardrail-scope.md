@@ -3,7 +3,7 @@
 - Status: **Accepted** 2026-08-02 (Proposed 2026-07-31)
 - Date: 2026-07-31; accepted after phases 0–2 shipped
 - Deciders: nranthony + agent
-- Implements: [`work/0001-dependency-guardrails/plan.md`](../../work/0001-dependency-guardrails/plan.md) §3
+- Implements: [`docs/_archive/dependency-guardrails-plan.md`](../_archive/dependency-guardrails-plan.md) §3
 
 **Accepted on evidence, not intent.** Phases 0–2 are complete and every refusal below held:
 nothing on the list was adopted, and no gap appeared that one of them would have filled.

@@ -4,7 +4,7 @@
 Answers one question per repo: *which dependency-supply-chain controls are
 configured?* It does NOT resolve, install, or reach the network.
 
-Design constraints (work/0001-dependency-guardrails/plan.md D1, D2 and plan 01 §1):
+Design constraints (docs/_archive/dependency-guardrails-plan.md D1, D2 and plan 01 §1):
 
   * **Zero third-party dependencies.** A supply-chain audit tool must not have a
     supply chain of its own; it has to be auditable by reading it. Python 3.11+

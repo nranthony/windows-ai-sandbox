@@ -2,7 +2,7 @@
 
 **Status:** Not started. Parked deliberately — raised while restructuring for
 [ADR-0001](../../docs/adr/0001-provenance-tiers.md), and **not part of the dependency
-guardrails thread** ([`work/0001`](../0001-dependency-guardrails/plan.md)).
+guardrails thread** ([`work/0001`](../../docs/_archive/dependency-guardrails-plan.md)).
 
 **Exit rule:** delete this folder, or move to `work/archive/`, when the work merges.
 

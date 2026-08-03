@@ -173,7 +173,7 @@ list_denied_domains() {
 
 # ---------------------------------------------------------------------------
 # check_allowlist_sync — tier-1 tripwire: is the proxy ENFORCING the repo's
-# allowlist? (work/0001-dependency-guardrails T24, gap G9.)
+# allowlist? (dependency-guardrails T24, gap G9 — docs/_archive/dependency-guardrails-plan.md.)
 #
 # Two independent staleness modes, and a naive file comparison catches only one:
 #

@@ -68,7 +68,9 @@ upstream ADR-0003 calls "a complete workflow, not a degraded one"; `docs/design/
   are auto-loaded.
 - The five dependency-guardrail documents split by kind rather than by arrival: three RFCs
   plus the rules draft in `docs/rfcs/`, the repo-specific application plan in
-  `work/0001-dependency-guardrails/`.
+  `work/0001-dependency-guardrails/` (completed and archived 2026-08-03 to
+  `docs/_archive/dependency-guardrails-plan.md`, per the exit rule below — the
+  tier split is the decision; the path is where it landed).
 - RFC filenames keep their imported `NN-` prefixes. The documents refer to each other as
   "plan 01" / "plan 02" in dozens of places; renaming for tidiness would have invalidated
   prose across ~130KB to no functional gain.

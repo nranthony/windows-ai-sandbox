@@ -3,7 +3,7 @@
 - Status: Accepted
 - Date: 2026-08-03
 - Deciders: nranthony + agent
-- Implements: [`work/0001-dependency-guardrails/plan.md`](../../work/0001-dependency-guardrails/plan.md) T23 (phase 4)
+- Implements: [`docs/_archive/dependency-guardrails-plan.md`](../_archive/dependency-guardrails-plan.md) T23 (phase 4)
 - Related: [ADR-0003](0003-strict-egress-default.md) (registries closed by default)
 
 ## Context

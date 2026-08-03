@@ -3,7 +3,7 @@
 - Status: Accepted
 - Date: 2026-08-02
 - Deciders: nranthony + agent
-- Implements: [`work/0001-dependency-guardrails/plan.md`](../../work/0001-dependency-guardrails/plan.md) §13 D1
+- Implements: [`docs/_archive/dependency-guardrails-plan.md`](../_archive/dependency-guardrails-plan.md) §13 D1
 - Related: [ADR-0002](0002-dependency-guardrail-scope.md) (what we deliberately do not build)
 
 ## Context

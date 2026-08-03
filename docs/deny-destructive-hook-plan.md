@@ -150,7 +150,7 @@ packages under a weakened gate cannot later read as a clean quarantined install.
 
 ### Rules 13–14 — dependency guardrails
 
-Added by [`work/0001-dependency-guardrails`](../work/0001-dependency-guardrails/plan.md)
+Added by [`docs/_archive/dependency-guardrails-plan.md`](_archive/dependency-guardrails-plan.md)
 phase 1 (T04, T05). Both close paths no Bash matcher can see.
 
 **Rule 13 exists because an install command is not the only way to install.** An agent

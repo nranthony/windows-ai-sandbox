@@ -230,7 +230,7 @@ fi
 
 # ---------------------------------------------------------------------------
 # Gate 2 — dependency-resolution quarantine (slopsquat defence).
-# work/0001-dependency-guardrails T12. These assert the LIVE values, because the
+# dependency-guardrails T12 (docs/_archive/dependency-guardrails-plan.md). These assert the LIVE values, because the
 # agent runs as root here and can edit both /usr/etc/npmrc (image layer) and
 # ~/.config/pnpm/rc (bind mount). The config is defence-in-depth, not a kernel
 # boundary — this tripwire is what makes drift surface within one `up`.
