@@ -95,6 +95,13 @@ set -euo pipefail
 
 REPO_ROOT="${HOME}/repo"
 PROFILES_ROOT="${HOME}/.ai-sandbox/profiles"
+
+# Container-side allowlist path. MUST agree with the mount target in
+# docker-compose.yml and the acl path in proxy/squid.conf.
+# `bash scripts/with-egress.test.sh` locks all of them together — a silent
+# mismatch here does not error, it makes the checks below read an empty result
+# and pass, which is the failure mode that hides drift rather than reporting it.
+PROXY_ALLOWLIST="/etc/squid/host/allowed_domains.txt"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 COMPOSE_FILE_ARGS=()
 BUILD_FLAGS=()
@@ -147,8 +154,9 @@ check_allowlist_sync() {
   local host_doms ctr_doms delta
   host_doms=$(grep -vE "$strip" "$allowlist" | sort)
   ctr_doms=$(docker exec "$proxy" sh -c \
-    "grep -vE '^[[:space:]]*#|^[[:space:]]*\$' /etc/squid/allowed_domains.txt | sort" 2>/dev/null) || {
-      warn "allowlist sync: could not read allowlist inside $proxy"; return 0; }
+    "grep -vE '^[[:space:]]*#|^[[:space:]]*\$' $PROXY_ALLOWLIST | sort" 2>/dev/null) || {
+      warn "allowlist sync: could not read $PROXY_ALLOWLIST inside $proxy — if this profile predates the directory mount, recreate it with 'profile.sh $PROFILE up'"
+      HOST_WARNS=$(( ${HOST_WARNS:-0} + 1 )); return 0; }
 
   if [[ "$host_doms" == "$ctr_doms" ]]; then
     ok "allowlist in sync with $proxy ($(printf '%s\n' "$host_doms" | grep -c . ) domains)"
@@ -156,36 +164,43 @@ check_allowlist_sync() {
     delta=$(diff <(printf '%s\n' "$host_doms") <(printf '%s\n' "$ctr_doms") | grep '^[<>]' | head -10)
     printf '\033[0;31m[FAIL]\033[0m  allowlist DRIFT — %s is not serving this repo'"'"'s allowlist\n' "$proxy" >&2
     printf '%s\n' "$delta" | sed 's/^>/        proxy permits (repo does NOT):/; s/^</        repo has (proxy lacks):     /' >&2
-    printf '        fix: docker restart %s   (NOT squid -k reconfigure — silent no-op)\n' "$proxy" >&2
+    printf '        fix: docker restart %s   (or `squid -k reconfigure`, which is\n' "$proxy" >&2
+    printf '        trustworthy again under the directory mount — it can no longer\n' >&2
+    printf '        silently re-read a stale copy)\n' >&2
     rc=1
     HOST_FAILS=$(( ${HOST_FAILS:-0} + 1 ))
   fi
 
-  # Mode B, DECISIVE. docker-compose.yml bind-mounts the allowlist as a FILE, so
-  # the mount resolves to an inode at container start. Anything that REPLACES the
-  # host file — `git checkout`/`merge`/`pull`/`stash`, an editor's atomic save,
-  # `sed -i`, mktemp+mv — leaves the container bound to the old, deleted inode.
-  # From then on it cannot see host writes AT ALL and `squid -k reconfigure`
-  # re-reads the stale copy and exits 0.
+  # REGRESSION LOCK, not a live tripwire any more.
   #
-  # The content diff above cannot catch this by itself: if the replacement only
-  # changed comment lines, the stripped domain lists still match and it reports
-  # "in sync" while the proxy is blind. MEASURED 2026-08-03 — merging a branch
-  # that touched allowed_domains.txt left two proxies on inode 275834 against a
-  # host file of 81188, reported "in sync", and silently broke with-egress.sh.
+  # The allowlist is now mounted as a DIRECTORY (docker-compose.yml), so the path
+  # resolves on every open() and the container always sees the current inode.
+  # This check should therefore never fire. It is kept precisely because it
+  # cannot fire: if anyone reverts proxy/ to a single-FILE bind mount, the whole
+  # silent-blindness class comes back, and this is what says so out loud.
+  #
+  # What it used to catch: a file mount pins an inode at container start, so any
+  # host-side REPLACE — `git checkout`/`merge`/`pull`/`stash`, an editor's atomic
+  # save, `sed -i`, mktemp+mv — left the container on the old, deleted inode,
+  # unable to see host writes at all, with `squid -k reconfigure` re-reading the
+  # stale copy and exiting 0. The content diff above could not catch it alone:
+  # when only comment lines changed, the stripped domain lists still matched and
+  # it reported "in sync" while the proxy was blind. MEASURED 2026-08-03 — a
+  # merge left two proxies on inode 275834 against a host file of 81188.
   local host_ino ctr_ino
   host_ino=$(stat -c %i "$allowlist" 2>/dev/null || echo "")
-  ctr_ino=$(docker exec -u proxy "$proxy" stat -c %i /etc/squid/allowed_domains.txt 2>/dev/null || echo "")
+  ctr_ino=$(docker exec -u proxy "$proxy" stat -c %i "$PROXY_ALLOWLIST" 2>/dev/null || echo "")
   if [[ -n "$host_ino" && -n "$ctr_ino" && "$host_ino" != "$ctr_ino" ]]; then
-    printf '\033[0;31m[FAIL]\033[0m  allowlist bind mount is STALE — %s holds inode %s, the repo file is %s.\n' \
+    printf '\033[0;31m[FAIL]\033[0m  allowlist mount is STALE — %s holds inode %s, the repo file is %s.\n' \
       "$proxy" "$ctr_ino" "$host_ino" >&2
-    printf '        The proxy cannot see host edits at all; squid -k reconfigure will no-op silently.\n' >&2
-    printf '        Cause is usually a git operation that rewrote proxy/allowed_domains.txt.\n' >&2
-    printf '        fix: docker restart %s\n' "$proxy" >&2
+    printf '        This should be impossible under the directory mount. Check whether\n' >&2
+    printf '        docker-compose.yml was reverted to a single-FILE bind mount of\n' >&2
+    printf '        proxy/allowed_domains.txt — that reintroduces silent blindness.\n' >&2
+    printf '        fix: restore the `./proxy:/etc/squid/host:ro` mount, then profile.sh %s up\n' "$PROFILE" >&2
     rc=1
     HOST_FAILS=$(( ${HOST_FAILS:-0} + 1 ))
   elif [[ -n "$host_ino" && "$host_ino" == "$ctr_ino" ]]; then
-    ok "allowlist bind mount is live (inode $host_ino) — proxy can see host edits"
+    ok "allowlist mount is live (inode $host_ino) — proxy sees host edits immediately"
   fi
 
   # Mode A approximation: in-place edit (inode intact) that squid has not

@@ -150,5 +150,58 @@ else
   ok "bracket excludes traffic before and after the window"
 fi
 
+printf "\n-- container-side allowlist path agrees everywhere --\n"
+# The path lives in FIVE places and nothing at runtime cross-checks them. Every
+# one of the consumers fails SILENTLY on a mismatch rather than erroring:
+#   profile.sh inode check  -> `stat` fails, ctr_ino is empty, check skipped forever
+#   profile.sh content diff -> degrades to a warn, drift detection goes soft-blind
+#   with-egress.sh          -> refuses every install (the whole ADR-0003 route)
+#   dashboard               -> domain count returns None, post-reload assert stops asserting
+# So a typo here is not a crash, it is a security control quietly switching off.
+ROOT="$(cd "$HERE/.." && pwd)"
+mount_target="$(grep -oE '^\s*- \./proxy:[^:]+:ro' "$ROOT/docker-compose.yml" | sed 's|.*:/|/|;s|:ro||')"
+acl_path="$(grep -oE 'dstdomain "[^"]+"' "$ROOT/proxy/squid.conf" | sed 's/.*"\(.*\)"/\1/')"
+sh_profile="$(grep -oE '^PROXY_ALLOWLIST="[^"]+"' "$ROOT/scripts/profile.sh" | sed 's/.*"\(.*\)"/\1/')"
+sh_egress="$(grep -oE '^PROXY_ALLOWLIST="[^"]+"' "$ROOT/scripts/with-egress.sh" | sed 's/.*"\(.*\)"/\1/')"
+py_dash="$(grep -oE '^PROXY_ALLOWLIST = "[^"]+"' "$ROOT/dashboard/src/lib/docker_client.py" | sed 's/.*"\(.*\)"/\1/')"
+
+for pair in "compose-mount:$mount_target" "squid.conf-acl:$acl_path" \
+            "profile.sh:$sh_profile" "with-egress.sh:$sh_egress" "dashboard:$py_dash"; do
+  if [[ -n "${pair#*:}" ]]; then ok "found ${pair%%:*} -> ${pair#*:}"
+  else bad "could not read the path from ${pair%%:*}" "a path" "empty"; fi
+done
+
+if [[ "$sh_profile" == "$sh_egress" && "$sh_egress" == "$py_dash" && "$py_dash" == "$acl_path" ]]; then
+  ok "squid.conf acl and all three code constants agree"
+else
+  bad "allowlist path disagrees across call sites" \
+      "all equal" "acl=$acl_path profile=$sh_profile egress=$sh_egress dash=$py_dash"
+fi
+
+if [[ -n "$mount_target" && "$acl_path" == "$mount_target/"* ]]; then
+  ok "the acl path lives inside the compose mount target"
+else
+  bad "acl path is not under the mount target" "$mount_target/..." "$acl_path"
+fi
+
+# A directory mount is the whole fix; a file mount reintroduces silent blindness.
+if grep -qE '^\s*- \./proxy/allowed_domains\.txt:' "$ROOT/docker-compose.yml"; then
+  bad "allowlist is bind-mounted as a FILE again" "directory mount ./proxy:...:ro" "single-file mount"
+else
+  ok "allowlist is not mounted as a single file  <-- REGRESSION LOCK"
+fi
+
+# Nothing may still reach for the pre-2026-08-03 location. Excludes this file
+# (which names the old path in the pattern above) and __pycache__ (stale .pyc
+# bytecode is not a source reference and regenerates on next import).
+stale="$(grep -rln --exclude='with-egress.test.sh' --exclude-dir='__pycache__' \
+  '/etc/squid/allowed_domains\.txt' \
+  "$ROOT/scripts" "$ROOT/dashboard" "$ROOT/docker-compose.yml" "$ROOT/proxy" 2>/dev/null || true)"
+if [[ -z "$stale" ]]; then
+  ok "no code references the old /etc/squid/allowed_domains.txt path"
+else
+  bad "stale path references remain" "none" "$(printf '%s' "$stale" | tr '\n' ' ')"
+fi
+
 printf "\n  %d passed, %d failed\n" "$PASS" "$FAIL"
 [[ "$FAIL" -eq 0 ]]

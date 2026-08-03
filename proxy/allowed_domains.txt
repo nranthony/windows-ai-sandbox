@@ -38,15 +38,26 @@
 # `verify` will now tell you if a running proxy has drifted from this file
 # (scripts/profile.sh <profile> verify).
 #
-# APPLYING AN EDIT — an edit here does NOTHING until a proxy reload.
+# APPLYING AN EDIT — an edit here does NOTHING until a proxy reload. Squid parses
+# this file into memory at startup, so the file on disk is not what is being
+# enforced until you say so.
 #   Easiest:  just dashboard  ->  Proxy Allowlist  ->  "Save & Reload Proxies"
-#             (writes this file and restarts every running proxy)
 #   By hand:  docker restart egress-proxy-<profile>
+#             or  docker exec egress-proxy-<profile> squid -k reconfigure
 #
-#   Do NOT use `squid -k reconfigure`. It exits 0 and logs a successful reload
-#   while applying NOTHING if the edit replaced this file atomically — which
-#   vim, sed -i, and every git checkout do. The container stays bound to the old
-#   inode. Only a restart re-resolves the mount. See docs/squid-internals.md.
+#   Both work, and that is a CHANGE (2026-08-03). This file used to warn that
+#   `squid -k reconfigure` exits 0 while applying nothing. That was true, and the
+#   cause was the mount, not the command: proxy/allowed_domains.txt was
+#   bind-mounted as a single FILE, which pins an inode at container start, so any
+#   atomic replace on the host — vim, sed -i, every git checkout/merge/pull —
+#   left the container reading a deleted copy it could never escape.
+#
+#   docker-compose.yml now mounts the whole `./proxy` DIRECTORY, so the path
+#   resolves on every read and the container always sees current bytes. The
+#   silent-no-op mode is gone, and reconfigure is trustworthy again.
+#
+#   `scripts/profile.sh <profile> verify` checks this and fails loudly if the
+#   mount ever regresses to a file. See docs/squid-internals.md.
 #
 # Blocks are tagged like `[name]` for grep — e.g. `grep "\[claude\]" allowed_domains.txt`.
 # To bulk-toggle a block: select its lines and `s/^# //` (uncomment) or

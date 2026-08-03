@@ -69,16 +69,20 @@ Edits to `scripts/depaudit.py` require `bash scripts/depaudit.test.sh` (26/26
 offline; `--online` adds the OSV corpus). Two of its assertions are regression
 locks for checks that shipped **inverted** — read the header before changing them.
 Edits to `scripts/with-egress.sh` require `bash scripts/with-egress.test.sh`
-(29/29, offline — no docker or network). It covers the two parsers; one of its
-assertions locks a bracket bug that made a real install log zero egress.
+(38/38, offline — no docker or network). It covers the two parsers, locks a
+bracket bug that made a real install log zero egress, and asserts the
+container-side allowlist path agrees across all five places it appears.
 
-**Restart the proxy after any git operation that touches
-`proxy/allowed_domains.txt`.** The file is bind-mounted *as a file*, so
-`git checkout`/`merge`/`pull`/`stash` gives the host a new inode while the
-running proxy stays bound to the old one — it then cannot see host edits at all,
-and `squid -k reconfigure` re-reads the stale copy and exits 0. `verify` now
-detects this by comparing inodes (a content diff alone misses it when only
-comments changed).
+**`proxy/` is mounted as a DIRECTORY (`./proxy:/etc/squid/host:ro`), and that is
+load-bearing.** A single-file bind mount pins an inode at container start, so
+`git checkout`/`merge`/`pull`/`stash` — ordinary workflow, not editor quirks —
+left running proxies unable to see host edits at all, with `squid -k reconfigure`
+re-reading a deleted copy and exiting 0. The allowlist was effectively advisory:
+tightening it in git did not take effect. Never revert this to a file mount;
+`verify` fails loudly if you do. Changing the mount target means changing the
+`acl` in `proxy/squid.conf` and the `PROXY_ALLOWLIST` constant in `profile.sh`,
+`with-egress.sh` and `dashboard/src/lib/docker_client.py` — every one of those
+fails *silently* on a mismatch, so the test suite locks them together.
 
 ## Container state placement
 

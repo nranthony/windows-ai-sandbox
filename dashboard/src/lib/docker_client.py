@@ -13,6 +13,14 @@ DOCKER_SOCK = os.environ.get(
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 PROFILE_SCRIPT = os.path.join(REPO_ROOT, "scripts", "profile.sh")
 
+# Container-side allowlist path. MUST agree with the mount target in
+# docker-compose.yml, the acl path in proxy/squid.conf, and the same constant in
+# scripts/profile.sh and scripts/with-egress.sh.
+# `bash scripts/with-egress.test.sh` locks all five together, because a mismatch
+# here does not raise — the exec just fails, the count comes back None, and the
+# post-reload assertion silently stops asserting anything.
+PROXY_ALLOWLIST = "/etc/squid/host/allowed_domains.txt"
+
 
 class DockerClient:
     def __init__(self) -> None:
@@ -113,7 +121,7 @@ class DockerClient:
         )
         # Fall back: count non-comment, non-blank lines in the allowlist
         exit_code2, raw = container.exec_run(
-            "sh -c \"grep -cvE '^(#|$)' /etc/squid/allowed_domains.txt\"",
+            f"sh -c \"grep -cvE '^(#|$)' {PROXY_ALLOWLIST}\"",
             demux=False,
         )
         try:

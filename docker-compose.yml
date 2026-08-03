@@ -241,8 +241,31 @@ services:
       - /var/log/squid:size=64m,uid=0,gid=13,mode=0775
       - /run:size=8m
     volumes:
+      # squid.conf stays a FILE mount: squid reads /etc/squid/squid.conf by
+      # default, and a config change needs a restart to be parsed anyway, so the
+      # snapshot semantics below are harmless for it. (0 of the last 49 commits
+      # touched it; 10 touched the allowlist. Same mount style, opposite edit
+      # profiles — which is why only one of them ever caused trouble.)
       - ./proxy/squid.conf:/etc/squid/squid.conf:ro
-      - ./proxy/allowed_domains.txt:/etc/squid/allowed_domains.txt:ro
+      # The allowlist is mounted as a DIRECTORY, deliberately. A single-file bind
+      # mount resolves to an inode ONCE, at container start, so anything that
+      # replaces the host file rather than truncating it in place — git
+      # checkout/merge/pull/stash, vim, sed -i, VS Code — leaves this container
+      # pinned to the old, orphaned inode. It then cannot see host edits at all,
+      # and `squid -k reconfigure` re-reads the stale copy and exits 0, so the
+      # reload looks successful. A directory mount resolves the path on every
+      # open(), so the container always sees current bytes.
+      #
+      # This is not hypothetical and not an inconvenience. It meant the repo's
+      # allowlist was ADVISORY, not authoritative: tightening it in git did not
+      # take effect on a running proxy. Found live twice — G9 (2026-07-31, all
+      # three proxies still tunnelling a domain the repo had gated) and again
+      # 2026-08-03, when a comment-only merge blinded two proxies and broke the
+      # only install route with an error that named nothing.
+      #
+      # Mount at a SUB-PATH. Never overmount /etc/squid wholesale — the image
+      # keeps errorpage.css and conf.d/ there.
+      - ./proxy:/etc/squid/host:ro
     # Squid needs SETUID+SETGID at startup to drop from root to the `proxy`
     # user. 3128 is unprivileged, so NET_BIND_SERVICE is NOT needed.
     cap_drop:
