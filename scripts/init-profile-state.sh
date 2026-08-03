@@ -40,6 +40,29 @@ if ! grep -qs '^manage-package-manager-versions=' "$BASE/config/pnpm/rc"; then
   printf 'manage-package-manager-versions=false\n' >> "$BASE/config/pnpm/rc"
 fi
 
+# Gate 2 (pnpm half): refuse to resolve anything published in the last 7 days —
+# the slopsquat quarantine. The npm and pip halves live in the image
+# (Dockerfile, "Gate 2" block); pnpm's has to live HERE because pnpm reads
+# ~/.config/pnpm/rc, and /root/.config is a per-profile BIND MOUNT — a value
+# written into the image layer would be masked by the mount at runtime.
+#
+# UNITS DIFFER FROM npm: pnpm's setting is in MINUTES, npm's min-release-age is
+# in DAYS. 10080 = 7 * 24 * 60. Getting this wrong by a factor of 1440 fails
+# OPEN (7 minutes of quarantine), which is why the value carries the arithmetic.
+#
+# KEY MUST BE KEBAB-CASE. pnpm documents the setting as `minimumReleaseAge`, but
+# in the rc file that spelling is silently ignored — `pnpm config get
+# minimumReleaseAge` returns `undefined`. Written as `minimum-release-age` it
+# resolves under both spellings. Same convention as the line above. Verified in
+# the image 2026-07-31; the verify-sandbox.sh tripwire is what caught it.
+#
+# Create-only, like the line above: an operator who deliberately lowers this for
+# one profile keeps their change across `up`. scripts/verify-sandbox.sh asserts
+# the live value, so a drop to nothing still surfaces within one cycle.
+if ! grep -qs '^minimum-release-age=' "$BASE/config/pnpm/rc"; then
+  printf 'minimum-release-age=10080\n' >> "$BASE/config/pnpm/rc"
+fi
+
 # Single-file bind mount target — must exist on host, non-empty JSON.
 if [[ ! -s "$BASE/claude.json" ]]; then
   printf '{}\n' > "$BASE/claude.json"

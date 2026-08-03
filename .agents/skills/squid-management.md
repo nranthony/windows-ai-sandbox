@@ -36,15 +36,54 @@ but no-ops (already open).
 ## Permanent additions
 
 1. Add the pinned host under the right tier with a `# --- name [tag] ---` header.
-2. Hot-reload: `docker exec egress-proxy-<profile> squid -k reconfigure`
-   (or `COMPOSE_PROJECT_NAME=ai-sandbox-<p> PROFILE=<p> docker compose restart egress-proxy`).
+2. **Apply it with a restart, not a reconfigure** — see below. Easiest is the
+   dashboard's **"Save & Reload Proxies"** button (`just dashboard`), which edits
+   the file and restarts every running proxy in one action. By hand:
+   `docker restart egress-proxy-<profile>`.
 3. Verify: from inside the agent, the new host resolves through the proxy and
    `https://example.com` is still blocked (`scripts/profile.sh <p> verify`).
+
+## Applying an edit — use restart, never `squid -k reconfigure`
+
+**`squid -k reconfigure` exits 0 while silently doing nothing, for the most common
+kind of edit.** Measured 2026-07-31:
+
+| Edit style | Container sees new bytes? | `reconfigure` | `docker restart` |
+|---|---|---|---|
+| In-place (dashboard save, `>` truncate) | yes — inode preserved | ✅ applies | ✅ applies |
+| Atomic replace (`vim`, `sed -i`, `git checkout`) | **no — inode swapped** | ❌ **silent no-op** | ✅ applies |
+
+After an atomic-replace edit commenting out `arxiv.org`, `reconfigure` returned 0,
+logged "Processing Configuration File", and `arxiv.org` still tunnelled (`200`).
+Most editors and every git operation replace atomically, so this is the normal
+case, not the edge case.
+
+A second, separate point: squid parses the allowlist into memory at start. Even
+with a live inode, an edit is not *enforced* until a reload — so grepping
+`allowed_domains.txt` **inside** the container tells you what the file says, not
+what squid is enforcing. Only an egress probe or a reload settles it.
+
+> Earlier notes here and in the dashboard claimed `reconfigure` *killed* the proxy
+> (SIGHUP → exit 129). That is refuted: squid is a child of `entrypoint.sh` (PID 1),
+> handles SIGHUP as a reconfigure, and the container survives. The defect is the
+> silent no-op, not a crash — but the fix is the same one, so `restart` stands.
+
+## The dashboard is the supported path
+
+`just dashboard` → **Proxy Allowlist** tab → **"Save & Reload Proxies"**.
+It writes `proxy/allowed_domains.txt`, restarts every running proxy, and asserts a
+non-zero domain count per profile, surfacing a **Recreate** button for any proxy
+that does not come back. Verified end-to-end 2026-07-31 in both directions
+(removing a domain then restoring it, confirmed by egress probe each way).
+
+Its file write uses in-place truncation, so it never swaps the inode — the
+dashboard has never been a *cause* of allowlist drift. Drift comes from editing the
+file by hand or by git and not reloading afterwards.
 
 ## Recreating the proxy (network wedge)
 
 A stale bind mount (external edit swapped the allowlist file's inode) needs a
-full **recreate**, not just `squid -k reconfigure` — only a fresh container
+full **recreate** or restart, not `squid -k reconfigure` — only a fresh container
 re-binds the mount to the current inode. Always recreate via
 `scripts/profile.sh <p> up` (force-remove first if it is already running:
 `docker rm -f egress-proxy-<p> && scripts/profile.sh <p> up`).

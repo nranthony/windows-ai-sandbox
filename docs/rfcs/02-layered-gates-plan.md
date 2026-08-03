@@ -1,15 +1,33 @@
 # RFC: Layered Dependency Gates (`depgate`)
 
-- Status: Draft — largely **declined for this repo**; see
-  [`work/0001-dependency-guardrails/plan.md`](../../work/0001-dependency-guardrails/plan.md) §4
-  ("what we deliberately do not build"). Retained as the gate model plan 01 and the
-  application plan both reason against.
+- Status: **Rejected as a system → [ADR-0002](../adr/0002-dependency-guardrail-scope.md)**
+  (Accepted 2026-08-02). Retained permanently: its **five-gate model** is the vocabulary
+  the whole guardrail effort reasons in, and its per-gate evidence is cited throughout
+  [`work/0001-dependency-guardrails/plan.md`](../../work/0001-dependency-guardrails/plan.md).
 - Author: external draft, imported 2026-07-30
 
 **Codename:** `depgate`
 **Scope:** Node + Python. Two deployment topologies: inside the egress container, and
 client-side without it.
-**Build status:** Design. Not built.
+**Build status:** Not built, and deliberately so.
+
+## Why this was rejected but not deleted
+
+`depgate` as specified is a system — a Gate-1 HTTP service, a `policy.yaml`, a resolution
+proxy. This repo already gets Gate 4 (egress containment) *as prevention* from
+`internal: true` + the Squid allowlist, so building the system would re-implement in
+application code what the network topology already enforces. ADR-0002 records each refusal
+with its re-open condition.
+
+What **was** taken from this document is the model, not the machinery:
+
+| Gate | This RFC's proposal | What this repo actually does |
+|---|---|---|
+| 0 — intent | Agent-side rules | `agent-notice.md` rules + `claude-settings.json` denies + hook rules 13/14 |
+| 1 — pre-resolution | HTTP existence service | **Refused.** Gate 2 covers the same window without a service |
+| 2 — resolution | Age gate | `min-release-age=7` (npm) / `minimum-release-age=10080` (pnpm), asserted by `verify` |
+| 3 — pre-execution | Script blocking | pnpm 10 blocks by default; npm `allow-scripts` empty |
+| 4 — post-install | Egress containment | Already the network boundary — not application code |
 
 ---
 

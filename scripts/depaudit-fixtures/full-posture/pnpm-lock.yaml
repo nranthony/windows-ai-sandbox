@@ -1,0 +1,6 @@
+lockfileVersion: "9.0"
+
+packages:
+
+  express@4.18.0:
+    resolution: {integrity: sha512-x}

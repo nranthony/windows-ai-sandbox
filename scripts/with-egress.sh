@@ -94,6 +94,24 @@ reload_proxy() {
   # cache.log and keeps running on the old config (safer than a hard
   # restart that would crash-loop on bad config). Falls back to a
   # compose-level restart only if exec fails.
+  #
+  # `reconfigure` IS CORRECT HERE, and only because of how this script writes.
+  # open_section uses `cat tmp > $ALLOWLIST` and cleanup uses
+  # `cp backup $ALLOWLIST` — both truncate in place and PRESERVE the inode the
+  # running proxy is bind-mounted to, so squid re-reads the bytes we just wrote.
+  #
+  # Do NOT copy this pattern to a call site that edits the allowlist with an
+  # atomic replace (`vim`, `sed -i`, `git checkout`, mktemp+mv). Those give the
+  # host file a NEW inode; the container stays bound to the old one, and
+  # reconfigure then exits 0 having applied nothing at all — a silent no-op, not
+  # an error the fallback below can catch. Such call sites must use
+  # `docker restart egress-proxy-<profile>`, which re-resolves the mount.
+  # Measured 2026-07-31; see docs/squid-internals.md.
+  #
+  # (An earlier claim that reconfigure KILLS the proxy — squid as foreground PID
+  # taking SIGHUP as Hangup, exit 129 — is refuted. squid is a child of
+  # entrypoint.sh, handles SIGHUP as a reconfigure, and the container survives.
+  # This function was never broken by that.)
   if docker exec "egress-proxy-$profile" squid -k reconfigure >/dev/null 2>&1; then
     return 0
   fi

@@ -44,6 +44,29 @@ emit_block() {
   exit 0
 }
 
+# Extract dependency NAMES from a manifest blob. Handles the four shapes that
+# actually appear: package.json `"pkg": "^1.0"`, poetry `pkg = "^1.0"`,
+# PEP 508 list entries `"pkg>=1.0"`, and bare requirements.txt `pkg==1.0`.
+# Metadata keys that look like dependencies (`version = "0.1.0"`,
+# `requires-python = ">=3.11"`) are filtered out by name — they would otherwise
+# be reported as new dependencies when a manifest is created from scratch.
+# Output is sorted+unique so `comm` can diff two sets directly.
+dep_names() {
+  # Split on JSON/TOML structural characters first. Without this the match is
+  # line-oriented and misses every compact manifest — `{"a":"^1","b":"^2"}` and
+  # `dependencies = ["x>=1", "y>=2"]` both put several dependencies on one line,
+  # and a missed OLD name is the dangerous direction: it makes an existing
+  # dependency look newly added and fires on a version bump.
+  printf '%s\n' "$1" | tr '{}[],' '\n' | sed -n '
+    s/^[[:space:]]*"\([A-Za-z0-9@._/-]\{1,\}\)"[[:space:]]*:[[:space:]]*"[~^><=0-9*].*$/\1/p
+    s/^[[:space:]]*\([A-Za-z0-9._-]\{1,\}\)[[:space:]]*=[[:space:]]*"[~^><=0-9*].*$/\1/p
+    s/^[[:space:]]*"\{0,1\}\([A-Za-z0-9._-]\{1,\}\)[><=~!].*$/\1/p
+  ' | grep -Fxv -e version -e name -e description -e readme -e license \
+        -e authors -e keywords -e classifiers -e requires-python -e python \
+        -e homepage -e repository -e documentation -e changelog \
+    | sort -u
+}
+
 warn_log() {
   rule=$1; payload=$2
   ts=$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null) || ts="?"
@@ -84,6 +107,59 @@ case "$tool_name" in
         # arbitrary execution — the tail end of the chain is pre-approved, so
         # this write is the only place left to stop it.
         emit_block "git-hook-tamper" "write to a .git/hooks/ script is denied; git executes these on commit — ask the user to install it" ;;
+    esac
+
+    # Payload actually being written: Edit(new_string) / Write(content) /
+    # MultiEdit(edits[].new_string), concatenated.
+    payload=$(printf '%s' "$envelope" | jq -r '
+      [ .tool_input.new_string?, .tool_input.content?,
+        (.tool_input.edits? // [])[].new_string? ]
+      | map(select(.)) | join("\n")' 2>/dev/null) || payload=""
+
+    case "$(basename "$rp")" in
+      # ---------- manifest dependency additions ----------
+      # An install command is not the only way to add a dependency: editing a
+      # manifest and then running an ALLOWED build command (`uv run`,
+      # `pnpm run build`, `make`) resolves it just the same. No Bash matcher can
+      # see that, so it is caught here.
+      #
+      # Blocks a dependency being ADDED, not a manifest being edited. The set of
+      # dependency names already in the file on disk is subtracted from the set
+      # in the payload; only genuinely new names block. That is what lets a
+      # version bump, a script change, or a metadata edit through — the name is
+      # already present, so nothing is added. Comparing against the file rather
+      # than against old_string matters: an Edit payload is only a fragment.
+      package.json|pyproject.toml|Pipfile|requirements*.txt)
+        if [ -n "$payload" ]; then
+          old_blob=""
+          [ -f "$rp" ] && old_blob=$(cat "$rp" 2>/dev/null)
+          _o=$(mktemp 2>/dev/null) || _o=""
+          _n=$(mktemp 2>/dev/null) || _n=""
+          if [ -n "$_o" ] && [ -n "$_n" ]; then
+            dep_names "$old_blob"  > "$_o" 2>/dev/null
+            dep_names "$payload"   > "$_n" 2>/dev/null
+            added=$(comm -13 "$_o" "$_n" 2>/dev/null | head -5 | tr '\n' ' ')
+            rm -f "$_o" "$_n"
+            if [ -n "$added" ]; then
+              emit_block "manifest-dep-add" \
+"new dependency in $(basename "$rp"): ${added}- adding a dependency is a trust-boundary change, not an implementation detail. Stop and tell the user the package name, what it is for, and why an existing dependency will not do. Verify it exists on the registry first: a 404 means the name was invented, and a 'similar' name is not a substitute. Version bumps and metadata edits are not affected by this rule."
+            fi
+          fi
+        fi
+        ;;
+      # ---------- install commands in instruction files ----------
+      # These files are executable surfaces: an install command written here is
+      # run by the next agent and pasted by the next human. WARN, not block —
+      # documentation about dependency rules legitimately quotes install
+      # commands (this repo's own agent-notice.md does), so blocking would fire
+      # on correct writing. Reviewed from the warn log before any promotion to
+      # block. Bare/lockfile forms (`npm ci`, `uv sync --frozen`) are ignored:
+      # the trailing pattern requires a non-flag argument, i.e. a package name.
+      AGENTS.md|CLAUDE.md|GEMINI.md|SKILL.md|README.md|CONTRIBUTING.md|agent-notice.md|.cursorrules|*.mdc)
+        if printf '%s' "$payload" | grep -Eq '(npm[[:space:]]+(i|install|add)|pnpm[[:space:]]+(add|install|dlx)|yarn[[:space:]]+add|bun[[:space:]]+add|pip3?[[:space:]]+install|uv[[:space:]]+add|uv[[:space:]]+pip[[:space:]]+install|pipx[[:space:]]+install|poetry[[:space:]]+add|cargo[[:space:]]+(install|add)|go[[:space:]]+(install|get))[[:space:]]+[^-[:space:]]' 2>/dev/null; then
+          warn_log "docs-install-cmd" "$envelope"
+        fi
+        ;;
     esac
     emit_pass
     ;;

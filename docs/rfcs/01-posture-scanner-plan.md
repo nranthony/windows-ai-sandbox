@@ -1,12 +1,29 @@
 # RFC: Post-Hoc Dependency Posture Scanner (`depaudit`)
 
-- Status: Draft — partially accepted; phase 1 (`posture`) is scheduled by
-  [`work/0001-dependency-guardrails/plan.md`](../../work/0001-dependency-guardrails/plan.md) phase 2c
+- Status: **Accepted in part → built** as [`scripts/depaudit.py`](../../scripts/depaudit.py)
+  (2026-08-02, [`work/0001-dependency-guardrails/plan.md`](../../work/0001-dependency-guardrails/plan.md)
+  phase 2, T13–T16). Not everything below shipped — see "What was built" immediately after.
 - Author: external draft, imported 2026-07-30
 
 **Codename:** `depaudit`
 **Scope:** Node (npm/pnpm/yarn/bun) and Python (pip/uv/poetry/pdm/pipenv) repos.
-**Build status:** Design. Not built.
+**Build status:** Built, stdlib-only, host-side. Read this document as the design rationale;
+read `scripts/depaudit.py --help` for what the tool actually does.
+
+## What was built, and what was not
+
+| This RFC proposed | Outcome |
+|---|---|
+| `posture` — offline control-configuration audit | **Built.** 21+ checks (`N*`/`P*`/`X*`/`D*`), file+line, `PASS/FAIL/WARN/N-A/UNKNOWN` |
+| `pkg` — per-package intelligence lookup | **Built**, narrowed to OSV `MAL-` as the sole BLOCK discriminator (T16) |
+| Lockfile enumeration → purl | **Built** as `deps`; the audit boundary is the lockfile, which is platform-complete |
+| SARIF output | **Refused** — [ADR-0002](../adr/0002-dependency-guardrail-scope.md) |
+| `osv-scanner` binary / local OSV mirror | **Refused** — ADR-0002 |
+| Its own repo / package | **Deferred** — lives in `scripts/` until a second repo needs it (plan §13 D3) |
+
+Regression suite: `bash scripts/depaudit.test.sh` (26 offline / 27 `--online`). Three of its
+assertions are locks for checks that shipped **inverted** — read that file's header before
+changing a rule. Reasoning is what got them wrong; measurement is what caught them.
 
 Answers two independent questions per repo, and reports them separately because they
 have different owners and different remediation timelines:

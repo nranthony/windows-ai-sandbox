@@ -60,7 +60,10 @@ Any change to them requires:
 3. Affected docs updated (ARCHITECTURE.md, `sandbox-hardening-package.md`).
 
 Hook edits additionally require
-`bash sandbox_templates/claude/hooks/deny-destructive.test.sh` (61/61).
+`bash sandbox_templates/claude/hooks/deny-destructive.test.sh` (79/79).
+Edits to `scripts/depaudit.py` require `bash scripts/depaudit.test.sh` (26/26
+offline; `--online` adds the OSV corpus). Two of its assertions are regression
+locks for checks that shipped **inverted** — read the header before changing them.
 
 ## Container state placement
 
@@ -130,6 +133,7 @@ scripts/profile.sh <profile> up|down|attach|verify|audit
 scripts/profile.sh list
 scripts/profile.sh build --refresh-ai        # bump AI CLIs (tail layer only)
 scripts/with-egress.sh <p> --with pypi -- '<cmd>'   # temporary egress widening
+scripts/profile.sh <p> deps [--osv]           # dependency posture (host-side, read-only)
 scripts/docker-gc.sh --dry-run               # host Docker hygiene (see above)
 ```
 

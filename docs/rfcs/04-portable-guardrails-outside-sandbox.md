@@ -1,7 +1,13 @@
 # RFC: Portable Dependency Guardrails — Outside the Sandbox
 
-- Status: Draft — estate-wide scope, no owning work item yet
+- Status: Draft — **partially applied, no owning work item.** Its central claim held up:
+  `scripts/depaudit.py` was built host-side and stdlib-only precisely so it runs against any
+  repo with no sandbox, and it has been run against the `therapod` repos. The estate-wide
+  rollout it argues for has no owner and no schedule.
 - Author: external draft, imported 2026-07-30
+- Applied so far: `depaudit` is portable by construction (plan §13 D3 keeps it in `scripts/`
+  until a second repo needs it); `therapod`'s `engine` / `app_blast` / `app_zero` had the
+  pnpm maturity window restored on branch `fix/supported-architectures` (2026-08-02).
 
 **Companion to:** [`work/0001-dependency-guardrails/plan.md`](../../work/0001-dependency-guardrails/plan.md)
 (formerly `03-sandbox-application-plan.md`).

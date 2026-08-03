@@ -6,21 +6,47 @@
 # WILL BREAK Squid — `dstdomain` treats the whole line (including `#` and
 # any trailing text) as one hostname string. Keep notes on their own lines.
 #
+# POSTURE: STRICT BY DEFAULT.
+#
+# The package registries and other install-time hosts are COMMENTED OUT, and the
+# sandbox therefore cannot reach them. That is the intended steady state, not a
+# temporary lockdown: a slopsquat payload can only run if a registry is
+# reachable, so the normal condition is that one is not.
+#
+# Opening one is a deliberate, bounded act — open, do the step, close again:
+#
+#     scripts/with-egress.sh <profile> --with npm -- 'cd /workspace/x && npm ci'
+#
+# That opens the tag, runs exactly one command, and restores the file verbatim,
+# flock-serialised and sentinel-tracked. Prefer it over editing this file by
+# hand: a hand edit has no automatic close, so a widened allowlist outlives the
+# task that needed it.
+#
 # Three lifecycle tiers, top to bottom:
 #   - ALWAYS ON: every profile needs these. Never comment out.
-#   - PROJECT-PERSISTENT: the dev/ML stack. This repo's primary workload is
-#     CUDA/ML dev, so package registries + CDNs are uncommented by default
-#     (unlike macolima, where they live in PLANNING-MODE and are commented).
-#     Pinned to specific subdomains where possible (per audit M3 discipline).
-#     Comment a block out only for fully autonomous agent runs that should
-#     not be able to install or fetch anything.
+#   - PROJECT-PERSISTENT: the dev/ML stack, pinned to specific subdomains where
+#     possible (per audit M3 discipline). Package registries and CDNs live here
+#     but are COMMENTED BY DEFAULT — uncomment a block only for a setup stage
+#     that genuinely needs sustained access, and re-comment it when the stage is
+#     done. (This used to say registries were uncommented by default. They are
+#     not, and have not been since fc7c0f0.)
 #   - PLANNING-MODE: short-lived installs you want to gate manually. Commented
 #     by default. Add blocks here for domains reachable only while you're
 #     driving the shell.
 #
-# Hot-reload after edits:
-#   COMPOSE_PROJECT_NAME=ai-sandbox-<profile> PROFILE=<profile> \
-#     docker compose restart egress-proxy
+# Whichever tier: an edit here changes NOTHING until the proxy reloads — and
+# `verify` will now tell you if a running proxy has drifted from this file
+# (scripts/profile.sh <profile> verify).
+#
+# APPLYING AN EDIT — an edit here does NOTHING until a proxy reload.
+#   Easiest:  just dashboard  ->  Proxy Allowlist  ->  "Save & Reload Proxies"
+#             (writes this file and restarts every running proxy)
+#   By hand:  docker restart egress-proxy-<profile>
+#
+#   Do NOT use `squid -k reconfigure`. It exits 0 and logs a successful reload
+#   while applying NOTHING if the edit replaced this file atomically — which
+#   vim, sed -i, and every git checkout do. The container stays bound to the old
+#   inode. Only a restart re-resolves the mount. See docs/squid-internals.md.
 #
 # Blocks are tagged like `[name]` for grep — e.g. `grep "\[claude\]" allowed_domains.txt`.
 # To bulk-toggle a block: select its lines and `s/^# //` (uncomment) or

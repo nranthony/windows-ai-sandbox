@@ -131,6 +131,10 @@ verify profile:
 audit profile *args:
     {{profile_sh}} {{profile}} audit {{args}}
 
+# dependency posture for a profile's workspace (host-side, read-only; --osv adds the OSV malicious-package check)
+deps profile *args:
+    {{profile_sh}} {{profile}} deps {{args}}
+
 # ---- state management (profile.sh) ------------------------------------------
 
 # prune rotating state (old backups, paste-cache, shell-snapshots). Accepts --deep.

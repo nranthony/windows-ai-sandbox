@@ -59,17 +59,32 @@ class DockerClient:
                     "needs_recreate": True}
 
         # Apply the host allowlist by RESTARTING the proxy — never
-        # `squid -k reconfigure`. Two reasons, both load-bearing:
-        #   1. SIGHUP death. squid runs as the container's foreground PID, so the
-        #      SIGHUP that `reconfigure` sends is taken as Hangup and the proxy
-        #      exits 129 — i.e. the "reload" KILLS the very container it targets,
-        #      then the follow-up exec 409s on the corpse.
-        #   2. Stale bind mount. An atomic-replace edit (this editor, sed -i,
-        #      vim, git checkout) swaps the host file's inode; a live reconfigure
-        #      would re-read the OLD inode the running container is still pinned
-        #      to. A restart re-runs the entrypoint and re-resolves the mount to
-        #      the current inode — which is exactly the resync we need, so it
-        #      also subsumes the old _allowlist_drifted pre-check.
+        # `squid -k reconfigure`.
+        #
+        # The reason is the STALE BIND MOUNT, and it is a silent failure. An
+        # atomic-replace edit (vim, sed -i, git checkout — and anything else that
+        # writes a temp file and renames over the target) swaps the host file's
+        # inode. The running container stays bound to the OLD inode, so a
+        # reconfigure re-reads a file that no longer receives updates: it exits 0,
+        # logs "Processing Configuration File", and applies nothing. Measured
+        # 2026-07-31 — after commenting out arxiv.org via atomic replace,
+        # reconfigure returned 0 and arxiv.org still tunnelled (200), with the
+        # container on inode 275839 while the host had moved to 275707.
+        #
+        # A restart re-runs the entrypoint and re-resolves the mount to the
+        # current inode, so it is correct for both that case and a plain
+        # in-place edit. It also subsumes the old _allowlist_drifted pre-check.
+        #
+        # NOTE: an earlier version of this comment claimed reconfigure KILLED the
+        # proxy (squid as foreground PID taking SIGHUP as Hangup, exit 129). That
+        # is refuted — squid runs as a child of entrypoint.sh (PID 1), handles
+        # SIGHUP as a reconfigure, and the container survives. The 409-on-a-dead-
+        # container symptom was real but had another cause; the guard above still
+        # covers it. Restart remains correct, for the reason stated above.
+        #
+        # This method's own write path (config_io.write_allowed_domains) truncates
+        # in place and does NOT swap the inode, so the dashboard has never been a
+        # cause of allowlist drift.
         try:
             container.restart(timeout=10)
             container.reload()

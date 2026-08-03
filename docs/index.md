@@ -7,12 +7,14 @@ right: an **RFC** proposes → an **ADR** records → **work/** implements → t
 (citing the ADR) is the outcome.
 
 - [docs/adr/](adr/) — decisions and their rationale. Append-only.
-  - [ADR-0001](adr/0001-provenance-tiers.md) — adopt these tiers
-- [docs/rfcs/](rfcs/) — proposals under discussion ([TEMPLATE.md](rfcs/TEMPLATE.md))
-  - [DEPENDENCY_GUARDRAILS.md](rfcs/DEPENDENCY_GUARDRAILS.md) — slopsquatting threat + agent behavioural rules
-  - [01-posture-scanner-plan.md](rfcs/01-posture-scanner-plan.md) — `depaudit`, stdlib-only dependency posture/inventory scanner
-  - [02-layered-gates-plan.md](rfcs/02-layered-gates-plan.md) — `depgate`, five-gate model (largely declined here)
-  - [04-portable-guardrails-outside-sandbox.md](rfcs/04-portable-guardrails-outside-sandbox.md) — what applies on the host, outside the egress boundary
+  - [ADR-0001](adr/0001-provenance-tiers.md) — adopt these tiers *(Accepted)*
+  - [ADR-0002](adr/0002-dependency-guardrail-scope.md) — dependency guardrails: what we deliberately do not build *(Accepted 08-02)*
+  - [ADR-0003](adr/0003-strict-egress-default.md) — registries unreachable by default; installs open a bounded window *(Accepted 08-02)*
+- [docs/rfcs/](rfcs/) — proposals, with their resolution ([TEMPLATE.md](rfcs/TEMPLATE.md))
+  - [DEPENDENCY_GUARDRAILS.md](rfcs/DEPENDENCY_GUARDRAILS.md) — slopsquatting threat + agent behavioural rules — **shipped**, phase 0
+  - [01-posture-scanner-plan.md](rfcs/01-posture-scanner-plan.md) — `depaudit` posture/inventory scanner — **built in part** as `scripts/depaudit.py`
+  - [02-layered-gates-plan.md](rfcs/02-layered-gates-plan.md) — `depgate`, five-gate model — **rejected as a system → ADR-0002**; the gate model is retained as vocabulary
+  - [04-portable-guardrails-outside-sandbox.md](rfcs/04-portable-guardrails-outside-sandbox.md) — what applies on the host, outside the egress boundary — **partially applied, unowned**
 - [work/](../work/) — in-flight items, deleted or archived on merge ([README](../work/README.md))
   - [0001-dependency-guardrails](../work/0001-dependency-guardrails/plan.md) — applying the above to this repo
   - [0002-host-side-skill-slot](../work/0002-host-side-skill-slot/plan.md) — `make-plan`/`wrap-up` are container-only
@@ -39,6 +41,7 @@ right: an **RFC** proposes → an **ADR** records → **work/** implements → t
 |---|---|---|
 | 1 | [`scripts/verify-sandbox.sh`](../scripts/verify-sandbox.sh) | Fast tripwire (~57 pass/fail/warn outcomes across ~28 checks) |
 | 2 | [`scripts/audit/`](../scripts/audit/) | ~80 structured probes, JSON output ([README](../scripts/audit/README.md)) |
+| — | [`scripts/depaudit.test.sh`](../scripts/depaudit.test.sh) | depaudit regression suite (26 offline, `--online` adds the OSV corpus) over [fixtures](../scripts/depaudit-fixtures/) |
 | 3 | [`sandbox_templates/skills/audit-sandbox/SKILL.md`](../sandbox_templates/skills/audit-sandbox/SKILL.md) | Agent-side judgment over tier-2 JSON (staged into container by `profile.sh audit`) |
 
 ## Agent Tool Controls
@@ -77,6 +80,7 @@ Guides in [`host_setup/`](../host_setup/):
 
 - [`scripts/profile.sh`](../scripts/profile.sh) — profile lifecycle (up, down, attach, auth, verify, audit, rebuild, clean)
 - [`scripts/with-egress.sh`](../scripts/with-egress.sh) — temporarily widen Squid allowlist for installs
+- [`scripts/depaudit.py`](../scripts/depaudit.py) — dependency-supply-chain posture scanner (stdlib-only, read-only; `posture` is offline, `pkg`/`deps` cross-check OSV for malicious-package records). Surfaced as `scripts/profile.sh <p> deps`
 - [`scripts/run-ephemeral.sh`](../scripts/run-ephemeral.sh) — disposable one-shot containers
 - [`scripts/init-profile-state.sh`](../scripts/init-profile-state.sh) — idempotent state bootstrap per profile
 - [`scripts/sync-agent-notice.sh`](../scripts/sync-agent-notice.sh) — inject/refresh the managed sandbox-notice block into repo `AGENTS.md` / global `CLAUDE.md` (source: `sandbox_templates/common/agent-notice.md`)
