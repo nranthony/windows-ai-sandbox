@@ -9,7 +9,7 @@
   until a second repo needs it); `therapod`'s `engine` / `app_blast` / `app_zero` had the
   pnpm maturity window restored on branch `fix/supported-architectures` (2026-08-02).
 
-**Companion to:** [`work/0001-dependency-guardrails/plan.md`](../../work/0001-dependency-guardrails/plan.md)
+**Companion to:** [`docs/_archive/dependency-guardrails-plan.md`](../_archive/dependency-guardrails-plan.md)
 (formerly `03-sandbox-application-plan.md`).
 **Question this answers:** of everything in the three imported documents, what
 applies to **any** repo — pre-deployment development on the host, sibling
@@ -98,7 +98,7 @@ Two consequences:
 
 The highest-leverage single move for a multi-repo estate, and it is genuinely
 cheap: the `PreToolUse` hooks from
-[`03-sandbox-application-plan.md`](../../work/0001-dependency-guardrails/plan.md) phase 1 are
+[`03-sandbox-application-plan.md`](../_archive/dependency-guardrails-plan.md) phase 1 are
 plain POSIX shell reading JSON on stdin. Nothing about them is sandbox-specific
 except the protected paths.
 
@@ -186,12 +186,12 @@ Four notes that matter more than the YAML:
   different control, or it generates false confidence.
 - **The OSV cross-check is what makes that separation workable**, and it is
   portable verbatim — free, keyless, one stdlib POST. See
-  [`03`](../../work/0001-dependency-guardrails/plan.md) §3 D6 for the verified API shape. The
+  [`03`](../_archive/dependency-guardrails-plan.md) §3 D6 for the verified API shape. The
   whole discipline is one line: **consume `MAL-` records, discard
   `GHSA-`/`PYSEC-`/`CVE-` on this path.** Honour `withdrawn` before blocking.
   `osv-scanner` is the batteries-included alternative if you would rather not
   write the client — outside the sandbox its Go binary costs nothing, whereas
-  inside it violates the stdlib-only rule ([`03`](../../work/0001-dependency-guardrails/plan.md) §4).
+  inside it violates the stdlib-only rule ([`03`](../_archive/dependency-guardrails-plan.md) §4).
 - **Run the intel check over the resolved tree, not the direct deps.** Plan 01
   §5 is emphatic and it matters most here: a hallucinated name often arrives as
   a *transitive* dependency and never appears in `package.json` at all. Checking
@@ -279,7 +279,7 @@ The three mitigations that recover part of it, all cheap:
   than inside it, and the reason is worth understanding: inside, it would be a
   third-party binary intermediating every install from within the security
   boundary, duplicating what the audited install window and lockfile inventory
-  already do ([`03`](../../work/0001-dependency-guardrails/plan.md) §4). Outside, there **is**
+  already do ([`03`](../_archive/dependency-guardrails-plan.md) §4). Outside, there **is**
   no window and no proxy — so an install-time interception layer is filling a
   genuine hole rather than adding a redundant one. Its strongest argument
   applies in both places though: your real exposure is the ~200 transitive
@@ -307,3 +307,79 @@ The three mitigations that recover part of it, all cheap:
 
 Items 1 and 2 cover every repo at once and together are an afternoon. Everything
 else is per-repo and can follow the work rather than lead it.
+
+## 8. Host-trust checklist (folded in from `docs/incoming/`, 2026-08-03)
+
+Triaged out of an unverified third-party checklist
+(`post_gpt5-6-sol_sandbox_break_ai_security_checklist_02.md`, now in
+[`docs/_archive/`](../_archive/)). Most of that document restated controls this
+estate already has. These five sections did not, and they belong here rather than
+in the sandbox repo's own docs **because every one of them is about the host —
+the side of the boundary this RFC exists to cover.** Unowned, like the rest of
+this RFC; recorded so the questions are not re-derived from scratch.
+
+The framing worth keeping: the sandbox review has always asked *what can the
+agent reach?* These ask *who trusts what the agent wrote?*
+
+### Host-trust boundaries
+
+- [ ] Files written by the agent are treated as untrusted until reviewed.
+- [ ] Workspace configuration is not implicitly executable.
+- [ ] Host-side automation that consumes workspace files is inventoried.
+- [ ] Git hooks, task runners, venv launchers and similar helpers are reviewed for
+      trust leakage.
+
+Partially addressed inside the boundary already: the deny hook blocks writes to
+`.git/hooks/` (rule 9b) precisely because git executes them later, and rules
+15/16 exist because *config* is a form of executable surface. The open part is
+host-side: `just` recipes, systemd units, cron jobs or editor tasks on the host
+that read files an agent wrote in `~/repo/<profile>/`.
+
+### Local daemons and helpers
+
+- [ ] The agent cannot talk to privileged local daemons unless explicitly required.
+- [ ] Docker socket, build daemons, language servers and local DBs are not exposed
+      by default.
+- [ ] Any daemon reachable from the sandbox is part of the attack surface.
+
+Largely held today by `internal: true` plus the DNS sinkhole, and the rootless
+socket is deliberately not mounted — see
+[`docs/vscode-integration-security.md`](../vscode-integration-security.md) for the
+socket-exposure analysis and Findings B/C. Worth re-checking whenever a new
+sibling container is added, since anything on `sandbox-internal` is reachable by
+name.
+
+### Command policy
+
+- [ ] Approval is based on the full invocation, not the command name alone.
+- [ ] "Safe" commands are reviewed for side effects and helper execution.
+- [ ] Shell, git, package managers and task runners are constrained by argument
+      and context.
+
+This one is **already answered, and the answer is written into the Dockerfile**:
+`permissions.deny` keys on a command *prefix*, so it is routed around by any
+wrapper — which is the whole reason the `deny-destructive` PreToolUse hook exists
+(it sees the full command string). The checklist item is a good statement of why.
+Outside the sandbox there is no equivalent, which is this RFC's §6 point.
+
+### Provenance and trust handoffs
+
+- [ ] The system records which files were created by the agent.
+- [ ] It records which trusted helper later consumed those files.
+- [ ] Execution events can be traced back to agent influence.
+- [ ] The sandbox review includes host-side readers, not just the agent process.
+
+Nothing covers this today, in or out of the boundary. The install-window audit
+record (`depgate.jsonl`) is the nearest thing and is scoped to dependency
+installs. Cheapest first step if this is ever picked up: agent-authored commits
+are already attributable via `Co-Authored-By`, so the gap is really about
+*non-git* artifacts.
+
+### Review questions to re-ask periodically
+
+- [ ] What can the agent write?
+- [ ] Which host components trust those writes?
+- [ ] Which local daemons can the agent reach?
+- [ ] Which commands skip approval, and why?
+- [ ] Is policy enforced on invocations or just names?
+- [ ] Where can agent-created artifacts become host actions?

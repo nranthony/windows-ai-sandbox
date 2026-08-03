@@ -8,7 +8,10 @@ Adopted 2026-07-31 — [ADR-0001](../docs/adr/0001-provenance-tiers.md).
 
 ## The exit rule — this is the point of the directory
 
-**When a work item's changes merge, delete its folder or move it to `work/archive/`.**
+**When a work item's changes merge, delete its folder or move it to
+[`docs/_archive/`](../docs/_archive/)** — the same destination the table below
+gives for completed work. (This used to say `work/archive/`, a directory that was
+never created; the first item to exit went to `docs/_archive/`.)
 
 A stale `plan.md` left in the tree quietly poisons future agent context: it reads as
 current intent long after it stopped being true. The two root-level `IN_TRANSIT_*` /
@@ -30,9 +33,13 @@ weeks after their content went stale.
 
 | # | Item | Status |
 |---|---|---|
-| [0001](0001-dependency-guardrails/plan.md) | Dependency guardrails / slopsquatting defense | Draft plan, awaiting rewrite + approval |
 | [0002](0002-host-side-skill-slot/plan.md) | Host-side skill slot (`make-plan` is container-only) | Not started |
 | [0003](0003-repo-scan-audit/plan.md) | Repo scan — audit + housekeeping | Planning, execution mode not chosen |
+
+Exited: **0001 dependency guardrails** — complete (T00–T26), archived 2026-08-03
+to [`docs/_archive/dependency-guardrails-plan.md`](../docs/_archive/dependency-guardrails-plan.md);
+the live record is
+[`docs/dependency-guardrails-handoff.md`](../docs/dependency-guardrails-handoff.md).
 
 ## plans/
 

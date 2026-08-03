@@ -64,14 +64,24 @@ Any change to them requires:
 3. Affected docs updated (ARCHITECTURE.md, `sandbox-hardening-package.md`).
 
 Hook edits additionally require
-`bash sandbox_templates/claude/hooks/deny-destructive.test.sh` (79/79).
-Edits to `scripts/depaudit.py` require `bash scripts/depaudit.test.sh` (27/27
+`bash sandbox_templates/claude/hooks/deny-destructive.test.sh` (95/95).
+Edits to `scripts/depaudit.py` require `bash scripts/depaudit.test.sh` (38/38
 offline; `--online` adds the OSV corpus). Two of its assertions are regression
 locks for checks that shipped **inverted** — read the header before changing them.
 Edits to `scripts/with-egress.sh` require `bash scripts/with-egress.test.sh`
-(38/38, offline — no docker or network). It covers the two parsers, locks a
+(58/58, offline — no docker or network). It covers five parsers — two here and
+`list_denied_domains` in `profile.sh`, which reads the same file — locks a
 bracket bug that made a real install log zero egress, and asserts the
-container-side allowlist path agrees across all five places it appears.
+container-side allowlist path agrees across all five places it appears. Edits to
+either script's allowlist parsing run it.
+Edits to the `Dockerfile` require `bash scripts/dockerfile-order.test.sh` (8/8,
+offline). The install-layer order is a load-bearing chain — beads < claude/agy <
+npmrc (Gate 2) < uv/pip (Gate 3) — because `min-release-age` applies at **build**
+time too: write it above the CLI install and `@anthropic-ai/claude-code@latest`
+becomes unresolvable whenever the newest release is inside the quarantine window.
+That break is intermittent (it depends on when upstream last published) and
+surfaces on a routine `--refresh-ai`, not just a cold build.
+`just test-offline` runs all four suites.
 
 **`proxy/` is mounted as a DIRECTORY (`./proxy:/etc/squid/host:ro`), and that is
 load-bearing.** A single-file bind mount pins an inode at container start, so

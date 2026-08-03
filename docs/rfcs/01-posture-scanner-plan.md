@@ -1,7 +1,7 @@
 # RFC: Post-Hoc Dependency Posture Scanner (`depaudit`)
 
 - Status: **Accepted in part → built** as [`scripts/depaudit.py`](../../scripts/depaudit.py)
-  (2026-08-02, [`work/0001-dependency-guardrails/plan.md`](../../work/0001-dependency-guardrails/plan.md)
+  (2026-08-02, [`docs/_archive/dependency-guardrails-plan.md`](../_archive/dependency-guardrails-plan.md)
   phase 2, T13–T16). Not everything below shipped — see "What was built" immediately after.
 - Author: external draft, imported 2026-07-30
 

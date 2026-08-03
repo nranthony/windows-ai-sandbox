@@ -373,7 +373,7 @@ RUN npm install -g --allow-scripts=@anthropic-ai/claude-code "@anthropic-ai/clau
 # install time. A quarantine window is the ONE control that covers the gap where
 # every threat-intel feed structurally fails — the hours-to-days between an
 # attacker publishing and anyone detecting it. See
-# work/0001-dependency-guardrails/plan.md and docs/rfcs/DEPENDENCY_GUARDRAILS.md.
+# docs/_archive/dependency-guardrails-plan.md and docs/rfcs/DEPENDENCY_GUARDRAILS.md.
 #
 # Why config and not the deny list: permissions.deny keys on a command PREFIX, so
 # it is routed around by any wrapper (`make`, `just`, `npm run`, `uv run` — all on

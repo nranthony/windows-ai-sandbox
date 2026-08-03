@@ -299,6 +299,96 @@ print(json.dumps(out))
   return 0
 }
 
+# scan_workspace_rc <dir> — release-age overrides in the tree about to install.
+#
+# The install is the moment this matters: a child .npmrc or pnpm-workspace.yaml
+# that zeroes the quarantine means the packages resolved inside THIS window were
+# never held to the age gate, and the audit record would otherwise claim a
+# quarantined install. depaudit's N03 and verify's G10 sweep both find these, but
+# neither runs here, and this is the only route by which a dependency enters.
+#
+# Baselines are the sandbox's own constants because the host cannot read the
+# container's live npm/pnpm config: npm min-release-age=7 DAYS (/usr/etc/npmrc,
+# set in the Dockerfile) and pnpm minimum-release-age=10080 MINUTES
+# (~/.config/pnpm/rc, written by profile.sh ensure_state). Same window, 1440x
+# apart in unit — do not "harmonise" them.
+#
+# Emits `path<TAB>key=value<TAB>CLASS` lines; never blocks. A weakened window is
+# confidence, not a boundary, and hard-failing the only install route over it
+# would break installs to defend against something already reported elsewhere.
+scan_workspace_rc() {
+  local dir="$1" f key val mins base class
+  [[ -d "$dir" ]] || return 0
+  while IFS= read -r f; do
+    case "$f" in
+      *pnpm-workspace.yaml)
+        while IFS= read -r line; do
+          val="${line#*:}"; val="${val//[[:space:]]/}"
+          key="minimumReleaseAge"; base=10080
+          if [[ -n "$val" && "$val" != *[!0-9]* ]]; then mins="$val"; else mins=""; fi
+          if   [[ -z "$mins" ]];        then class=MALFORMED
+          elif (( mins == 0 ));         then class=OFF
+          elif (( mins < base ));       then class=WEAKER
+          else                               class=OK; fi
+          printf '%s\t%s=%s\t%s\n' "${f#$dir/}" "$key" "$val" "$class"
+        done < <(grep -hE '^[[:space:]]*minimumReleaseAge[[:space:]]*:' "$f" 2>/dev/null)
+        ;;
+      *)
+        while IFS= read -r line; do
+          key="${line%%=*}"; key="${key//[[:space:]]/}"
+          val="${line#*=}";  val="${val//[[:space:]]/}"
+          case "$key" in
+            min-release-age)     base=10080
+                                 if [[ -n "$val" && "$val" != *[!0-9]* ]]; then mins=$(( val * 1440 )); else mins=""; fi ;;
+            minimum-release-age) base=10080
+                                 if [[ -n "$val" && "$val" != *[!0-9]* ]]; then mins="$val"; else mins=""; fi ;;
+            *) continue ;;
+          esac
+          if   [[ -z "$mins" ]];  then class=MALFORMED
+          elif (( mins == 0 ));   then class=OFF
+          elif (( mins < base )); then class=WEAKER
+          else                         class=OK; fi
+          printf '%s\t%s=%s\t%s\n' "${f#$dir/}" "$key" "$val" "$class"
+        done < <(grep -hE '^[[:space:]]*(min-release-age|minimum-release-age)[[:space:]]*=' "$f" 2>/dev/null)
+        ;;
+    esac
+  done < <(find "$dir" -maxdepth 4 \( -name .npmrc -o -name pnpm-workspace.yaml \) \
+             -not -path '*/node_modules/*' 2>/dev/null | sort)
+}
+
+RC_OVERRIDE_JSON="[]"
+posture_preflight() {
+  # NB: REPO_ROOT here is the SANDBOX repo, not the workspace parent. The
+  # workspace is ${HOME}/repo/<profile>, mounted at /workspace in the agent
+  # (docker-compose.yml), which is the tree the install will actually resolve in.
+  local rows; rows="$(scan_workspace_rc "${HOME}/repo/$profile")"
+  [[ -n "$rows" ]] || return 0
+
+  local bad_rows
+  bad_rows="$(printf '%s\n' "$rows" | grep -vE '\tOK$' || true)"
+  if [[ -n "$bad_rows" ]]; then
+    echo "WARN: the workspace weakens the resolution quarantine — packages resolved in" >&2
+    echo "      this window may NOT have been held to the 7-day age gate:" >&2
+    printf '%s\n' "$bad_rows" | while IFS=$'\t' read -r p kv c; do
+      printf '        %-10s %s  (%s)\n' "$c" "$p" "$kv" >&2
+    done
+    echo "      Proceeding — this is recorded in the audit log, not enforced here." >&2
+  fi
+
+  RC_OVERRIDE_JSON="$(printf '%s\n' "$rows" | python3 -c '
+import sys, json
+out = []
+for line in sys.stdin.read().splitlines():
+    if not line.strip():
+        continue
+    parts = line.split("\t")
+    while len(parts) < 3:
+        parts.append("")
+    out.append({"path": parts[0], "setting": parts[1], "class": parts[2]})
+print(json.dumps(out))
+' 2>/dev/null || echo '[]')"
+}
+
 # Confirm the proxy can READ the widened allowlist at the expected path.
 #
 # BE CLEAR ABOUT WHAT THIS DOES AND DOES NOT PROVE. It compares file contents,
@@ -322,10 +412,11 @@ print(json.dumps(out))
 # with an error that names nothing — which is exactly how the 2026-08-03
 # incident presented.
 #
-# The definitive check would be an egress probe against a just-opened host.
-# Deliberately not built: it needs a section -> canonical-host mapping, and with
-# the silent-no-op mode removed the marginal value is small. Revisit if a window
-# is ever observed opening without taking effect.
+# The definitive check is the enforcement probe below, which now runs alongside
+# this one. That earlier note said a probe "needs a section -> canonical-host
+# mapping" and was therefore not worth building; that objection was wrong. No
+# mapping is needed — diffing the backup against the widened file names the
+# domains this run just opened, and squid can be asked about those directly.
 assert_allowlist_visible() {
   local host_doms ctr_doms
   host_doms="$(grep -vE '^[[:space:]]*#|^[[:space:]]*$' "$ALLOWLIST" | sort)"
@@ -350,6 +441,71 @@ require_allowlist_visible() {
   echo "       Refusing to run the command: the window may not be open, and an audit" >&2
   echo "       record for an install that could not reach a registry is worse than none." >&2
   echo "       Fix: scripts/profile.sh $profile up   (recreates with the directory mount)" >&2
+  return 1
+}
+
+# newly_opened_domains <backup> <current> — domains this run just uncommented.
+#
+# Text only, so it is testable offline. Idempotent opens (the section was already
+# uncommented) legitimately yield nothing; the caller treats empty as "nothing to
+# probe", not as a failure.
+newly_opened_domains() {
+  local before="$1" after="$2" strip='^[[:space:]]*#|^[[:space:]]*$'
+  comm -13 <(grep -vE "$strip" "$before" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//; s/^\.//' | sort -u) \
+           <(grep -vE "$strip" "$after"  | sed 's/^[[:space:]]*//; s/[[:space:]]*$//; s/^\.//' | sort -u)
+}
+
+# Is squid ENFORCING the widened list? assert_allowlist_visible above compares
+# file bytes, which under the directory mount is very nearly tautological — it
+# cannot distinguish "reloaded" from "not reloaded". This can.
+#
+# Probes one just-opened domain from inside the proxy container and expects
+# anything other than 403. Unlike verify's deny sweep this costs a real upstream
+# connect, which is free here: the window is open precisely so that host can be
+# reached, and the command about to run will connect to it anyway.
+#
+# Fails CLOSED, consistent with the refusal policy above: an audit record for an
+# install that could never have reached its registry is worse than no record.
+assert_window_enforced() {
+  local domain="$1" code
+  code="$(printf '%s\n' "$domain" | timeout 30 docker exec -i "$PROXY" bash -c '
+      read -r d
+      code=TIMEOUT
+      if exec 3<>/dev/tcp/127.0.0.1/3128 2>/dev/null; then
+        printf "CONNECT %s:443 HTTP/1.1\r\nHost: %s:443\r\n\r\n" "$d" "$d" >&3
+        read -t 5 -r _proto code _rest <&3 || code=TIMEOUT
+        exec 3<&- 3>&-
+      else
+        code=NOCONNECT
+      fi
+      printf "%s\n" "$code"' 2>/dev/null)" || code=""
+  # Only an explicit 403 is a verdict that the ACL still denies the host. A
+  # timeout or a 5xx means the request got PAST the ACL and something upstream
+  # failed — not an enforcement problem, and not this check's business.
+  [[ "$code" != "403" ]]
+}
+
+require_window_enforced() {
+  local opened first
+  opened="$(newly_opened_domains "$backup" "$ALLOWLIST")"
+  first="$(printf '%s\n' "$opened" | grep -m1 . || true)"
+  [[ -n "$first" ]] || { echo "→ no new domains to probe (sections already open)" >&2; return 0; }
+
+  assert_window_enforced "$first" && {
+    echo "→ $PROXY is enforcing the widened list (probed $first)" >&2; return 0; }
+
+  echo "WARN: $PROXY still DENIES $first after a reload — the widened list is not" >&2
+  echo "      being enforced. Restarting the proxy and re-probing." >&2
+  docker restart "$PROXY" >/dev/null 2>&1 || { echo "ERROR: could not restart $PROXY" >&2; return 1; }
+  local i
+  for i in 1 2 3 4 5 6 7 8 9 10; do
+    sleep 1
+    assert_window_enforced "$first" && {
+      echo "→ $PROXY restarted and now enforcing the widened list" >&2; return 0; }
+  done
+  echo "ERROR: $PROXY denies $first even after a restart." >&2
+  echo "       Refusing to run the command: the window is not actually open, and the" >&2
+  echo "       install would fail with an error naming nothing (see docs/squid-internals.md)." >&2
   return 1
 }
 
@@ -460,6 +616,11 @@ trap cleanup EXIT INT TERM
 echo "→ pre-flight (OSV malicious-package check)" >&2
 preflight || exit 4
 
+# Posture pre-flight: does the workspace itself weaken the age gate? Warn-only,
+# recorded in the audit record. Runs here so the finding describes the tree as it
+# was when the window opened, not after the install rewrote lockfiles.
+posture_preflight
+
 TS_OPEN="$(date +%s)"
 snapshot > "$snap_before"
 
@@ -477,7 +638,10 @@ reload_proxy
 
 # The window is not open until the proxy can serve it. Without this the command
 # runs against the OLD allowlist and fails in a way that names nothing.
+# Two layers: the file is readable at the expected path (mount health), and squid
+# is actually enforcing it (reload health). The second is the decisive one.
 require_allowlist_visible || exit 5
+require_window_enforced || exit 5
 
 echo "→ exec $AGENT: ${cmd[*]}" >&2
 rc=0
@@ -507,7 +671,8 @@ echo "→ window ${TS_OPEN}..${TS_CLOSE} ($((TS_CLOSE - TS_OPEN))s) · hosts $(p
 mkdir -p "$AUDIT_DIR" 2>/dev/null || true
 if WE_TS_OPEN="$TS_OPEN" WE_TS_CLOSE="$TS_CLOSE" WE_PROFILE="$profile" \
    WE_SECTIONS="$sections" WE_CMD="${cmd[*]}" WE_RC="$rc" \
-   WE_PREFLIGHT="$PREFLIGHT_JSON" WE_ALLOWED="$hosts_allowed" WE_DENIED="$hosts_denied" \
+   WE_PREFLIGHT="$PREFLIGHT_JSON" WE_RC_OVERRIDES="$RC_OVERRIDE_JSON" \
+   WE_ALLOWED="$hosts_allowed" WE_DENIED="$hosts_denied" \
    WE_LOCKS="$locks_changed" WE_ADDED="$mods_added" WE_REMOVED="$mods_removed" \
    python3 - >> "$AUDIT_LOG" <<'PY'
 import os, json
@@ -526,6 +691,15 @@ try:
 except json.JSONDecodeError:
     preflight = []
 
+# Release-age overrides found in the workspace when the window opened. An entry
+# whose class is not OK means the packages resolved in this window may not have
+# been held to the age gate — without which the record would read as a clean
+# quarantined install.
+try:
+    rc_overrides = json.loads(os.environ.get("WE_RC_OVERRIDES") or "[]")
+except json.JSONDecodeError:
+    rc_overrides = []
+
 rec = {
     "ts_open":   int(os.environ["WE_TS_OPEN"]),
     "ts_close":  int(os.environ["WE_TS_CLOSE"]),
@@ -535,6 +709,7 @@ rec = {
     "cmd":       os.environ.get("WE_CMD", ""),
     "rc":        int(os.environ.get("WE_RC") or 0),
     "preflight": preflight,
+    "rc_overrides": rc_overrides,
     "egress":    {"allowed": lines("WE_ALLOWED"), "denied": lines("WE_DENIED")},
     "lockfiles_changed": lines("WE_LOCKS"),
     "modules_added":     capped("WE_ADDED"),

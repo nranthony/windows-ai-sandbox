@@ -230,7 +230,7 @@ fi
 
 # ---------------------------------------------------------------------------
 # Gate 2 — dependency-resolution quarantine (slopsquat defence).
-# work/0001-dependency-guardrails T12. These assert the LIVE values, because the
+# dependency-guardrails T12 (docs/_archive/dependency-guardrails-plan.md). These assert the LIVE values, because the
 # agent runs as root here and can edit both /usr/etc/npmrc (image layer) and
 # ~/.config/pnpm/rc (bind mount). The config is defence-in-depth, not a kernel
 # boundary — this tripwire is what makes drift surface within one `up`.
@@ -305,14 +305,24 @@ if [[ -d /workspace ]]; then
   }
 
   weaker=""; malformed=""; uncomparable=""; ok_count=0
+  # Both file kinds carry the same setting under different spellings and units:
+  #   .npmrc              min-release-age=<DAYS> | minimum-release-age=<MINUTES>
+  #   pnpm-workspace.yaml minimumReleaseAge: <MINUTES>
+  # A pnpm workspace file in a monorepo CHILD is as effective an override as an
+  # .npmrc, and was invisible here until 2026-08-03.
   while IFS= read -r rc; do
+    case "$rc" in
+      *pnpm-workspace.yaml) pat='^[[:space:]]*minimumReleaseAge[[:space:]]*:' ; sep=':' ;;
+      *)                    pat='^[[:space:]]*(min-release-age|minimum-release-age)[[:space:]]*=' ; sep='=' ;;
+    esac
     while IFS= read -r line; do
-      key="${line%%=*}"; key="${key//[[:space:]]/}"
-      val="${line#*=}";  val="${val//[[:space:]]/}"
+      key="${line%%${sep}*}"; key="${key//[[:space:]]/}"
+      val="${line#*${sep}}";  val="${val//[[:space:]]/}"
       case "$key" in
         min-release-age)     base="$g_npm_m"
                              if [[ -n "$val" && "$val" != *[!0-9]* ]]; then mins=$(( val * 1440 )); else mins=""; fi ;;
-        minimum-release-age) base="$g_pnpm_m"
+        minimum-release-age|minimumReleaseAge)
+                             base="$g_pnpm_m"
                              if [[ -n "$val" && "$val" != *[!0-9]* ]]; then mins="$val"; else mins=""; fi ;;
         *) continue ;;
       esac
@@ -323,19 +333,20 @@ if [[ -d /workspace ]]; then
         weaker="${weaker}${label} = $(fmt_window "$mins") vs global $(fmt_window "$base");  "
       else ok_count=$(( ok_count + 1 ))
       fi
-    done < <(grep -hE '^[[:space:]]*(min-release-age|minimum-release-age)[[:space:]]*=' "$rc" 2>/dev/null)
-  done < <(find /workspace -maxdepth 4 -name .npmrc -not -path '*/node_modules/*' 2>/dev/null)
+    done < <(grep -hE "$pat" "$rc" 2>/dev/null)
+  done < <(find /workspace -maxdepth 4 \( -name .npmrc -o -name pnpm-workspace.yaml \) \
+             -not -path '*/node_modules/*' 2>/dev/null)
 
   # A non-integer is worse than a weak value: pnpm computes value*60*1e3, so a
   # suffixed form yields NaN -> Invalid Date -> every version rejected.
-  [[ -n "$malformed" ]] && warn "project .npmrc has a NON-INTEGER release-age — pnpm computes value*60*1e3, so this yields Invalid Date and REJECTS EVERY VERSION (presents as a broken registry): $malformed"
-  [[ -n "$weaker" ]] && warn "project .npmrc WEAKENS the global quarantine (project > global): $weaker"
-  [[ -n "$uncomparable" ]] && warn "project .npmrc sets a release-age but the global baseline is unreadable, so it cannot be compared: $uncomparable"
+  [[ -n "$malformed" ]] && warn "project config has a NON-INTEGER release-age — pnpm computes value*60*1e3, so this yields Invalid Date and REJECTS EVERY VERSION (presents as a broken registry): $malformed"
+  [[ -n "$weaker" ]] && warn "project config WEAKENS the global quarantine (project > global): $weaker"
+  [[ -n "$uncomparable" ]] && warn "project config sets a release-age but the global baseline is unreadable, so it cannot be compared: $uncomparable"
   if [[ -z "$malformed$weaker$uncomparable" ]]; then
     if (( ok_count > 0 )); then
-      pass "$ok_count project .npmrc release-age setting(s) under /workspace meet or beat the global quarantine"
+      pass "$ok_count project release-age setting(s) under /workspace meet or beat the global quarantine"
     else
-      pass "no project .npmrc overriding the release-age quarantine under /workspace"
+      pass "no project .npmrc / pnpm-workspace.yaml overriding the release-age quarantine under /workspace"
     fi
   fi
   unset -f fmt_window
@@ -376,6 +387,52 @@ if [[ -f /etc/uv/uv.toml ]]; then
   fi
 else
   fail "/etc/uv/uv.toml absent — uv will build source distributions (Dockerfile 'Gate 3'). uv reads NO pip config, so /etc/pip.conf does not cover it"
+fi
+
+# BEHAVIOURAL assertion for the same gate, because the file check above can pass
+# while the gate is off.
+#
+# MEASURED 2026-08-03 on uv 0.12.0 in this image: `UV_NO_SYSTEM_CONFIG=1` makes uv
+# ignore /etc/uv/uv.toml entirely, and a source build that is otherwise refused
+# ("Building source distributions is disabled") installs cleanly. The env var is
+# undocumented in `uv help`. It never touches the file, so the grep above still
+# reports PASS — the exact shape of failure this repo keeps re-learning: a config
+# that looks correct and does nothing.
+#
+# So: actually try to build a trivial local package and require the refusal.
+# ~0.1s, no network (`--offline`), nothing fetched and nothing of the package's
+# code executed — the point is that uv REFUSES before any build runs.
+#
+# Honest about scope: this proves enforcement in THIS environment. The agent is
+# root in-container and can set its own env per command, so no in-container check
+# can prevent the bypass — same standing as every other config gate here
+# (defence-in-depth, not the boundary; see ARCHITECTURE.md). What it does buy is
+# that the gate cannot be silently off for the whole container without saying so.
+if command -v uv >/dev/null 2>&1; then
+  _uvg=/root/.uv-gate-probe
+  rm -rf "$_uvg"; mkdir -p "$_uvg/pkg/src/gateprobe"
+  printf '[build-system]\nrequires = ["setuptools>=61"]\nbuild-backend = "setuptools.build_meta"\n[project]\nname = "gateprobe"\nversion = "0.0.1"\n' \
+    > "$_uvg/pkg/pyproject.toml"
+  : > "$_uvg/pkg/src/gateprobe/__init__.py"
+  if uv venv "$_uvg/v" >/dev/null 2>&1; then
+    _uvout=$(uv pip install --python "$_uvg/v/bin/python" --offline "$_uvg/pkg" 2>&1)
+    if printf '%s' "$_uvout" | grep -q 'source distributions is disabled'; then
+      pass "uv wheels-only is ENFORCED (a source build was refused, not just configured)"
+    elif printf '%s' "$_uvout" | grep -qE '^ \+ gateprobe|Installed 1 package'; then
+      fail "uv BUILT a source distribution despite /etc/uv/uv.toml — Gate 3 is not in effect (check UV_NO_SYSTEM_CONFIG / UV_NO_BUILD in the environment: $(env | grep -oE 'UV_[A-Z_]+' | tr '\n' ' '))"
+    else
+      warn "uv wheels-only could not be confirmed behaviourally (probe output: $(printf '%s' "$_uvout" | tail -1))"
+    fi
+  else
+    warn "uv wheels-only not confirmed behaviourally — could not create a probe venv"
+  fi
+  rm -rf "$_uvg"
+  # A persistent bypass in the container's own environment would make every
+  # install in this session unguarded, and unlike a per-command env var it is
+  # visible from here.
+  if [[ -n "${UV_NO_SYSTEM_CONFIG:-}" ]]; then
+    fail "UV_NO_SYSTEM_CONFIG is set in the container environment — uv ignores /etc/uv/uv.toml, so Gate 3's uv half is off for every install in this session"
+  fi
 fi
 
 if [[ -f /etc/pip.conf ]]; then

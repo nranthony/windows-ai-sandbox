@@ -102,6 +102,13 @@ PROFILES_ROOT="${HOME}/.ai-sandbox/profiles"
 # mismatch here does not error, it makes the checks below read an empty result
 # and pass, which is the failure mode that hides drift rather than reporting it.
 PROXY_ALLOWLIST="/etc/squid/host/allowed_domains.txt"
+
+# Allow-direction canary for the enforcement probe. Must be a domain the repo
+# keeps permanently uncommented under ALWAYS ON — it is the one host the probe
+# expects squid NOT to deny, which catches "the proxy is enforcing some other
+# list entirely" (a case the deny sweep cannot see). Unlike the deny sweep, this
+# costs one real upstream connect per verify.
+ALLOWLIST_CANARY="api.anthropic.com"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 COMPOSE_FILE_ARGS=()
 BUILD_FLAGS=()
@@ -120,8 +127,53 @@ warn()  { printf '\033[1;33m[WARN]\033[0m  %s\n' "$*"; }
 fail()  { printf '\033[0;31m[FAIL]\033[0m  %s\n' "$*" >&2; exit 1; }
 
 # ---------------------------------------------------------------------------
+# list_denied_domains <allowlist> — the domains this repo means to DENY.
+#
+# Feeds the enforcement probe below, which asks squid whether it agrees. Getting
+# this set wrong is the one way the probe can cry wolf, so both traps are
+# handled here rather than in the caller:
+#
+#   1. Commented DOMAIN lines look like `# example.com`; PLANNING-MODE section
+#      HEADERS look like `# # --- Name [tag] ---` (double-commented so
+#      with-egress.sh can find them). Prose comments are everywhere. Only a
+#      single dotted token after `# ` is treated as a domain, which excludes
+#      headers (next char is `#`) and prose (spaces).
+#
+#   2. A domain can be commented in ONE block and live in another — e.g.
+#      github.com is commented under [quarto-install] and active under [git].
+#      Probing it would report "proxy permits what the repo denies" on a
+#      perfectly healthy profile. So the denied set is commented MINUS active,
+#      with squid's leading-dot wildcard normalised away on both sides.
+#
+#   3. Squid's `dstdomain .foo.com` matches foo.com AND every subdomain, so an
+#      ACTIVE wildcard also permits any commented host beneath it. Such a host
+#      is not actually denied; probing it would be trap 2 one level down.
+#      Commented hosts covered by an active wildcard are dropped too.
+# ---------------------------------------------------------------------------
+list_denied_domains() {
+  local allowlist="$1" commented active wild d
+  commented=$(sed -n 's/^#[[:space:]]\{1,\}\(\.\{0,1\}[A-Za-z0-9][A-Za-z0-9.-]*\.[A-Za-z][A-Za-z]\{1,\}\)[[:space:]]*$/\1/p' \
+    "$allowlist" | sed 's/^\.//' | sort -u)
+  active=$(grep -vE '^[[:space:]]*#|^[[:space:]]*$' "$allowlist" \
+    | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' | sort -u)
+  # Active wildcard parents, dot retained: `.foo.com` -> suffix test `*.foo.com`.
+  wild=$(printf '%s\n' "$active" | grep '^\.' || true)
+
+  while IFS= read -r d; do
+    [[ -n "$d" ]] || continue
+    local covered=0 w
+    while IFS= read -r w; do
+      [[ -n "$w" ]] || continue
+      [[ "$d" == *"$w" ]] && { covered=1; break; }
+    done <<< "$wild"
+    [[ "$covered" -eq 0 ]] && printf '%s\n' "$d"
+  done < <(comm -23 <(printf '%s\n' "$commented") \
+                    <(printf '%s\n' "$active" | sed 's/^\.//' | sort -u))
+}
+
+# ---------------------------------------------------------------------------
 # check_allowlist_sync — tier-1 tripwire: is the proxy ENFORCING the repo's
-# allowlist? (work/0001-dependency-guardrails T24, gap G9.)
+# allowlist? (dependency-guardrails T24, gap G9 — docs/_archive/dependency-guardrails-plan.md.)
 #
 # Two independent staleness modes, and a naive file comparison catches only one:
 #
@@ -135,10 +187,13 @@ fail()  { printf '\033[0;31m[FAIL]\033[0m  %s\n' "$*" >&2; exit 1; }
 #   Mode A — edited in place but never reloaded. The container's file is
 #     byte-identical to the repo's, so the diff is clean, but squid parsed the
 #     allowlist into memory at startup and is still enforcing the OLD set. This
-#     is INVISIBLE to any file comparison; approximated below by comparing the
-#     allowlist mtime against the proxy's start time.
+#     is INVISIBLE to any file comparison, and no timestamp settles it either
+#     (see the probe at the end of this function for why). Squid is asked
+#     directly instead.
 #
-# Deliberately makes no network call: tier 1 must work with egress down.
+# The deny sweep makes no outbound request: squid answers 403 from its parsed
+# config before touching DNS or an upstream, so tier 1 still works with egress
+# down. Only the single allowed canary opens a real connection.
 # An extra domain in the container is the dangerous direction — a host the repo
 # revoked but the proxy still permits — so that is a hard FAIL, not a warning.
 # ---------------------------------------------------------------------------
@@ -203,16 +258,91 @@ check_allowlist_sync() {
     ok "allowlist mount is live (inode $host_ino) — proxy sees host edits immediately"
   fi
 
-  # Mode A approximation: in-place edit (inode intact) that squid has not
-  # re-parsed. Only a WARN — unlike Mode B this self-resolves on any reload.
-  local started epoch_started epoch_file
-  started=$(docker inspect -f '{{.State.StartedAt}}' "$proxy" 2>/dev/null) || started=""
-  if [[ -n "$started" ]]; then
-    epoch_started=$(date -d "$started" +%s 2>/dev/null || echo 0)
-    epoch_file=$(stat -c %Y "$allowlist" 2>/dev/null || echo 0)
-    if [[ "$epoch_started" -gt 0 && "$epoch_file" -gt "$epoch_started" ]]; then
-      warn "allowlist mtime is newer than $proxy start — squid may still be enforcing the previous set (it parses at startup). Restart the proxy, or use the dashboard's 'Save & Reload Proxies'."
+  # Mode A, DECISIVE — ask squid what it is actually enforcing.
+  #
+  # This replaces an mtime heuristic (allowlist newer than the proxy's StartedAt
+  # => "may be stale"). That warn was wrong in both directions: under the
+  # directory mount every git operation touching the allowlist bumps mtime, so it
+  # fired on benign checkouts until people learned to ignore it; and StartedAt is
+  # blind to `squid -k reconfigure`, so it stayed silent after a real edit that
+  # HAD been applied. A permanently-firing warning is furniture.
+  #
+  # Instead: open a CONNECT to squid's own port from inside the proxy container
+  # and read the status line. 403 means the in-memory ACL denies the host —
+  # answered from squid's parsed config BEFORE any DNS or upstream connect, so
+  # the deny direction costs no egress and works with the internet down. That is
+  # the fact the mtime check was guessing at.
+  #
+  # Only the deny direction is swept, because that is the dangerous one (a host
+  # the repo revoked but the proxy still permits) and it is free. One allowed
+  # canary is probed to catch "squid is enforcing some other list entirely".
+  local denied probe_out n_denied
+  denied=$(list_denied_domains "$allowlist")
+  n_denied=$(printf '%s\n' "$denied" | grep -c . || true)
+
+  if [[ -e "$PROFILES_ROOT/.egress-widened-$PROFILE" ]]; then
+    info "enforcement probe skipped — a with-egress window is open for $PROFILE"
+  elif [[ "$n_denied" -eq 0 ]]; then
+    info "enforcement probe skipped — no commented-out domains to test"
+  else
+    # One exec for the whole sweep. Per-domain read timeout so a wedged squid
+    # cannot stall verify; outer timeout caps the worst case regardless.
+    probe_out=$(printf '%s\n%s\n' "$denied" "$ALLOWLIST_CANARY" \
+      | timeout 90 docker exec -i "$proxy" bash -c '
+          while IFS= read -r d; do
+            [ -n "$d" ] || continue
+            code=TIMEOUT
+            if exec 3<>/dev/tcp/127.0.0.1/3128 2>/dev/null; then
+              printf "CONNECT %s:443 HTTP/1.1\r\nHost: %s:443\r\n\r\n" "$d" "$d" >&3
+              read -t 3 -r _proto code _rest <&3 || code=TIMEOUT
+              exec 3<&- 3>&-
+            else
+              code=NOCONNECT
+            fi
+            printf "%s %s\n" "$d" "$code"
+          done' 2>/dev/null) || probe_out=""
+
+    if [[ -z "$probe_out" ]]; then
+      warn "enforcement probe could not run against $proxy — squid's in-memory allowlist was NOT verified (the file checks above still passed)"
       HOST_WARNS=$(( ${HOST_WARNS:-0} + 1 ))
+    else
+      local permitted odd unreachable canary_code
+      # The canary is the last line; everything before it is the denied sweep.
+      canary_code=$(printf '%s\n' "$probe_out" | awk -v c="$ALLOWLIST_CANARY" '$1==c {print $2}' | tail -1)
+      permitted=$(printf '%s\n' "$probe_out" | awk -v c="$ALLOWLIST_CANARY" '$1!=c && $2=="200" {print $1}')
+      odd=$(printf '%s\n' "$probe_out" | awk -v c="$ALLOWLIST_CANARY" '$1!=c && $2!="200" && $2!="403" {print $1" ("$2")"}')
+      unreachable=$(printf '%s\n' "$odd" | grep -cE '\((TIMEOUT|NOCONNECT)\)$' || true)
+
+      if [[ -n "$permitted" ]]; then
+        printf '\033[0;31m[FAIL]\033[0m  %s PERMITS a domain this repo denies — it is enforcing a stale allowlist\n' "$proxy" >&2
+        printf '%s\n' "$permitted" | sed 's/^/        proxy tunnels (repo has it commented out): /' >&2
+        printf '        NB: squid answers 200 only after connecting upstream, so each line\n' >&2
+        printf '        above is one real connection to a host the repo revoked. That is\n' >&2
+        printf '        the evidence, and the reason this is a FAIL and not a warning.\n' >&2
+        printf '        fix: docker restart %s   (or `squid -k reconfigure`)\n' "$proxy" >&2
+        rc=1
+        HOST_FAILS=$(( ${HOST_FAILS:-0} + 1 ))
+      fi
+
+      # Anything that is neither 403 nor 200 means the ACL let the request
+      # through and something later failed (503 = allowed, upstream unreachable).
+      # Arguably also a FAIL; kept a WARN until observed in the wild, because a
+      # probe-infrastructure failure must never read as an enforcement verdict.
+      if [[ -n "$odd" && "$unreachable" -eq 0 ]]; then
+        warn "enforcement probe: unexpected status from $proxy — $(printf '%s' "$odd" | tr '\n' ' ')"
+        HOST_WARNS=$(( ${HOST_WARNS:-0} + 1 ))
+      elif [[ "$unreachable" -gt 0 ]]; then
+        warn "enforcement probe: $unreachable of $n_denied domains unprobeable (squid slow or busy) — those were not verified"
+        HOST_WARNS=$(( ${HOST_WARNS:-0} + 1 ))
+      fi
+
+      if [[ "$canary_code" == "403" ]]; then
+        warn "enforcement probe: $proxy denies $ALLOWLIST_CANARY, which this repo allows — it may be enforcing a different or empty allowlist"
+        HOST_WARNS=$(( ${HOST_WARNS:-0} + 1 ))
+      fi
+
+      [[ -z "$permitted" && -z "$odd" ]] && \
+        ok "allowlist ENFORCED by $proxy ($n_denied denied domains verified 403, $ALLOWLIST_CANARY reachable)"
     fi
   fi
   return "$rc"

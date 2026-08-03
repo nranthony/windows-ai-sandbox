@@ -58,4 +58,4 @@ cannot resolve at all outside a `scripts/with-egress.sh` window. That gates
 *when* resolution may happen; `exclude-newer` gates *what* it may resolve to.
 Use it on any project where a reproducible resolution date matters.
 
-See [`work/0001-dependency-guardrails/plan.md`](../work/0001-dependency-guardrails/plan.md) T11.
+See [`docs/_archive/dependency-guardrails-plan.md`](_archive/dependency-guardrails-plan.md) T11.

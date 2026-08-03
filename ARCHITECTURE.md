@@ -48,6 +48,18 @@ See `sandbox-hardening-package.md` §4 and `docs/compose-network-ipam.md`.
   `extra_hosts` with static IPs (`egress-proxy` .10, `postgres` .20, `mongo` .30).
   This closes the DNS-exfil side channel that `internal: true` alone does NOT close.
 - Removing `internal: true` turns the proxy into a suggestion. Never do it.
+- **`proxy/` is bind-mounted as a DIRECTORY** (`./proxy:/etc/squid/host:ro`), not
+  as two files. A single-file bind mount resolves to an inode at container start,
+  so any write that *replaces* the file — `git checkout`/`merge`/`pull`/`stash`,
+  an editor's atomic save, `sed -i` — leaves the running proxy bound to the old,
+  deleted inode. It then cannot see host edits at all, and `squid -k reconfigure`
+  re-reads the stale copy and exits 0. That made the repo's allowlist *advisory*:
+  tightening it in git did not take effect on a running proxy (measured twice —
+  G9, and again on a comment-only merge). A directory mount resolves the path on
+  every `open()`, so the class is gone. Never revert it to a file mount; `verify`
+  fails loudly if you do, and the mount target is duplicated in
+  `proxy/squid.conf`'s `acl` plus three script constants that all fail *silently*
+  on a mismatch (`scripts/with-egress.test.sh` locks them together).
 
 ## Per-profile persistent state (outlives container recreates)
 

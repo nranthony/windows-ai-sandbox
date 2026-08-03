@@ -3,7 +3,7 @@
 - Status: **Rejected as a system → [ADR-0002](../adr/0002-dependency-guardrail-scope.md)**
   (Accepted 2026-08-02). Retained permanently: its **five-gate model** is the vocabulary
   the whole guardrail effort reasons in, and its per-gate evidence is cited throughout
-  [`work/0001-dependency-guardrails/plan.md`](../../work/0001-dependency-guardrails/plan.md).
+  [`docs/_archive/dependency-guardrails-plan.md`](../_archive/dependency-guardrails-plan.md).
 - Author: external draft, imported 2026-07-30
 
 **Codename:** `depgate`

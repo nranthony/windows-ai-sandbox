@@ -30,8 +30,17 @@ source of truth is config, not prose.
 
 ## Current contents
 
-| File | What | In |
-|---|---|---|
-| `securing_agentic_coding_environments_gemini_deep_research.md` | Gemini deep-research report on agentic coding environment security | 2026-07-30 |
-| `post_gpt5-6-sol_sandbox_break_ai_security_checklist_01.md` | Post-incident sandbox-break security checklist | 2026-07-30 |
-| `post_gpt5-6-sol_sandbox_break_ai_security_checklist_02.md` | Continuation of the above | 2026-07-30 |
+**Empty — last triaged 2026-08-03.** That is the intended steady state.
+
+Where the previous three went, as a worked example of the exit rule: the two
+post-incident checklists and the Gemini deep-research report all landed in
+[`docs/_archive/`](../_archive/) (each with a one-line entry in
+[`docs/index.md`](../index.md) saying what superseded it). Before archiving, the
+two things in them that were **not** already covered were extracted — the
+host-trust sections became
+[RFC-04 §8](../rfcs/04-portable-guardrails-outside-sandbox.md), and the
+shared-package-cache question became a watch item in
+[the dependency-guardrails handoff](../dependency-guardrails-handoff.md) §6.
+
+That is the pattern to repeat: **mine the delta first, then archive.** Archiving
+without extracting loses the one paragraph that was worth the read.

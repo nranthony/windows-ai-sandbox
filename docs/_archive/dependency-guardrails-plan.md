@@ -1,9 +1,20 @@
 # Dependency Guardrails — Implementation Plan
 
-**Status:** IN PROGRESS. **Phases 0 and 1 complete; phase 2 config half complete
-(T07–T12, T24, T09, T11) — 2026-07-31.** Remaining: `depaudit` (T13–T16), phase 3, phase 4.
+> **ARCHIVED 2026-08-03.** All phases (T00–T26) merged; this was moved here from
+> `work/0001-dependency-guardrails/` per its own exit rule (§13.1). **It is a
+> historical record, not current intent** — the status line below and every
+> "remaining" note in it were true on 2026-07-31 and are not now.
+>
+> For what actually shipped, what is still open, and the defect log that is the
+> real output of this work, read
+> [dependency-guardrails-handoff.md](../dependency-guardrails-handoff.md).
+> D4 (a second intel source, ever?) — the one decision this plan left open —
+> lives in that document's §6 table with its review trigger.
+
+**Status (as of 2026-07-31, superseded):** IN PROGRESS. **Phases 0 and 1 complete; phase 2 config half complete
+(T07–T12, T24, T09, T11).** Remaining: `depaudit` (T13–T16), phase 3, phase 4.
 Prerequisites T00/T01 discharged — see §0.1.
-**Exit rule:** this folder is deleted, or moved to `work/archive/`, when the work merges.
+**Exit rule (discharged):** archive to `docs/_archive/` when T22 merges — see §13.1.
 **Owner decision gate:** §13. Five decisions need an answer; four of them only block later phases.
 
 **Inputs (RFC tier):**

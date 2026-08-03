@@ -8,6 +8,14 @@
 #   extract_specs()  T18 — which package names does a command actually name?
 #   egress_hosts()   T20 — which hosts did the proxy see inside the bracket?
 #
+# Plus the third allowlist parser, which lives in profile.sh but belongs with
+# these because it reads the same file and fails the same way:
+#
+#   list_denied_domains()  — which domains does the repo mean to DENY? This
+#     feeds verify's enforcement probe, so a parser that over-matches reports a
+#     healthy proxy as permitting revoked hosts (crying wolf), and one that
+#     under-matches verifies nothing while printing a reassuring count.
+#
 # This is not incidental caution. The identical class of bug has now shipped
 # three times on this workstream: T04's dep-name extractor was line-oriented and
 # silently matched nothing on compact manifests; depaudit's lockfile parser put
@@ -26,22 +34,30 @@
 set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 SRC="$HERE/with-egress.sh"
+PROFILE_SRC="$HERE/profile.sh"
 [[ -f "$SRC" ]] || { echo "missing $SRC" >&2; exit 1; }
+[[ -f "$PROFILE_SRC" ]] || { echo "missing $PROFILE_SRC" >&2; exit 1; }
 
-# Pull a top-level `name() { ... }` block out of the real script and define it
-# here. Anchored on column-0 braces, which is how the file is written.
+# Pull a top-level `name() { ... }` block out of a real script and define it
+# here. Anchored on column-0 braces, which is how both files are written.
+# Second argument is the source file; it defaults to with-egress.sh because most
+# of what this suite covers lives there, but the allowlist parsers are split
+# across two scripts and both are locked here (see the header).
 import_fn() {
-  local fn="$1" body
+  local fn="$1" src="${2:-$SRC}" body
   body="$(awk -v f="$fn" '
     $0 ~ "^" f "\\(\\) \\{" { inside = 1 }
     inside { print }
     inside && /^\}$/ { exit }
-  ' "$SRC")"
-  [[ -n "$body" ]] || { echo "could not extract $fn() from $SRC" >&2; exit 1; }
+  ' "$src")"
+  [[ -n "$body" ]] || { echo "could not extract $fn() from $src" >&2; exit 1; }
   eval "$body"
 }
 import_fn extract_specs
 import_fn egress_hosts
+import_fn newly_opened_domains
+import_fn scan_workspace_rc
+import_fn list_denied_domains "$PROFILE_SRC"
 
 PASS=0; FAIL=0
 ok()   { PASS=$((PASS+1)); printf "  ok   %s\n" "$1"; }
@@ -202,6 +218,197 @@ if [[ -z "$stale" ]]; then
 else
   bad "stale path references remain" "none" "$(printf '%s' "$stale" | tr '\n' ' ')"
 fi
+
+# ---------------------------------------------------------------------------
+# list_denied_domains() — the enforcement probe's input set
+# ---------------------------------------------------------------------------
+# Every case below is a shape that actually occurs in proxy/allowed_domains.txt.
+# The two that matter most are the last two: they are false-FAIL generators, and
+# a false FAIL on every healthy profile is how a check becomes furniture.
+echo
+echo "list_denied_domains() — denied-set parser"
+
+DENYFIX="$(mktemp -d "${TMPDIR:-/tmp}/denyfix.XXXXXX")"
+trap 'rm -rf "$DENYFIX"' EXIT
+
+cat > "$DENYFIX/allowlist.txt" <<'EOF'
+# =============================================================================
+# Prose header. Not a domain. Mentions example.com in passing, with words.
+# =============================================================================
+api.anthropic.com
+github.com
+api.github.com
+
+# # --- Playwright browser binaries [playwright-install] ---
+# # Used by `playwright install chromium` etc.
+# cdn.playwright.dev
+# playwright.download.prss.microsoft.com
+
+# --- Quarto CLI install [quarto-install] ---
+# github.com
+# objects.githubusercontent.com
+
+# --- Python package ecosystem [pypi] ---
+# .files.pythonhosted.org
+
+# --- Wildcard-covered child ---
+.covered.example
+# child.covered.example
+EOF
+
+expect_denied() {
+  local desc="$1" want="$2" got
+  got="$(list_denied_domains "$DENYFIX/allowlist.txt" | sort | tr '\n' ' ' | sed 's/ $//')"
+  if [[ "$got" == "$want" ]]; then ok "$desc"; else bad "$desc" "$want" "$got"; fi
+}
+
+expect_denied "denied set: commented domains only, traps excluded" \
+  "cdn.playwright.dev files.pythonhosted.org objects.githubusercontent.com playwright.download.prss.microsoft.com"
+
+# Spelled out individually so a regression names the specific trap it hit.
+got_all="$(list_denied_domains "$DENYFIX/allowlist.txt")"
+for probe in "example.com:prose comment is not a domain" \
+             "Playwright:double-commented '# #' section header is not a domain" \
+             "github.com:commented under one tag but ACTIVE under another" \
+             "child.covered.example:covered by an active .wildcard parent" \
+             "api.anthropic.com:active domain is not in the denied set"; do
+  needle="${probe%%:*}"; why="${probe#*:}"
+  if printf '%s\n' "$got_all" | grep -qx "$needle"; then
+    bad "excluded: $why" "$needle absent" "$needle present"
+  else
+    ok "excluded: $why"
+  fi
+done
+
+# files.pythonhosted.org is written `# .files.pythonhosted.org` — a commented
+# wildcard. Squid would match the bare parent too, so probe it without the dot.
+if printf '%s\n' "$got_all" | grep -qx 'files.pythonhosted.org'; then
+  ok "included: commented wildcard, leading dot stripped for the probe"
+else
+  bad "included: commented wildcard, leading dot stripped" "files.pythonhosted.org" "absent"
+fi
+
+# The real file must yield a non-empty set, or the probe silently verifies
+# nothing while reporting success.
+real_count="$(list_denied_domains "$ROOT/proxy/allowed_domains.txt" | grep -c . || true)"
+if [[ "$real_count" -gt 0 ]]; then
+  ok "real allowlist yields a non-empty denied set ($real_count domains)"
+else
+  bad "real allowlist denied set" "at least 1 domain" "0 — probe would verify nothing"
+fi
+
+# github.com is the live instance of the commented-here-active-there trap.
+if list_denied_domains "$ROOT/proxy/allowed_domains.txt" | grep -qx 'github.com'; then
+  bad "real allowlist: github.com excluded" "absent (active under [git])" "present — would false-FAIL"
+else
+  ok "real allowlist: github.com excluded  <-- FALSE-FAIL LOCK"
+fi
+
+# ---------------------------------------------------------------------------
+# newly_opened_domains() — what the window just widened, i.e. what to probe
+# ---------------------------------------------------------------------------
+echo
+echo "newly_opened_domains() — window diff"
+
+cat > "$DENYFIX/before.txt" <<'EOF'
+api.anthropic.com
+github.com
+# --- Python package ecosystem [pypi] ---
+# .pypi.org
+# .files.pythonhosted.org
+EOF
+
+cat > "$DENYFIX/after.txt" <<'EOF'
+api.anthropic.com
+github.com
+# --- Python package ecosystem [pypi] ---
+.pypi.org
+.files.pythonhosted.org
+EOF
+
+expect_opened() {
+  local desc="$1" before="$2" after="$3" want="$4" got
+  got="$(newly_opened_domains "$before" "$after" | sort | tr '\n' ' ' | sed 's/ $//')"
+  if [[ "$got" == "$want" ]]; then ok "$desc"; else bad "$desc" "$want" "$got"; fi
+}
+
+expect_opened "opening [pypi] names both registry hosts" \
+  "$DENYFIX/before.txt" "$DENYFIX/after.txt" "files.pythonhosted.org pypi.org"
+
+# An already-open section must yield nothing, or every idempotent re-open would
+# probe a stale domain and could refuse a perfectly good window.
+expect_opened "idempotent re-open yields nothing to probe" \
+  "$DENYFIX/after.txt" "$DENYFIX/after.txt" ""
+
+# Direction matters: closing a section is not an opening.
+expect_opened "closing a section yields nothing (wrong direction)" \
+  "$DENYFIX/after.txt" "$DENYFIX/before.txt" ""
+
+# ---------------------------------------------------------------------------
+# scan_workspace_rc() — does the tree we are about to install into weaken the gate?
+# ---------------------------------------------------------------------------
+# Classes: OK / WEAKER / OFF / MALFORMED. MALFORMED is its own class rather than
+# a flavour of OFF because it fails CLOSED (pnpm computes value*60*1e3 -> NaN ->
+# Invalid Date -> every version rejected), which presents as a broken registry
+# and sends people looking in the wrong place.
+echo
+echo "scan_workspace_rc() — workspace quarantine overrides"
+
+WSFIX="$(mktemp -d "${TMPDIR:-/tmp}/wsfix.XXXXXX")"
+mkdir -p "$WSFIX"/{off,weak,strong,malformed,yamlweak,ignored/node_modules/pkg}
+printf 'minimum-release-age=0\n'       > "$WSFIX/off/.npmrc"
+printf 'minimum-release-age=60\n'      > "$WSFIX/weak/.npmrc"
+printf 'minimum-release-age=10080\n'   > "$WSFIX/strong/.npmrc"
+printf 'min-release-age=7\n'          >> "$WSFIX/strong/.npmrc"   # 7 DAYS = same window
+printf 'minimum-release-age=7d\n'      > "$WSFIX/malformed/.npmrc"
+printf 'minimumReleaseAge: 5\n'        > "$WSFIX/yamlweak/pnpm-workspace.yaml"
+printf 'minimum-release-age=0\n'       > "$WSFIX/ignored/node_modules/pkg/.npmrc"
+
+# Keyed on path AND setting: one file can carry several settings (strong/.npmrc
+# deliberately does), so a path-only lookup would return more than one class.
+ws_class() {  # <relative path> <setting> -> class, or MISSING
+  scan_workspace_rc "$WSFIX" \
+    | awk -F'\t' -v p="$1" -v s="$2" '$1==p && $2==s {print $3; f=1} END{if(!f) print "MISSING"}'
+}
+expect_class() {
+  local desc="$1" path="$2" setting="$3" want="$4" got; got="$(ws_class "$path" "$setting")"
+  if [[ "$got" == "$want" ]]; then ok "$desc"; else bad "$desc" "$want" "$got"; fi
+}
+
+expect_class "quarantine set to 0 is OFF" \
+  "off/.npmrc" "minimum-release-age=0" "OFF"
+expect_class "60 minutes is WEAKER than the 10080 baseline" \
+  "weak/.npmrc" "minimum-release-age=60" "WEAKER"
+expect_class "10080 minutes is OK" \
+  "strong/.npmrc" "minimum-release-age=10080" "OK"
+expect_class "suffixed '7d' is MALFORMED, not merely weak" \
+  "malformed/.npmrc" "minimum-release-age=7d" "MALFORMED"
+expect_class "child pnpm-workspace.yaml is scanned too" \
+  "yamlweak/pnpm-workspace.yaml" "minimumReleaseAge=5" "WEAKER"
+
+# npm counts DAYS, pnpm counts MINUTES. `min-release-age=7` and
+# `minimum-release-age=10080` are the SAME window; comparing the day-form against
+# the minute baseline would read as 7 minutes and report WEAKER — a 1440x error.
+expect_class "min-release-age=7 (DAYS) is OK, not WEAKER  <-- UNIT LOCK" \
+  "strong/.npmrc" "min-release-age=7" "OK"
+
+# node_modules holds thousands of vendored .npmrc files; scanning them would bury
+# the real finding.
+if scan_workspace_rc "$WSFIX" | grep -q node_modules; then
+  bad "node_modules is excluded" "no node_modules rows" "node_modules row present"
+else
+  ok "node_modules is excluded from the scan"
+fi
+
+# A clean tree must emit nothing at all, so the audit field stays empty rather
+# than carrying a reassuring "checked: 0 problems" that hides a scan that ran on
+# the wrong directory.
+if [[ -z "$(scan_workspace_rc "$WSFIX/strong/nonexistent" 2>/dev/null)" ]]; then
+  ok "a missing directory yields no rows (and no error)"
+else
+  bad "missing directory" "no output" "output present"
+fi
+rm -rf "$WSFIX"
 
 printf "\n  %d passed, %d failed\n" "$PASS" "$FAIL"
 [[ "$FAIL" -eq 0 ]]

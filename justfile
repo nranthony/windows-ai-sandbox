@@ -135,6 +135,19 @@ audit profile *args:
 deps profile *args:
     {{profile_sh}} {{profile}} deps {{args}}
 
+# offline test suites — no docker, no network, no profile. Run before committing
+# a change to any file they gate (see AGENTS.md).
+test-offline:
+    bash {{justfile_directory()}}/sandbox_templates/claude/hooks/deny-destructive.test.sh
+    bash {{justfile_directory()}}/scripts/depaudit.test.sh
+    bash {{justfile_directory()}}/scripts/with-egress.test.sh
+    bash {{justfile_directory()}}/scripts/dockerfile-order.test.sh
+
+# build-layer ordering tripwire (Dockerfile only; see the header for why the
+# order is load-bearing)
+test-dockerfile:
+    bash {{justfile_directory()}}/scripts/dockerfile-order.test.sh
+
 # ---- state management (profile.sh) ------------------------------------------
 
 # prune rotating state (old backups, paste-cache, shell-snapshots). Accepts --deep.

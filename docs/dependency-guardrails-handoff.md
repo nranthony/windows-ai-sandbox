@@ -97,7 +97,13 @@ gaps around an existing boundary, not building a system.
   - **Rule 14 `docs-install-cmd` — WARNS.** Instruction files (`AGENTS.md`, `CLAUDE.md`,
     `*.mdc`, `README`) are an executable surface: an agent reads them and acts. Warn, not
     block, because false positives here are constant.
-- Test suite: `bash sandbox_templates/claude/hooks/deny-destructive.test.sh` — **79/79**.
+  - **Rules 15/16/16b `quarantine-*` — added 2026-08-03.** Writing a file could switch
+    Gate 2 off: config precedence is `cli > env > project > user > global`, so a
+    per-directory `.npmrc` / `pnpm-workspace.yaml` overrides the sandbox-wide age gate.
+    Rule 15 blocks writes to the sandbox's OWN config by path; rule 16 blocks a payload
+    that zeroes or malforms the gate; 16b warns on anything else touching those keys,
+    because strengthening is legitimate.
+- Test suite: `bash sandbox_templates/claude/hooks/deny-destructive.test.sh` — **95/95**.
 
 ### Gate 2 — resolution quarantine
 
@@ -134,7 +140,12 @@ Also set: `registry=` pinned, `save-exact=true`, `/etc/pip.conf` index pinned wi
   - **egress diff** — distinct hosts reached inside the bracket, split permitted/denied;
   - **audit record** — one JSON line to `~/.ai-sandbox/profiles/<p>/audit/depgate.jsonl`
     (host-side, so it survives `docker rm`).
-  - Test suite: `bash scripts/with-egress.test.sh` — **38/38, fully offline**.
+  - **posture pre-flight** — release-age overrides in the workspace, classified
+    OK/WEAKER/OFF/MALFORMED and recorded as `rc_overrides`; warn-only, never blocks;
+  - **enforcement probe** — after the reload, a CONNECT probe confirms squid is actually
+    serving the widened list, and refuses to run the command if not (the file comparison
+    it replaces became near-tautological once `proxy/` was mounted as a directory).
+  - Test suite: `bash scripts/with-egress.test.sh` — **58/58, fully offline**.
 
 ### The scanner — `scripts/depaudit.py`
 
@@ -143,7 +154,7 @@ tool with its own dependency tree is self-defeating.
 
 | Subcommand | Network | Purpose |
 |---|---|---|
-| `posture <path>` | no | ~21 config checks (`N*` node, `P*` python, `X*` cross-cutting, `D*` discovery) with file+line |
+| `posture <path>` | no | ~22 config checks (`N*` node, `P*` python, `X*` cross-cutting, `D*` discovery) with file+line. **N03** finds a child directory weakening the quarantine; **X04/X05** scan the whole tree, skipping vendored/venv trees |
 | `pkg <eco> <name> [ver]` | yes | OSV lookup; `MAL-` prefix is the sole BLOCK discriminator |
 | `deps <path>` | yes | Enumerates every lockfile-pinned package → purl → OSV |
 
@@ -155,13 +166,15 @@ A **withdrawn** `MAL-` record is `INFO`, not `BLOCK` (the reported May 2026 with
 157 records, which wrongly flagged FastAPI/Strawberry GraphQL/rdflib, is the worked
 example and is pinned in the test corpus).
 
-Test suite: `bash scripts/depaudit.test.sh` — **27 offline / 28 with `--online`**, over 7
+Test suite: `bash scripts/depaudit.test.sh` — **38 offline / 39 with `--online`**, over 9
 fixtures.
 
 ### Tripwires — `scripts/profile.sh <p> verify`
 
-**38 checks per profile**, tier 1, no network. Asserts every value above and fails on
-drift. Split deliberately:
+**38 checks per profile**, tier 1. Asserts every value above and fails on drift. The deny
+sweep of the enforcement probe makes no outbound request (squid answers 403 from parsed
+config), so tier 1 still works with egress down; one allowed canary is the only real
+connection. Split deliberately:
 
 - **container-side** (`scripts/verify-sandbox.sh`, streamed in over stdin) — it can see
   neither the repo nor the proxy container;
@@ -195,14 +208,17 @@ scripts/with-egress.sh <p> --with pypi -- '<cmd>' # the ONLY install route
 python3 scripts/depaudit.py posture <path>        # offline, any repo
 python3 scripts/depaudit.py pkg npm <name>        # OSV check
 
-bash sandbox_templates/claude/hooks/deny-destructive.test.sh   # 79
-bash scripts/depaudit.test.sh [--online]                       # 27 / 28
-bash scripts/with-egress.test.sh                               # 38
+bash sandbox_templates/claude/hooks/deny-destructive.test.sh   # 95
+bash scripts/depaudit.test.sh [--online]                       # 38 / 39
+bash scripts/with-egress.test.sh                               # 58
+bash scripts/dockerfile-order.test.sh                          # 8
+just test-offline                                              # all four
 ```
 
 **After editing `proxy/allowed_domains.txt`:** reload with `docker restart
 egress-proxy-<p>` **or** `docker exec egress-proxy-<p> squid -k reconfigure`. Both work
-now — see §7 defect 5 for why that sentence has changed three times.
+now — see §7 defect 5 for why that sentence has changed three times. `verify` no longer
+takes your word for it: it probes squid directly (see §6, Mode A staleness).
 
 ---
 
@@ -210,14 +226,25 @@ now — see §7 defect 5 for why that sentence has changed three times.
 
 | Item | State |
 |---|---|
-| **Five Python projects need a wheels-only opt-out** | `job_search_agent` (forbiddenfruit, tavily), `citation_tools` (bibtexparser, sgmllib3k), `wearable_publications` (bibtexparser), `numerai` (antlr4-python3-runtime), `shrec` (python-louvain). Fix is `no-build = false` + a reason in each project's `uv.toml`. They are in the user's own repos and were deliberately not edited |
-| **Two `therapod` branches unpushed** | `engine` `0aa86d5`, `app_blast` `526212c` — carry `minimum-release-age` 1440 → 10080. Until merged, the 7-day window applies only in local working copies |
-| **`work/0001-dependency-guardrails/` archival** | Its own §13.1 exit rule says archive to `docs/_archive/` once T22 merged — which happened. **Blocked on re-homing D4 first**, the one open thread with no other home |
-| **D4 — a second intel source, ever?** | Data-gated. Every install window now records its OSV verdicts; decide from the observed `MAL-` hit rate after ~a month of real installs. If OSV never fires, a second source is not the missing piece — the age gate is doing the work |
+| **Five Python projects need a wheels-only opt-out** | **Edits written 2026-08-03 and left UNCOMMITTED for review** (four of the five trees were already dirty): `uv.toml` with `no-build = false` + a dated reason in `job_search_agent` (forbiddenfruit, tavily), `citation_tools` (bibtexparser, sgmllib3k), `wearable_publications` (bibtexparser), `shrec` (python-louvain); `numerai` gets `[tool.uv]` in its **pyproject.toml**, not a `uv.toml`, because a project `uv.toml` would make uv ignore the `[tool.uv.sources]` table and silently break its editable `../shrec` dependency. Verified end-to-end on `job_search_agent` through a real `--with pypi` window: forbiddenfruit and tavily built and installed; with the opt-out removed the same sync fails with *"marked as `--no-build` but has no binary distribution"*. Remaining: review and commit in each repo |
+| **Two `therapod` branches pushed, not merged** | `engine` (`0aa86d5`, now an ancestor of branch head `ab68b95`) and `app_blast` (`526212c`) were **published 2026-08-03** and track origin with zero divergence. Both still sit on `fix/supported-architectures`, unmerged into their `main`s, so the 7-day window applies on those branches only. Closes when the PRs land |
+| **D4 — a second intel source, ever?** | Data-gated, and this row is its home now that `work/0001` is archived. Every install window records its OSV verdicts in `~/.ai-sandbox/profiles/<p>/audit/depgate.jsonl`. **Review when ≥20 install windows are recorded** (`wc -l ~/.ai-sandbox/profiles/*/audit/depgate.jsonl`, or `scripts/profile.sh <p> deps --history`) **or on 2026-09-15, whichever comes first** — a calendar month alone is the wrong gate, because strict-by-default egress means a quiet month produces almost no data. Decide from the observed `MAL-` hit rate: if OSV never fires, a second source is not the missing piece — the age gate is doing the work |
 | **D5 — cross-port to `macolima`** | Phases 0, 1 and the npmrc layer are portable; phase 3 is not (different egress topology). Keep shell in the **bash-3.2/macOS subset** |
-| `docs/incoming/` | 3 unprocessed research files. The README says triage out, don't accumulate |
-| G10 one level deeper | Per-member `.npmrc` in monorepo children not detected |
-| X04 coverage | Does not scan `apps/*/README.md` |
+| **Shared package cache — watch item** | No shared/writable package cache or registry mirror exists today, and that is a security property rather than an omission: per-container caches are disposable writable-layer state (see the state table in `AGENTS.md`), so there is no cross-profile artifact store to poison. The July 2026 GPT-5.6 Sol escape pivoted through exactly such a shared cache. If a mirror, Verdaccio/devpi, or shared cache volume is ever proposed, it needs its own ADR and an isolation review — [ADR-0002](adr/0002-dependency-guardrail-scope.md) refuses the in-boundary registry but does not cover a cache, and [ADR-0003](adr/0003-strict-egress-default.md) covers reachability, not artifact trust. Extracted from a triaged research doc, now at [`docs/_archive/`](_archive/) |
+
+### Closed since this document was written (2026-08-03)
+
+Recorded so a reader does not go looking for work that is already done.
+
+| Was | Outcome |
+|---|---|
+| `work/0001-dependency-guardrails/` archival | Done — [`docs/_archive/dependency-guardrails-plan.md`](_archive/dependency-guardrails-plan.md), with an ARCHIVED banner. D4 was the stated blocker and now lives in the table above. The `work/archive/` vs `docs/_archive/` contradiction between `work/README.md` and §13.1 is fixed in favour of `docs/_archive/` |
+| G10 one level deeper | Done, and it was worse than "not detected" — writing one file switched Gate 2 off with nothing watching. Now: `depaudit` **N03** (static, any repo), the `verify-sandbox.sh` G10 sweep extended to child `pnpm-workspace.yaml` (dynamic, live baseline), `with-egress.sh` records overrides in the window's audit record as `rc_overrides`, and deny-hook rules **15/16/16b** block a zeroed or malformed gate while warning on anything else touching those keys |
+| X04 coverage | Done — scans the whole tree, not just the root and `docs/**`. Widening it exposed three false-positive sources in the same check (flags and shell operators captured as package names; extras forms compared unnormalised) plus a scan reaching **inside a `.venv-linux` site-packages tree** and attributing a third party's README to the user. All fixed and locked; therapod went 14 findings / 2 phantoms → 1 / 0 |
+| Mode A staleness (mtime warn) | Replaced by a decisive in-container CONNECT probe. `verify` now asks squid what it enforces: every commented-out domain must answer 403, and a 200 is a hard FAIL. The mtime warn was deleted — under the directory mount every git operation bumped mtime, so it fired on benign checkouts, and `StartedAt` never moves on `squid -k reconfigure` so it stayed silent after a real applied edit. Wrong in both directions |
+| `docs/incoming/` (3 files) | Triaged to empty — two archived, one folded into RFC-04 as a checklist, and the cache-proxy question extracted into the watch item above |
+| Dockerfile layer order guarded only by a comment | Now `scripts/dockerfile-order.test.sh` (offline), asserting the chain beads < claude/agy < npmrc < uv/pip on anchor strings rather than line numbers |
+| Directory-mount docs propagation | `ARCHITECTURE.md` and `sandbox-hardening-package.md` were never updated when the mount changed (the repo's own security-change rule 3). Done, including the from-scratch compose template a sibling repo would copy |
 
 ---
 

@@ -4,7 +4,7 @@
 Answers one question per repo: *which dependency-supply-chain controls are
 configured?* It does NOT resolve, install, or reach the network.
 
-Design constraints (work/0001-dependency-guardrails/plan.md D1, D2 and plan 01 §1):
+Design constraints (docs/_archive/dependency-guardrails-plan.md D1, D2 and plan 01 §1):
 
   * **Zero third-party dependencies.** A supply-chain audit tool must not have a
     supply chain of its own; it has to be auditable by reading it. Python 3.11+
@@ -256,21 +256,37 @@ def discover(root: Path, rep: Report) -> dict:
     elif node:
         rep.add("D01", PASS, "Single Node lockfile", ", ".join(node_locks) or "none")
 
-    # Nested projects. This scan is root-scoped, so a repo whose real manifests
-    # live one level down would otherwise report "nothing detected" and read as
-    # clean. Say so explicitly rather than under-report.
-    if not node and not py and not reqs:
-        nested = sorted({
-            str(p.parent.relative_to(root))
-            for name in ("package.json", "pyproject.toml")
-            for p in root.glob(f"*/{name}")
-            if ".venv" not in p.parts and "node_modules" not in p.parts
-        })
-        if nested:
-            rep.add("D03", WARN, "No manifests at the repo root, but nested projects exist",
-                    "This scan is root-scoped and did NOT check them — rerun per directory: "
-                    + ", ".join(nested[:8]) + (" …" if len(nested) > 8 else ""),
-                    fix="depaudit posture <path>/" + nested[0])
+    # Nested projects. This scan is root-scoped, so anything one level down is
+    # unchecked and would otherwise read as clean.
+    #
+    # This used to fire only when the root had NO manifests at all, which made it
+    # blind to the shape it matters most for: a monorepo WITH a root manifest and
+    # real projects underneath. Those children were never reported as unchecked,
+    # so "posture: clean" meant only "the root is clean". The gate now keys on
+    # whether nested manifests exist, not on whether the root is empty; the
+    # wording distinguishes the two cases because the advice differs.
+    # Depth 1 AND 2: `packages/<name>/package.json` is the standard pnpm/npm
+    # workspace layout, and a depth-1-only glob (`*/package.json`) misses every
+    # one of them — it only ever matched `apps/package.json`, which nobody writes.
+    nested = sorted({
+        str(p.parent.relative_to(root))
+        for name in ("package.json", "pyproject.toml")
+        for pat in (f"*/{name}", f"*/*/{name}")
+        for p in root.glob(pat)
+        if not skipped(p, root)
+    })
+    if nested and not node and not py and not reqs:
+        rep.add("D03", WARN, "No manifests at the repo root, but nested projects exist",
+                "This scan is root-scoped and did NOT check them — rerun per directory: "
+                + ", ".join(nested[:8]) + (" …" if len(nested) > 8 else ""),
+                fix="depaudit posture <path>/" + nested[0])
+    elif nested:
+        rep.add("D03", WARN, "Nested projects were not checked by this root-scoped scan",
+                "The root has its own manifest, so the checks above describe the ROOT ONLY. "
+                "These children carry their own dependency sets: "
+                + ", ".join(nested[:8]) + (" …" if len(nested) > 8 else ""),
+                fix="depaudit posture <path>/" + nested[0]
+                    + "   (or `profile.sh <p> deps`, which iterates children)")
 
     if node and not declared:
         rep.add("D02", WARN, "No `packageManager` pin in package.json",
@@ -287,9 +303,130 @@ def discover(root: Path, rep: Report) -> dict:
 # Node posture
 # --------------------------------------------------------------------------
 
+SKIP_DIRS = {"node_modules", ".venv", ".git", "venv", "__pycache__"}
+
+
+def skipped(p: Path, root: Path) -> bool:
+    """Is this path inside vendored / installed third-party code?
+
+    A literal name set is not enough. Virtualenvs are routinely named `.venv-linux`,
+    `.venv311`, `env`, and their `site-packages` trees carry thousands of READMEs
+    and `.npmrc` files belonging to OTHER projects. One live example: scanning a
+    real workspace surfaced `pip install babel` from
+    `pipeline/.venv-linux/.../jupyter_server/i18n/README.md` — a third party's
+    documentation, reported as if the user's own repo had written it.
+
+    `site-packages` / `dist-packages` are the reliable markers, since any venv
+    layout ends up with one regardless of what the top directory is called.
+    """
+    parts = p.relative_to(root).parts
+    if SKIP_DIRS & set(parts):
+        return True
+    return any(part in ("site-packages", "dist-packages") or part.startswith(".venv")
+               or part in ("venv", "env", ".env", ".tox", ".nox", "vendor")
+               for part in parts)
+
+
+def _child_rc_files(root: Path, max_depth: int = 4) -> list[Path]:
+    """Config files below the root that can override the quarantine.
+
+    Depth cap mirrors the container-side sweep in verify-sandbox.sh, which uses
+    `find -maxdepth 4`; the two are meant to see the same set.
+    """
+    out: list[Path] = []
+    for name in (".npmrc", "pnpm-workspace.yaml"):
+        for p in root.rglob(name):
+            rel = p.relative_to(root)
+            if len(rel.parts) < 2 or len(rel.parts) > max_depth:
+                continue  # root-level file is N02/N02p's job
+            if skipped(p, root) or any(q.is_symlink() for q in p.parents
+                                       if q != root and root in q.parents):
+                continue
+            out.append(p)
+    return sorted(out)
+
+
+def check_child_quarantine(root: Path, rep: Report) -> None:
+    """N03 — a child directory can switch the age gate off for itself.
+
+    npm/pnpm config precedence is `cli > env > project > user > global`, so a
+    per-member `.npmrc` or `pnpm-workspace.yaml` inside a monorepo child silently
+    overrides the sandbox-wide quarantine for installs run from that directory.
+    Nothing else sees this: the deny-list and the hook rules key on COMMANDS and
+    on root manifests, and N02/N02p only read the root.
+
+    Thresholds are absolute rather than compared against a live baseline. This
+    runs host-side against arbitrary repos, where no baseline exists; the
+    live-comparison form of this check is the G10 block in verify-sandbox.sh,
+    which reads the real `npm config get --location=global` inside the container.
+    Treat the two as the static and dynamic halves of one control.
+
+    ABSENCE IS NOT A FINDING, unlike root N02/N02p. A child with no rc file
+    inherits the global window, which is the wanted state — flagging it would
+    fire on every healthy monorepo member and teach people to ignore N03.
+    """
+    weak: list[tuple[str, int, str]] = []
+    broken: list[tuple[str, int, str]] = []
+    fine = 0
+
+    for p in _child_rc_files(root):
+        rel = str(p.relative_to(root))
+        if p.name == ".npmrc":
+            # npm counts DAYS, pnpm counts MINUTES; normalise to minutes so one
+            # threshold serves both. Getting this backwards is a 1440x error.
+            for key, mult in (("min-release-age", 1440), ("minimum-release-age", 1)):
+                val, ln = ini_get(p, key)
+                if val is None:
+                    continue
+                if not val.isdigit():
+                    broken.append((rel, ln, f"{key}={val}"))
+                elif int(val) == 0:
+                    weak.append((rel, ln, f"{key}=0 (quarantine off)"))
+                elif int(val) * mult < 1440:
+                    weak.append((rel, ln, f"{key}={val} (under 24h)"))
+                else:
+                    fine += 1
+        else:
+            val, ln = yaml_lookup(p, "minimumReleaseAge")
+            if val is None:
+                continue
+            val = val.strip()
+            if not val.isdigit():
+                broken.append((rel, ln, f"minimumReleaseAge: {val}"))
+            elif int(val) == 0:
+                weak.append((rel, ln, "minimumReleaseAge: 0 (quarantine off)"))
+            elif int(val) < 1440:
+                weak.append((rel, ln, f"minimumReleaseAge: {val} (under 24h)"))
+            else:
+                fine += 1
+
+    if broken:
+        rel, ln, what = broken[0]
+        rep.add("N03", FAIL, "Child quarantine value is not a plain integer",
+                f"{what} in {rel} — a suffixed value gives an Invalid Date cutoff and "
+                "REJECTS EVERY VERSION, which fails closed and presents as a broken "
+                "registry" + (f"; {len(broken)} such files" if len(broken) > 1 else ""),
+                file=rel, line=ln, fix="Use plain minutes, e.g. 10080 for 7 days")
+    elif weak:
+        rel, ln, what = weak[0]
+        rep.add("N03", FAIL, "A child directory weakens the resolution quarantine",
+                f"{what} in {rel} — config precedence is cli > env > project > user > "
+                "global, so this overrides the global window for installs run from that "
+                "directory" + (f"; {len(weak)} such files" if len(weak) > 1 else ""),
+                file=rel, line=ln,
+                fix="Remove the override so the child inherits the global window, or raise "
+                    "it to at least 1440 minutes (10080 = 7d)")
+    elif fine:
+        rep.add("N03", PASS, "Child quarantine overrides are at least as strong",
+                f"{fine} nested override(s) checked, none weaker than 24h")
+
+
 def check_node(root: Path, rep: Report, ctx: dict) -> None:
     if not ctx["node"]:
         rep.add("N00", NA, "Node toolchain not present", "no Node lockfile or manifest")
+        # A child .npmrc can still switch the gate off for a nested project even
+        # when the ROOT has no Node toolchain, so this runs before the bail.
+        check_child_quarantine(root, rep)
         return
 
     npmrc = root / ".npmrc"
@@ -406,6 +543,8 @@ def check_node(root: Path, rep: Report, ctx: dict) -> None:
             rep.add("N02", FAIL, "No npm resolution quarantine", "min-release-age unset",
                     file=".npmrc" if npmrc.exists() else "",
                     fix="Add `min-release-age=7` to .npmrc (unit is DAYS, unlike pnpm)")
+
+    check_child_quarantine(root, rep)
 
     # --- N04 / N05: registry pinning --------------------------------------
     reg, rl = ini_get(npmrc, "registry")
@@ -601,17 +740,46 @@ def check_cross(root: Path, rep: Report, ctx: dict) -> None:
     # --- X04: instruction files are executable surfaces -------------------
     # The check most implementations skip, and the one this estate is most
     # exposed to: an install command in AGENTS.md is executed by the next agent.
+    # Scans the WHOLE tree, not just the root and docs/. The previous globs were
+    # `<name>` plus `docs/**/<name>`, which missed the shape that matters most in
+    # a monorepo: apps/<x>/README.md and packages/<x>/AGENTS.md are read by an
+    # agent working in that subdirectory, and are exactly where a per-app setup
+    # instruction lives.
+    #
+    # Fenced code blocks are NOT excluded, deliberately. An install command inside
+    # a ``` block is if anything more likely to be copied verbatim — being tracked
+    # here is the point. (An earlier version computed an `in_fence` flag and never
+    # used it, so this was already the behaviour; the dead variable is gone.)
     hits: list[tuple[str, int, str, str]] = []
+    seen_docs: set[Path] = set()
     for name in DOC_TARGETS:
-        for p in list(root.glob(name)) + list(root.glob(f"docs/**/{name}")):
-            text = read(p)
-            in_fence = False
-            for n, line in enumerate(text.splitlines(), 1):
-                if line.lstrip().startswith("```"):
-                    in_fence = not in_fence
+        for p in sorted(root.rglob(name)):
+            if skipped(p, root) or p in seen_docs:
+                continue
+            seen_docs.add(p)
+            for n, line in enumerate(read(p).splitlines(), 1):
                 m = INSTALL_CMD.search(line)
-                if m:
-                    hits.append((str(p.relative_to(root)), n, m.group(1).strip(), m.group(2)))
+                if not m:
+                    continue
+                arg = m.group(2)
+                # A flag is not a package name. `pnpm install --frozen-lockfile`
+                # and `npm install -g` name nothing to verify — the first is a
+                # LOCKFILE install, whose versions were already held to the age
+                # gate when the lockfile was written (the same reason
+                # with-egress.sh's extract_specs skips them). Counting them
+                # inflates X04 and puts flags in front of the reader as though
+                # they were packages.
+                if arg.startswith("-"):
+                    continue
+                # Nor is a shell operator. `npm install && npm run build` captured
+                # `&&` and then reported it as a phantom package, which is the
+                # false-phantom failure mode in its purest form. A package name
+                # starts alphanumeric or `@` (npm scopes) — prose words that happen
+                # to follow an install verb still slip through, which is why X04 is
+                # a WARN and not a FAIL.
+                if not re.match(r"^[@A-Za-z0-9][A-Za-z0-9._@/+-]*$", arg):
+                    continue
+                hits.append((str(p.relative_to(root)), n, m.group(1).strip(), arg))
     if hits:
         rep.add("X04", WARN, "Install commands in instruction files",
                 f"{len(hits)} occurrence(s) — these are run by the next agent and pasted by "
@@ -624,25 +792,48 @@ def check_cross(root: Path, rep: Report, ctx: dict) -> None:
                 f"checked {', '.join(DOC_TARGETS)}")
 
     # --- X05: docs name packages the manifests do not have ----------------
+    # Reads CHILD manifests as well as the root's, because X04 now finds hits in
+    # child docs. An `npm install express` in apps/web/README.md is declared if
+    # apps/web/package.json declares it — comparing against the root manifest
+    # alone would report it as a phantom, and a false phantom is worse than a
+    # missed one: it sends someone hunting for an injection that is not there.
     declared: set[str] = set()
-    pkg = root / "package.json"
-    if pkg.exists():
+    for pkg in [root / "package.json",
+                *sorted(root.glob("*/package.json")),
+                *sorted(root.glob("*/*/package.json"))]:
+        if not pkg.exists() or skipped(pkg, root):
+            continue
         try:
             j = json.loads(read(pkg)) or {}
             for k in ("dependencies", "devDependencies", "optionalDependencies"):
                 declared |= set((j.get(k) or {}).keys())
         except json.JSONDecodeError:
             pass
-    pyproject = root / "pyproject.toml"
-    if pyproject.exists():
+    for pyproject in [root / "pyproject.toml",
+                      *sorted(root.glob("*/pyproject.toml")),
+                      *sorted(root.glob("*/*/pyproject.toml"))]:
+        if not pyproject.exists() or skipped(pyproject, root):
+            continue
         try:
             d = tomllib.loads(read(pyproject))
             for dep in (d.get("project", {}) or {}).get("dependencies", []) or []:
                 declared.add(re.split(r"[<>=!~\[ ]", dep)[0])
         except (tomllib.TOMLDecodeError, ValueError):
             pass
-    phantom = sorted({pkg_ for _, _, _, pkg_ in hits
-                      if pkg_ not in declared and not pkg_.startswith(("-", "."))})
+    # Normalise the doc-named package the SAME way the declared set is built
+    # (`re.split(r"[<>=!~\[ ]", dep)[0]` above), or an extras/version form reports
+    # as a phantom while the plain name is declared. Live example: docs say
+    # `pip install paperbridge[zotero,bibtex]`, pyproject declares
+    # `paperbridge[zotero,bibtex] @ git+...` which normalises to `paperbridge` —
+    # comparing the raw strings made a correctly-declared package a phantom.
+    # A false phantom is worse than a missed one: it sends someone hunting for an
+    # injection that does not exist.
+    def _norm(name: str) -> str:
+        return re.split(r"[<>=!~\[@ ]", name)[0].strip()
+
+    phantom = sorted({_norm(pkg_) for _, _, _, pkg_ in hits
+                      if _norm(pkg_) and _norm(pkg_) not in declared
+                      and not pkg_.startswith(("-", "."))})
     if phantom:
         rep.add("X05", WARN, "Packages named in docs but absent from manifests",
                 "Phantom instruction — a future agent installs a name nothing has vetted: "

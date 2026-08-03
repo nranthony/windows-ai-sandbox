@@ -48,9 +48,53 @@ Tmpfs-backed `proxy:proxy 0640` — forensic trail of every request, resets on `
    rather than taking the instruction.
 
 Squid parses the allowlist into memory at start, so a container-side `grep` shows the
-*file*, not what is being *enforced*. Only a reload (or an egress probe) settles that.
-This is the benign staleness mode: it self-resolves on any reload, and `verify` warns when
-the file's mtime is newer than the proxy's start.
+*file*, not what is being *enforced*. Only a reload (or a probe) settles that. This is the
+benign staleness mode — it self-resolves on any reload — and `verify` now settles it
+decisively rather than guessing; see the next section.
+
+### Enforcement probe (what `verify` actually asks)
+
+`scripts/profile.sh <p> verify` asks squid directly. From **inside** the proxy container it
+opens `/dev/tcp/127.0.0.1/3128` and sends `CONNECT <domain>:443` for every domain the repo
+has **commented out**, then reads the status line:
+
+| Response | Meaning | Verdict |
+|---|---|---|
+| `403` | the in-memory ACL denies it | expected — one summary line |
+| `200` | squid **tunnels** a host the repo revoked | **FAIL** — stale enforcement |
+| other (`503`, …) | ACL passed it, something later failed | WARN |
+| no answer | probe could not run; nothing verified | WARN, never FAIL |
+
+Two properties make this affordable in tier 1. A **403 comes from parsed config before any
+DNS lookup or upstream connect**, so sweeping ~45 denied domains costs no egress and works
+with the internet down. And it needs no section→host mapping — the file itself states which
+domains are meant to be denied. (`bash` and `/dev/tcp` are both present in the pinned
+`ubuntu/squid` image; no `squidclient`, `curl` or `nc` is, and the cache manager is
+unreachable because port 3128 is not in `Safe_ports`.)
+
+Building that denied set is the one place this can cry wolf, so three shapes are excluded
+and locked by `scripts/with-egress.test.sh`: double-commented `# # --- Name [tag] ---`
+section headers, prose comments, and — the live one — a domain commented under one tag while
+**active** under another (`github.com` is commented under `[quarto-install]` and live under
+`[git]`). Commented hosts covered by an *active* `.wildcard` parent are dropped too.
+
+One allowed **canary** (`api.anthropic.com`) is probed and expected not to 403. That costs
+one real connection and catches what the deny sweep cannot: squid enforcing some other
+allowlist, or an empty one.
+
+A `200` in the deny direction means squid completed a connection to a revoked host in order
+to answer — unavoidable, and it *is* the evidence. It is also why the probe skips itself
+while a `with-egress.sh` window is open (sentinel
+`~/.ai-sandbox/profiles/.egress-widened-<p>`): it must never write into an audit bracket.
+
+**Why not a timestamp.** `verify` used to warn when the allowlist's mtime was newer than the
+proxy's `StartedAt`. That was wrong in both directions: under the directory mount every git
+operation touching the file bumps mtime, so it fired on benign checkouts until it became
+furniture; and `StartedAt` does not move on `squid -k reconfigure`, so it stayed silent after
+a real edit that *had* been applied. Deleted, not demoted. The manual equivalent is still
+useful when debugging — `docker exec -u proxy egress-proxy-<p> grep -E 'Starting Squid
+Cache|Reconfiguring Squid Cache' /var/log/squid/cache.log | tail -1` gives the last parse
+time (tmpfs, so current container only).
 
 ### The mount is what made reconfigure unreliable — fixed 2026-08-03
 

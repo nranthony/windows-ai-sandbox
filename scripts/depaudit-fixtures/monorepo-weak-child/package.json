@@ -1,0 +1,2 @@
+{ "name": "monorepo-root", "packageManager": "pnpm@10.34.5",
+  "dependencies": { "express": "4.21.2" } }
