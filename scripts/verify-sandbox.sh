@@ -389,6 +389,52 @@ else
   fail "/etc/uv/uv.toml absent — uv will build source distributions (Dockerfile 'Gate 3'). uv reads NO pip config, so /etc/pip.conf does not cover it"
 fi
 
+# BEHAVIOURAL assertion for the same gate, because the file check above can pass
+# while the gate is off.
+#
+# MEASURED 2026-08-03 on uv 0.12.0 in this image: `UV_NO_SYSTEM_CONFIG=1` makes uv
+# ignore /etc/uv/uv.toml entirely, and a source build that is otherwise refused
+# ("Building source distributions is disabled") installs cleanly. The env var is
+# undocumented in `uv help`. It never touches the file, so the grep above still
+# reports PASS — the exact shape of failure this repo keeps re-learning: a config
+# that looks correct and does nothing.
+#
+# So: actually try to build a trivial local package and require the refusal.
+# ~0.1s, no network (`--offline`), nothing fetched and nothing of the package's
+# code executed — the point is that uv REFUSES before any build runs.
+#
+# Honest about scope: this proves enforcement in THIS environment. The agent is
+# root in-container and can set its own env per command, so no in-container check
+# can prevent the bypass — same standing as every other config gate here
+# (defence-in-depth, not the boundary; see ARCHITECTURE.md). What it does buy is
+# that the gate cannot be silently off for the whole container without saying so.
+if command -v uv >/dev/null 2>&1; then
+  _uvg=/root/.uv-gate-probe
+  rm -rf "$_uvg"; mkdir -p "$_uvg/pkg/src/gateprobe"
+  printf '[build-system]\nrequires = ["setuptools>=61"]\nbuild-backend = "setuptools.build_meta"\n[project]\nname = "gateprobe"\nversion = "0.0.1"\n' \
+    > "$_uvg/pkg/pyproject.toml"
+  : > "$_uvg/pkg/src/gateprobe/__init__.py"
+  if uv venv "$_uvg/v" >/dev/null 2>&1; then
+    _uvout=$(uv pip install --python "$_uvg/v/bin/python" --offline "$_uvg/pkg" 2>&1)
+    if printf '%s' "$_uvout" | grep -q 'source distributions is disabled'; then
+      pass "uv wheels-only is ENFORCED (a source build was refused, not just configured)"
+    elif printf '%s' "$_uvout" | grep -qE '^ \+ gateprobe|Installed 1 package'; then
+      fail "uv BUILT a source distribution despite /etc/uv/uv.toml — Gate 3 is not in effect (check UV_NO_SYSTEM_CONFIG / UV_NO_BUILD in the environment: $(env | grep -oE 'UV_[A-Z_]+' | tr '\n' ' '))"
+    else
+      warn "uv wheels-only could not be confirmed behaviourally (probe output: $(printf '%s' "$_uvout" | tail -1))"
+    fi
+  else
+    warn "uv wheels-only not confirmed behaviourally — could not create a probe venv"
+  fi
+  rm -rf "$_uvg"
+  # A persistent bypass in the container's own environment would make every
+  # install in this session unguarded, and unlike a per-command env var it is
+  # visible from here.
+  if [[ -n "${UV_NO_SYSTEM_CONFIG:-}" ]]; then
+    fail "UV_NO_SYSTEM_CONFIG is set in the container environment — uv ignores /etc/uv/uv.toml, so Gate 3's uv half is off for every install in this session"
+  fi
+fi
+
 if [[ -f /etc/pip.conf ]]; then
   if grep -qE '^[[:space:]]*only-binary[[:space:]]*=[[:space:]]*:all:' /etc/pip.conf; then
     # An exemption is legitimate but must be visible — same discipline as npm's

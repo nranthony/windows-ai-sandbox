@@ -75,7 +75,7 @@ can only build from source. Same discipline as npm's `allow-scripts` allowlist.
   existing, which is exactly what a slopsquat miss looks like. Anyone debugging a
   "nonexistent package" under pip should check this ADR before concluding the name is
   wrong. uv's message is the reason to prefer uv here.
-- `verify` gains two tripwires (36 → 38 checks). Both are asserted separately because
+- `verify` gains three tripwires (36 → 39 checks; the third is behavioural — see the addendum). Both are asserted separately because
   checking one would leave the other silently open.
 - ML/CUDA packages are unaffected in practice — torch, numpy, scipy and friends all ship
   manylinux wheels. The friction lands on small pure-Python packages whose maintainers
@@ -95,3 +95,60 @@ can only build from source. Same discipline as npm's `allow-scripts` allowlist.
 - **Block at the proxy instead** (refuse `.tar.gz` from PyPI). Rejected: Squid gates hosts,
   not artifact types, and adding content inspection to the egress path contradicts
   [ADR-0002](0002-dependency-guardrail-scope.md).
+
+## Addendum 2026-08-03 — `UV_NO_SYSTEM_CONFIG` bypasses the file, and the check now catches it
+
+The decision above stands unchanged. What follows is a measured correction to how it is
+*verified*.
+
+**Finding.** `UV_NO_SYSTEM_CONFIG=1` makes uv ignore `/etc/uv/uv.toml` entirely. Measured on
+uv **0.12.0** in this image (host uv is 0.11.16 — check semantics where they run):
+
+```
+$ uv pip install --offline ./pkg
+error: Failed to prepare distributions
+  Caused by: Building source distributions is disabled, but attempted to build `probepkg`
+
+$ UV_NO_SYSTEM_CONFIG=1 uv pip install --offline ./pkg
+Installed 1 package  + probepkg==0.0.1
+```
+
+The variable is **undocumented in `uv help`**; it was found by reading strings in the binary.
+
+**Why this mattered more than the bypass itself.** The bypass never touches the file, so
+`verify`'s existing check — a grep for `no-build = true` — still reported **PASS** while the
+gate was off. That is the failure shape this repo keeps re-learning: *a config that looks
+correct and does nothing* (see the handoff's retrospective, lessons 2 and 3). The check was
+asserting the wrong thing, not merely missing a case.
+
+**Fix.** `verify` now also asserts the gate **behaviourally**: it builds a trivial local
+package and requires uv to refuse. ~0.1s, `--offline`, nothing fetched and no package code
+executed — the whole point is that uv refuses *before* any build runs. It also fails if
+`UV_NO_SYSTEM_CONFIG` is present in the container environment. Negative-tested: with the
+variable set, the file check still passes while the behavioural check fails and names it.
+
+**Scope, stated honestly.** The agent is root in-container and sets its own environment, so
+no in-container check can *prevent* this — same standing as every other config gate here
+(defence-in-depth, not the boundary; the boundary is rootless Docker plus the egress
+topology). What the check buys is that the gate cannot be silently off for a whole session
+without saying so, and that a `verify` PASS now means "enforced" rather than "configured".
+
+The generalisable rule, worth applying to the other gates: **assert the effect, not the
+file.** Any gate whose configuration can be overridden by environment, precedence, or a
+per-project file needs at least one probe of its actual behaviour. `min-release-age` has the
+same property (project config overrides global — that is what deny-hook rules 15/16 and
+`depaudit` N03 address), and `verify`'s allowlist enforcement probe is the same idea applied
+to Squid.
+
+### Related asymmetry, worth knowing before reaching for a workaround
+
+pip and uv differ in exactly the direction that matters when one package needs a build:
+
+| | Per-package exemption? | So a single sdist-only dependency… |
+|---|---|---|
+| pip | **Yes** — `no-binary = <name>` beside `only-binary = :all:` | …is a surgical, one-name change |
+| uv | **No** — every per-package key (`no-build-package`, `no-binary-package`) *narrows*, never grants | …forces a wholesale `no-build = false` for the project |
+
+This is why the five opt-outs are project-wide rather than package-scoped, and it is a reason
+to reach for pip's config when only one dependency is the problem — the opposite of the
+usual advice on this image, where uv is preferred for its clearer failure message.
