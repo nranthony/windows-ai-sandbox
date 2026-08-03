@@ -413,19 +413,49 @@ RUN mkdir -p /usr/etc \
  && npm config get save-exact | grep -qx true \
  && claude --version
 
-# pip has no native age gate (that is proxy-enforced here: the registries are
-# closed unless a with-egress window is open). This pins the index and, by its
-# absence, documents that NO extra-index-url is set — that flag is a
-# dependency-confusion vector, since pip may prefer whichever index offers the
-# higher version. Wheels-only (`--only-binary :all:`, the pip analogue of script
-# blocking, since sdists run setup.py at build time) is deliberately NOT set yet:
-# it is the highest-friction control on a CUDA/ML image and is gated behind real
-# sdist-usage data. See plan.md T23.
-RUN printf '%s\n' \
+# ---------- Gate 3 (Python): wheels only ------------------------------------
+# T23 / ADR-0004. An sdist runs setup.py (or a PEP-517 backend) at INSTALL time —
+# it is the exact Python analogue of an npm lifecycle script, which this image
+# already blocks. Wheels are inert: unpacked, not executed.
+#
+# Enabled on measured data, not on principle. Across 16 real lockfiles in these
+# profiles: 565 distinct packages, of which 522 publish an sdist but only 6 have
+# NO wheel and therefore must build from source. Blocking source builds costs
+# 1.1% of packages and buys the default-deny that stops the NEXT one silently.
+# (depaudit's P08 originally counted "publishes an sdist" and reported 522 as the
+# risk surface — an ~87x over-report that stalled this decision. Fixed.)
+#
+# BOTH tools need configuring and they do NOT share config:
+#   uv  reads /etc/uv/uv.toml (verified: it reads NO pip config at all)
+#   pip reads /etc/pip.conf
+#
+# Escape hatches differ, which matters when a build legitimately must happen:
+#   uv  — no per-package exemption key exists. A project opts OUT wholesale with
+#         `no-build = false` in its own uv.toml / [tool.uv]; verified to override
+#         this system default.
+#   pip — `no-binary = <pkg>` exempts one package while `:all:` still applies to
+#         the rest. Verified.
+#
+# pip's refusal message is a trap worth knowing: it reads "Could not find a
+# version that satisfies the requirement X (from versions: none)", which is
+# indistinguishable from the package not existing — i.e. it looks exactly like a
+# slopsquat miss. uv's message names the real reason.
+RUN mkdir -p /etc/uv \
+ && printf '%s\n' \
+      '# Managed by Dockerfile — see the Gate 3 block there before editing.' \
+      '# Refuse to build source distributions: an sdist executes code at install' \
+      '# time, a wheel does not. Override per project with no-build = false.' \
+      'no-build = true' \
+    > /etc/uv/uv.toml \
+ && printf '%s\n' \
       '[global]' \
       '# Managed by Dockerfile. No extra-index-url: dependency-confusion vector.' \
       'index-url = https://pypi.org/simple' \
-    > /etc/pip.conf
+      '# Wheels only — sdists run setup.py at install time (Gate 3 / ADR-0004).' \
+      '# Exempt a single package with:  no-binary = <name>' \
+      'only-binary = :all:' \
+    > /etc/pip.conf \
+ && uv --version
 
 # ---------- runtime layout ---------------------------------------------------
 # Expected bind mounts (see docker-compose.yml):

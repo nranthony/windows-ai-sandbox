@@ -87,9 +87,26 @@ expect docs-injection X05  WARN "the named package is in no manifest — phantom
 # --- python ---
 expect python-uv      P03  PASS "uv.lock present"
 expect python-uv      P04  PASS "exclude-newer set"
-expect python-uv      P08  WARN "one dependency resolves to an sdist"
+expect python-uv      P08  WARN "one dependency has NO wheel and must build from source"
 expect pip-confusion  P06  FAIL "extra-index-url is a dependency-confusion vector"
 expect pip-confusion  P05  PASS "index-url pinned"
+
+# REGRESSION LOCK. P08 must count sdist-ONLY packages, not every package that
+# publishes an sdist alongside wheels. The fixture's `idna` has both; if it is
+# named in the detail string the check has reverted to `"sdist" in p`, which
+# over-reported by ~87x on real lockfiles and produced the number that gated T23.
+p08_detail=$(python3 "$DA" posture "$FIX/python-uv" --format json --fail-on never 2>/dev/null \
+  | python3 -c "
+import sys, json
+f=[x for x in json.load(sys.stdin)['findings'] if x['id']=='P08']
+print(f[0].get('detail','') if f else '')" )
+if [[ "$p08_detail" == *idna* ]]; then
+  FAIL=$((FAIL+1)); printf "  FAIL P08 counted a package that HAS wheels (idna)  <-- the 87x over-report is back\n"
+elif [[ "$p08_detail" == *requests* ]]; then
+  PASS=$((PASS+1)); printf "  ok   P08 counts sdist-ONLY, ignores sdist+wheels  <-- REGRESSION LOCK\n"
+else
+  FAIL=$((FAIL+1)); printf "  FAIL P08 detail named neither requests nor idna: %s\n" "$p08_detail"
+fi
 
 printf "\n-- lockfile enumeration (offline) --\n"
 # Locks the peer-dependency-suffix bug: pnpm v9 keys look like

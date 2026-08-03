@@ -10,6 +10,7 @@ right: an **RFC** proposes → an **ADR** records → **work/** implements → t
   - [ADR-0001](adr/0001-provenance-tiers.md) — adopt these tiers *(Accepted)*
   - [ADR-0002](adr/0002-dependency-guardrail-scope.md) — dependency guardrails: what we deliberately do not build *(Accepted 08-02)*
   - [ADR-0003](adr/0003-strict-egress-default.md) — registries unreachable by default; installs open a bounded window *(Accepted 08-02)*
+  - [ADR-0004](adr/0004-python-wheels-only.md) — Python installs are wheels-only; source builds opted into per project *(Accepted 08-03)*
 - [docs/rfcs/](rfcs/) — proposals, with their resolution ([TEMPLATE.md](rfcs/TEMPLATE.md))
   - [DEPENDENCY_GUARDRAILS.md](rfcs/DEPENDENCY_GUARDRAILS.md) — slopsquatting threat + agent behavioural rules — **shipped**, phase 0
   - [01-posture-scanner-plan.md](rfcs/01-posture-scanner-plan.md) — `depaudit` posture/inventory scanner — **built in part** as `scripts/depaudit.py`
@@ -41,7 +42,7 @@ right: an **RFC** proposes → an **ADR** records → **work/** implements → t
 |---|---|---|
 | 1 | [`scripts/verify-sandbox.sh`](../scripts/verify-sandbox.sh) | Fast tripwire (~57 pass/fail/warn outcomes across ~28 checks) |
 | 2 | [`scripts/audit/`](../scripts/audit/) | ~80 structured probes, JSON output ([README](../scripts/audit/README.md)) |
-| — | [`scripts/depaudit.test.sh`](../scripts/depaudit.test.sh) | depaudit regression suite (26 offline, `--online` adds the OSV corpus) over [fixtures](../scripts/depaudit-fixtures/) |
+| — | [`scripts/depaudit.test.sh`](../scripts/depaudit.test.sh) | depaudit regression suite (27 offline, `--online` adds the OSV corpus) over [fixtures](../scripts/depaudit-fixtures/) |
 | — | [`scripts/with-egress.test.sh`](../scripts/with-egress.test.sh) | install-window parser suite (29, fully offline — no docker, no network) |
 | 3 | [`sandbox_templates/skills/audit-sandbox/SKILL.md`](../sandbox_templates/skills/audit-sandbox/SKILL.md) | Agent-side judgment over tier-2 JSON (staged into container by `profile.sh audit`) |
 

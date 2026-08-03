@@ -953,7 +953,7 @@ not a degraded one (upstream ADR-0003).
 | ~~T21~~ | ~~Filesystem diff~~ — **DONE 08-03**, folded into the T19 snapshot | 3 | — | — |
 | ~~T22~~ | ~~Persist to host audit log~~ — **DONE 08-03**, + `deps --history` | 3 | — | — |
 | ~~T25~~ | ~~Stale bind-mount detection~~ — **DONE 08-03** *(new, §20)*, inode check in `verify` + self-heal in `with-egress.sh` | 3 | — | — |
-| T23 | Python wheels-only, staged | 4 | TBD | T22 telemetry |
+| ~~T23~~ | ~~Python wheels-only~~ — **DONE 08-03**, ADR-0004; the gating number was an 87x over-report | 4 | — | — |
 
 **Suggested order.** ~~T00 + T01 first~~ — **both done 2026-07-31**; they removed one task
 (T17) and added another (T24). Next: **phase 1 in full** — half a day, closes the
@@ -1408,3 +1408,62 @@ together (38 assertions, up from 29).
 bind-mounted directory is a view. The first incident produced better documentation of the
 trap; the class only went away when the trap did. A mitigation that requires a human to
 remember an invisible coupling is not a mitigation.
+
+---
+
+## 22. T23 result (2026-08-03) — phase 4 complete, and the gate was measuring the wrong thing
+
+Recorded as [ADR-0004](../../docs/adr/0004-python-wheels-only.md). Summary and the parts
+that generalise:
+
+**The data this task was gated on was wrong, and the tool we built produced it.** `P08`
+counted any lockfile entry containing an `sdist` key. Almost every package on PyPI publishes
+an sdist *alongside* its wheels and uv installs the wheel, so the check measured "publishes
+an sdist", not "builds from source".
+
+| Metric | Count | Share of 565 |
+|---|---|---|
+| Publish an sdist — the old, wrong metric | 522 | 92.4% |
+| **No wheel at all — must build from source** | **6** | **1.1%** |
+
+`dashboard`, cited in §19 as having "45 sdists" and used as evidence that image-wide
+enforcement was not viable, has **zero**. The decision had been deferred for days on a
+number that was off by ~87x. P08 is fixed and the fixture now carries a package with *both*
+an sdist and wheels as a regression lock.
+
+**Decision: wheels-only image-wide, per-project opt-out.** `no-build = true` in
+`/etc/uv/uv.toml` and `only-binary = :all:` in `/etc/pip.conf`. The two are asserted
+separately by `verify` (36 → 38 checks) because **uv reads no pip config at all** — checking
+one would have left the other silently open, and uv is the primary installer here.
+
+**Measured, not assumed**, since both tools' escape hatches differ:
+
+| | Global switch | Per-package exemption | Project opt-out |
+|---|---|---|---|
+| uv | `no-build = true` | **none exists** (`no-build-package` is the narrowing form) | `no-build = false` — verified to override the system default |
+| pip | `only-binary = :all:` | `no-binary = <name>` — verified | via the same file |
+
+**Five projects need a two-line opt-out** and will fail to install until they get one:
+`job_search_agent` (forbiddenfruit, tavily), `numerai` (antlr4-python3-runtime), `shrec`
+(python-louvain), `citation_tools` (bibtexparser, sgmllib3k), `wearable_publications`
+(bibtexparser). That is the control working. They live in the user's own repos and were
+deliberately not edited from here.
+
+**A trap worth carrying forward:** pip's refusal reads `Could not find a version that
+satisfies the requirement X (from versions: none)` — indistinguishable from the package not
+existing, which is precisely what a slopsquat miss looks like. uv names the real reason.
+Anyone debugging a "nonexistent package" under pip should suspect this first.
+
+### The generalisable lesson
+
+This is the fifth wrong check on this workstream and the most expensive, because it did not
+fail — it produced a confident number that *stopped work*. The previous four (two inverted
+depaudit rules, the awk locals hang, the fractional-second bracket) were caught by tests or
+by running the code. This one had a passing test: the fixture asserted `P08 == WARN`, and
+P08 did emit WARN — for the wrong reason, on the wrong packages.
+
+**A test that asserts a status but never checks which items produced it will not catch a
+counting bug.** The fixture now pins the discriminating case (`idna`, sdist *and* wheels,
+must not be counted) rather than only the verdict.
+
+**Phase 4 is complete. All of T00–T26 are done.**

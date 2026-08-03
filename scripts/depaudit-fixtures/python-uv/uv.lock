@@ -1,11 +1,35 @@
 version = 1
 
+# P08 fixture. The three cases below are the whole point of the check, and the
+# second is a REGRESSION LOCK: `idna` publishes an sdist *and* wheels, which is
+# what almost every package on PyPI does. uv installs the wheel, so it must NOT
+# be reported. Testing `"sdist" in p` flagged it anyway and over-reported by
+# ~87x across real lockfiles (522 of 565 distinct packages "have an sdist"; only
+# 6 are genuinely sdist-only). That wrong number is what gated T23 for days.
+
+# (1) sdist and NO wheels -> genuinely builds from source. MUST be flagged.
 [[package]]
 name = "requests"
 version = "2.31.0"
+source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://example/requests.tar.gz" }
 
+# (2) sdist AND wheels -> uv takes the wheel. MUST NOT be flagged.
+[[package]]
+name = "idna"
+version = "3.10"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://example/idna.tar.gz" }
+wheels = [{ url = "https://example/idna.whl" }]
+
+# (3) wheels only -> nothing to build.
 [[package]]
 name = "certifi"
 version = "2026.1.1"
+source = { registry = "https://pypi.org/simple" }
 wheels = [{ url = "https://example/certifi.whl" }]
+
+# (4) the workspace root itself: no source, no artifacts. Not a download at all.
+[[package]]
+name = "fixture-root"
+version = "0.1.0"

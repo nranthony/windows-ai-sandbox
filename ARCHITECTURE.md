@@ -81,7 +81,7 @@ See `sandbox-hardening-package.md` §4 and `docs/compose-network-ipam.md`.
 | Network | internal-only agent net + Squid allowlist sidecar (see above) |
 | DNS | sinkholed + `extra_hosts` |
 | Agent tools | `sandbox_templates/claude/claude-settings.json` deny-lists Claude's Bash/Read tools (network clients, git write ops, package installs, secrets reads — **the JSON file is the authoritative list**, don't trust prose mirrors); `deny-destructive.sh` PreToolUse hook closes the bypass class |
-| Dependencies | Registries **unreachable by default** ([ADR-0003](docs/adr/0003-strict-egress-default.md)); installs go through `scripts/with-egress.sh`, which pre-flights named packages against OSV, refuses to open on a live `MAL-` record, and appends an audit record per window. Resolution is quarantined — `min-release-age=7` (npm, `/usr/etc/npmrc`) and `minimum-release-age=10080` min (pnpm), so nothing published this week resolves. Install scripts blocked (`allow-scripts` empty; pnpm 10 blocks by default). `verify` asserts all of it; drift fails |
+| Dependencies | Registries **unreachable by default** ([ADR-0003](docs/adr/0003-strict-egress-default.md)); installs go through `scripts/with-egress.sh`, which pre-flights named packages against OSV, refuses to open on a live `MAL-` record, and appends an audit record per window. Resolution is quarantined — `min-release-age=7` (npm, `/usr/etc/npmrc`) and `minimum-release-age=10080` min (pnpm), so nothing published this week resolves. Install scripts blocked (`allow-scripts` empty; pnpm 10 blocks by default). Python is **wheels-only** ([ADR-0004](docs/adr/0004-python-wheels-only.md)) — `no-build=true` in `/etc/uv/uv.toml` and `only-binary=:all:` in `/etc/pip.conf`, since an sdist runs `setup.py` at install time; both are set because uv reads no pip config. `verify` asserts all of it; drift fails |
 | GPU (WSL only) | `docker-compose.wsl-gpu.yml` overlay — `/dev/dxg` + `/usr/lib/wsl`; auto-layered on detection |
 | Restart policy | `restart: "no"` — explicit `up` after host reboot (prevents silent config-drift recovery) |
 
@@ -108,7 +108,7 @@ Deliberately NOT installed in the image: `bubblewrap`, `socat`,
 ├── proxy/                        # squid.conf + allowed_domains.txt (egress allowlist)
 ├── scripts/                      # profile.sh (lifecycle driver), verify/audit, with-egress, ephemeral
 │   ├── depaudit.py               #   dependency posture scanner + OSV MAL- check (host-side, stdlib-only)
-│   └── depaudit.test.sh          #   its regression suite — 26 offline / 27 --online
+│   └── depaudit.test.sh          #   its regression suite — 27 offline / 28 --online
 ├── docs/                         # Design notes, permissions model, portability, debug recipes (index.md)
 │   ├── adr/                      #   Decisions — append-only, superseded not deleted (ADR-0001)
 │   ├── rfcs/                     #   Proposals: Draft → In review → Accepted → ADR-NNNN | Rejected
