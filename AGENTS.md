@@ -74,6 +74,14 @@ Edits to `scripts/with-egress.sh` require `bash scripts/with-egress.test.sh`
 bracket bug that made a real install log zero egress, and asserts the
 container-side allowlist path agrees across all five places it appears. Edits to
 either script's allowlist parsing run it.
+Edits to the `Dockerfile` require `bash scripts/dockerfile-order.test.sh` (8/8,
+offline). The install-layer order is a load-bearing chain — beads < claude/agy <
+npmrc (Gate 2) < uv/pip (Gate 3) — because `min-release-age` applies at **build**
+time too: write it above the CLI install and `@anthropic-ai/claude-code@latest`
+becomes unresolvable whenever the newest release is inside the quarantine window.
+That break is intermittent (it depends on when upstream last published) and
+surfaces on a routine `--refresh-ai`, not just a cold build.
+`just test-offline` runs all four suites.
 
 **`proxy/` is mounted as a DIRECTORY (`./proxy:/etc/squid/host:ro`), and that is
 load-bearing.** A single-file bind mount pins an inode at container start, so
