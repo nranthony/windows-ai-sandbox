@@ -191,6 +191,9 @@ services:
     cap_drop: [ALL]
     cap_add: [SETUID, SETGID]   # Squid needs these to drop privs at startup
     networks: [sandbox-internal, sandbox-external]
+    volumes:
+      # DIRECTORY mount, not two file mounts — see the note below.
+      - ./proxy:/etc/squid/host:ro
 
 networks:
   sandbox-internal:
@@ -201,6 +204,18 @@ networks:
 ```
 
 The `internal: true` on `sandbox-internal` is what makes the whole model work. Without it, the proxy is a suggestion, not an enforcement point.
+
+**Mount the allowlist's parent directory, never the file.** The obvious shape —
+`./proxy/allowed_domains.txt:/etc/squid/allowed_domains.txt:ro` — is a trap. A
+single-file bind mount resolves to an inode when the container starts, so any
+write that replaces the file rather than truncating it (`git checkout`, `merge`,
+`pull`, `stash`, an editor's atomic save, `sed -i`) leaves the running proxy
+pinned to the old, deleted inode. From then on it cannot see host edits at all,
+and `squid -k reconfigure` re-reads the stale copy and **exits 0** — so a
+tightened allowlist silently keeps permitting the domain you just revoked. This
+was measured twice on this repo before the cause was found; a directory mount
+resolves the path per `open()` and removes the whole class. See
+`docs/squid-internals.md`.
 
 ---
 
