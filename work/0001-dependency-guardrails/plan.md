@@ -967,20 +967,43 @@ them catches only what someone else already caught.
 
 ## 13. Open decisions
 
-Four of five block only later phases, so none of them should hold up phases 0–1.
+Three of five are now settled. The two that remain block only phase 3+ outcomes, not its work.
 
-| # | Decision | Recommendation | Blocks | Becomes |
+| # | Decision | Status | Blocks | Became |
 |---|---|---|---|---|
-| D1 | `locked` vs `dev` egress default | **`locked`** — it is the observed deployed state (§0); the draft's `dev` recommendation is superseded | T09 | ADR when decided |
-| D2 | Quarantine window: flat 7d, or 7/14 split by plan 02's `high_risk_days` | **Flat 7** until there is data to justify the complexity | T07, T10 | plan detail, not an ADR |
-| D3 | Does `depaudit` live here or in its own repo? | **Build in `scripts/` here; extract the first time a second repo needs it.** Do not pre-build the abstraction (plan 04 §5) | T13 | ADR when extracted |
-| D4 | A second intel source, ever? | **Ship T16, let phase 3's log accumulate a month, decide from the observed `MAL-` hit rate.** If OSV never fires, a second source is not the missing piece — the age gate is doing the work | T16+ | ADR when decided |
-| D5 | Cross-port to macolima | Phases 0, 1 and T07 are portable; phase 3 is not (different egress topology). Cross-check `deny-destructive.sh` against the sibling before merging, keep it bash-3.2-safe (D5) | — | per golden rule 3 |
+| ~~D1~~ | ~~`locked` vs `dev` egress default~~ | **DECIDED 08-02: `locked`.** Confirmed by the operator, and it was already the deployed state (§0) | T09 ✅ | [ADR-0003](../../docs/adr/0003-strict-egress-default.md) |
+| ~~D2~~ | ~~Quarantine window: flat 7d, or 7/14 split~~ | **DECIDED: flat 7.** Shipped in T07/T10 and asserted by `verify`. No data yet argues for the split; revisit only if a real release is blocked | T07 ✅, T10 ✅ | plan detail, no ADR |
+| ~~D3~~ | ~~Does `depaudit` live here or in its own repo?~~ | **DECIDED: `scripts/` here.** Extraction trigger unchanged and explicit — *the first time a second repo needs it*. macolima is the likely first caller (D5) | T13 ✅ | ADR when extracted |
+| D4 | A second intel source, ever? | **OPEN, data-gated.** Ship T16 (done), let phase 3's log accumulate a month, decide from the observed `MAL-` hit rate. If OSV never fires, a second source is not the missing piece — the age gate is doing the work | — | ADR when decided |
+| D5 | Cross-port to macolima | **OPEN.** Phases 0, 1 and T07 are portable; phase 3 is not (different egress topology). Cross-check `deny-destructive.sh` against the sibling before merging, keep it bash-3.2-safe | — | per golden rule 3 |
 
-**Already recorded:** the scope refusals of §3 are drafted as
+**Already recorded:** the scope refusals of §3 are
 [`docs/adr/0002-dependency-guardrail-scope.md`](../../docs/adr/0002-dependency-guardrail-scope.md)
-(Proposed) rather than buried here, per `make-plan` §4 — they affect the security boundary
-and would otherwise be re-litigated every time someone reads plan 02.
+(**Accepted 2026-08-02** — every refusal held through phases 0–2) rather than buried here,
+per `make-plan` §4: they affect the security boundary and would otherwise be re-litigated
+every time someone reads plan 02.
+
+## 13.1 Exit rule for this work item
+
+`work/README.md` requires a deletion or archival trigger; without one this folder becomes
+the permanent stale-plan trap [ADR-0001](../../docs/adr/0001-provenance-tiers.md) exists to
+close. The trigger:
+
+**Archive to `docs/_archive/` when T22 merges** — that completes phase 3 and every gate this
+plan set out to close. T23 (phase 4) does **not** hold it open: it is data-gated with no
+schedule, and if it is still unstarted at that point it moves out as its own one-paragraph
+`work/` item carrying the sdist counts, not as a reason to keep 1600 lines alive.
+
+What survives archival, and where, so nothing load-bearing is lost with the folder:
+
+| Content | Survives as |
+|---|---|
+| Scope refusals | ADR-0002 (already extracted) |
+| Egress posture | ADR-0003 (already extracted) |
+| Inverted-check findings | `scripts/depaudit.test.sh` regression locks + its header |
+| Units gotcha (npm days / pnpm minutes) | `verify-sandbox.sh` tripwire, which fails distinctly if <1440 |
+| Ordering constraint in the `Dockerfile` | The comment at the npmrc layer |
+| D4 telemetry question | Must be re-homed before archival — it is the one open thread with no other home |
 
 
 ---

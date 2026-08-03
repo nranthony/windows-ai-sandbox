@@ -1,9 +1,19 @@
 # ADR-0002: Dependency guardrails — what we deliberately do not build
 
-- Status: Proposed
-- Date: 2026-07-31
+- Status: **Accepted** 2026-08-02 (Proposed 2026-07-31)
+- Date: 2026-07-31; accepted after phases 0–2 shipped
 - Deciders: nranthony + agent
 - Implements: [`work/0001-dependency-guardrails/plan.md`](../../work/0001-dependency-guardrails/plan.md) §3
+
+**Accepted on evidence, not intent.** Phases 0–2 are complete and every refusal below held:
+nothing on the list was adopted, and no gap appeared that one of them would have filled.
+`depaudit` shipped stdlib-only and host-side, nothing new runs inside the security boundary,
+and no vendor or API key entered the trust path.
+
+One correction to the text below: the `policy.toml` it says to "keep" was never created.
+No threshold needed to be configurable — the quarantine window is enforced by npm/pnpm
+themselves and the rest are CLI flags with defaults. Create it when a second consumer needs
+to disagree about a threshold, not before.
 
 ## Context
 

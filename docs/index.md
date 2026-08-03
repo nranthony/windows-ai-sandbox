@@ -7,13 +7,14 @@ right: an **RFC** proposes → an **ADR** records → **work/** implements → t
 (citing the ADR) is the outcome.
 
 - [docs/adr/](adr/) — decisions and their rationale. Append-only.
-  - [ADR-0001](adr/0001-provenance-tiers.md) — adopt these tiers
-  - [ADR-0002](adr/0002-dependency-guardrail-scope.md) — dependency guardrails: what we deliberately do not build (Proposed)
-- [docs/rfcs/](rfcs/) — proposals under discussion ([TEMPLATE.md](rfcs/TEMPLATE.md))
-  - [DEPENDENCY_GUARDRAILS.md](rfcs/DEPENDENCY_GUARDRAILS.md) — slopsquatting threat + agent behavioural rules
-  - [01-posture-scanner-plan.md](rfcs/01-posture-scanner-plan.md) — `depaudit`, stdlib-only dependency posture/inventory scanner
-  - [02-layered-gates-plan.md](rfcs/02-layered-gates-plan.md) — `depgate`, five-gate model (largely declined here)
-  - [04-portable-guardrails-outside-sandbox.md](rfcs/04-portable-guardrails-outside-sandbox.md) — what applies on the host, outside the egress boundary
+  - [ADR-0001](adr/0001-provenance-tiers.md) — adopt these tiers *(Accepted)*
+  - [ADR-0002](adr/0002-dependency-guardrail-scope.md) — dependency guardrails: what we deliberately do not build *(Accepted 08-02)*
+  - [ADR-0003](adr/0003-strict-egress-default.md) — registries unreachable by default; installs open a bounded window *(Accepted 08-02)*
+- [docs/rfcs/](rfcs/) — proposals, with their resolution ([TEMPLATE.md](rfcs/TEMPLATE.md))
+  - [DEPENDENCY_GUARDRAILS.md](rfcs/DEPENDENCY_GUARDRAILS.md) — slopsquatting threat + agent behavioural rules — **shipped**, phase 0
+  - [01-posture-scanner-plan.md](rfcs/01-posture-scanner-plan.md) — `depaudit` posture/inventory scanner — **built in part** as `scripts/depaudit.py`
+  - [02-layered-gates-plan.md](rfcs/02-layered-gates-plan.md) — `depgate`, five-gate model — **rejected as a system → ADR-0002**; the gate model is retained as vocabulary
+  - [04-portable-guardrails-outside-sandbox.md](rfcs/04-portable-guardrails-outside-sandbox.md) — what applies on the host, outside the egress boundary — **partially applied, unowned**
 - [work/](../work/) — in-flight items, deleted or archived on merge ([README](../work/README.md))
   - [0001-dependency-guardrails](../work/0001-dependency-guardrails/plan.md) — applying the above to this repo
   - [0002-host-side-skill-slot](../work/0002-host-side-skill-slot/plan.md) — `make-plan`/`wrap-up` are container-only
