@@ -945,11 +945,12 @@ not a degraded one (upstream ADR-0003).
 | ~~T15~~ | ~~Fixtures + corpora~~ — **DONE 08-02**, 26 offline / 27 online | 2 | — | — |
 | ~~T16~~ | ~~`depaudit pkg` + OSV `MAL-`~~ — **DONE 08-02**, + `deps` lockfile mode | 2 | — | — |
 | ~~T17~~ | ~~Fix `reload_proxy`~~ — **DROPPED**, G1 refuted | 3 | — | — |
-| T18 | Window pre-flight | 3 | 0.5d | T16 |
-| T19 | Bracket + snapshot | 3 | 3h | — |
-| T20 | Egress diff | 3 | 3h | T19 |
-| T21 | Filesystem diff | 3 | 2h | T19 |
-| T22 | Persist to host audit log | 3 | 3h | T19–T21 |
+| ~~T18~~ | ~~Window pre-flight~~ — **DONE 08-03**, refuses on live `MAL-`, fails open on UNKNOWN | 3 | — | — |
+| ~~T19~~ | ~~Bracket + snapshot~~ — **DONE 08-03** | 3 | — | — |
+| ~~T20~~ | ~~Egress diff~~ — **DONE 08-03**, `-u proxy`; bracket bug found + locked | 3 | — | — |
+| ~~T21~~ | ~~Filesystem diff~~ — **DONE 08-03**, folded into the T19 snapshot | 3 | — | — |
+| ~~T22~~ | ~~Persist to host audit log~~ — **DONE 08-03**, + `deps --history` | 3 | — | — |
+| ~~T25~~ | ~~Stale bind-mount detection~~ — **DONE 08-03** *(new, §20)*, inode check in `verify` + self-heal in `with-egress.sh` | 3 | — | — |
 | T23 | Python wheels-only, staged | 4 | TBD | T22 telemetry |
 
 **Suggested order.** ~~T00 + T01 first~~ — **both done 2026-07-31**; they removed one task
@@ -1254,3 +1255,88 @@ writing them:
 **Phase 2 is complete: T07–T16 and T24 all done.** Remaining: phase 3 (T18–T22,
 install-window instrumentation, unblocked since G1 was refuted) and T23 (Python
 wheels-only, still gated on the sdist data — `dashboard` alone has 45).
+
+---
+
+## 20. Phase 3 results (2026-08-03) — T18–T22 complete, plus T25
+
+All of phase 3 landed in `scripts/with-egress.sh`, with the read-back in
+`profile.sh <p> deps --history` and the log at
+`~/.ai-sandbox/profiles/<p>/audit/depgate.jsonl`. Regression suite:
+`bash scripts/with-egress.test.sh` — **29 passed, offline**, no docker or network.
+
+**T18 pre-flight.** Extracts only *explicitly named* packages. `npm ci`,
+`pnpm install --frozen-lockfile` and `uv sync` name nothing new — every version in a
+lockfile already passed the age gate when it was written — so reporting them would emit a
+wall of UNKNOWNs on the most common command. Verdict handling: `BLOCK` refuses to open the
+window; `INFO`/`UNKNOWN` print and proceed. **Fails open by design.** A clean OSV result
+already means "nothing known yet" rather than "safe", and since this script is the only
+install route, hard-failing on a network hiccup would break every install to defend against
+nothing.
+
+**T19/T21 snapshot.** One `docker exec` before and after, emitting `L <sha256> <path>` per
+lockfile and `M <dir>/<entry>` per installed module. `comm` gives the delta. Lists in the
+JSON are capped at 50 with the exact count and a `truncated` flag kept — a silent cap in an
+audit log is a lie about coverage.
+
+**T22 persist.** One JSON line per window, built by `python3` from environment variables
+rather than assembled in shell, so an arbitrary `<cmd>` cannot break the record.
+
+### Three defects, all found by running it rather than reading it
+
+**1. The T18 extractor hung forever.** In awk, function variables are global unless declared
+as extra parameters. `emit()` assigned to `i`, which is the caller's `for (i = 1; i <= NF; i++)`
+counter, so every call rewound the loop. The test harness caught it on its first execution —
+before it ever reached a real command.
+
+**2. `verify` said "in sync" while two proxies were blind.** `docker-compose.yml:245`
+bind-mounts the allowlist **as a file**, so the mount pins an inode at container start. The
+merge of phases 0–2 rewrote `proxy/allowed_domains.txt`, and the running proxies stayed on
+the old inode (275834 vs 81188). The content diff missed it because that merge changed only
+comment lines, which the diff strips. `with-egress.sh` then wrote to a file the container
+could not see, `squid -k reconfigure` re-read the stale copy and exited 0, and the install
+failed with `tunnel error: unsuccessful` — naming nothing.
+
+> **The trigger is ordinary git workflow, not editor quirks.** `docs/squid-internals.md`
+> already listed `git checkout` under "atomic replace", which undersold it: every branch
+> switch, merge, pull or stash touching that file blinds every running proxy, with nobody
+> having edited an allowlist.
+
+Fixed as **T25**, in two places deliberately:
+- `verify` compares **inodes** and hard-FAILs. Decisive, unlike the mtime heuristic, which
+  only approximates the other staleness mode.
+- `with-egress.sh` confirms the proxy is serving the widened list and restarts it if not.
+  If it still cannot confirm, it **refuses to run the command** — an audit record for an
+  install that could never have reached a registry is worse than no record.
+
+**3. The audit log under-reported egress to zero.** Squid logs `epoch.milliseconds`;
+`date +%s` truncates. With `$1 <= e`, every request in the closing fractional second was
+dropped. A successful `uv pip install six` reached `pypi.org` at `.063` past the close and
+the record read **0 hosts**. Now `$1 < e + 1`, with a regression lock. This is the worst
+failure mode an audit log has: under-reporting is indistinguishable from a clean run.
+
+### A fourth, in the reporting rather than the check
+
+`verify` printed the host-side WARN and then `== 36 passed | 0 failed | 0 warnings ==`.
+The tally comes from `verify-sandbox.sh` *inside the container*; the host-side checks run in
+`profile.sh` before the stream and were never counted. That is how a stale-inode proxy
+survived a full post-merge verification pass — the summary line is what gets read. A
+host-side tally now prints when it has anything to say.
+
+### Validation
+
+| Check | Result |
+|---|---|
+| `with-egress.test.sh` | 29 passed, 0 failed (offline) |
+| Plan §8 smoke (`--with pypi`, trivial cmd) | window opens + closes, one JSONL line |
+| Real install, cache cold | `six==1.17.0`, rc=0, egress `pypi.org` + `files.pythonhosted.org` |
+| Denied-host capture | the pre-fix failure logged `DENIED: pypi.org` — the forensic case working |
+| `deps --history` | reads all four windows back, flags non-zero rc and denials |
+| `verify` × 3 profiles | 36 passed, 0 failed, 0 warnings |
+| hooks / depaudit | 79/79 · 26/26 |
+
+**D4 is now unblocked to start accumulating**: the `preflight` field records every OSV
+verdict per window, so the "does OSV ever fire?" question has somewhere to read from. Do not
+decide it before a month of real installs.
+
+**Phase 3 is complete.** Remaining: T23 (phase 4), still gated on sdist data.

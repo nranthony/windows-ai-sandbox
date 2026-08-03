@@ -26,7 +26,14 @@ mkdir -p \
   "$BASE/config/git" \
   "$BASE/config/pnpm" \
   "$BASE/gemini-home" \
-  "$BASE/kaggle"
+  "$BASE/kaggle" \
+  "$BASE/audit"
+
+# audit/ holds depgate.jsonl — one JSON line per with-egress.sh install window
+# (phase 3, T22). HOST side and not bind-mounted into any container: the proxy's
+# own access.log lives on tmpfs and dies with the container (gap G7), which is
+# exactly the state-placement mistake AGENTS.md warns about. Losing the install
+# history would hurt, so it does not live in a container layer.
 
 # pnpm: always run the image's pnpm; ignore repo `packageManager` pins. pnpm
 # 10's built-in version manager downloads the pinned version into

@@ -15,6 +15,25 @@
 # This is the scripted version of the manual "uncomment / restart squid /
 # install / re-comment / restart squid" loop.
 #
+# INSTRUMENTED (phase 3, T18-T22). Because ADR-0003 makes registries unreachable
+# by default, this script is the ONLY route by which a dependency can enter a
+# profile. That makes it the one place worth measuring: a bracket here is a
+# record, not a sample. Each run:
+#
+#   T18  pre-flight — explicit package names in <cmd> are checked against OSV
+#        before the window opens. A live MAL- record REFUSES to open it.
+#   T19  bracket    — epoch open/close, plus a before/after snapshot of lockfile
+#        hashes and installed-module listings under /workspace.
+#   T20  egress     — distinct hosts reached during the bracket, split into
+#        permitted and DENIED, read from the proxy's own access.log.
+#   T21  filesystem — module directory entries added/removed across the window.
+#   T22  persist    — one JSON line per window appended to
+#        ~/.ai-sandbox/profiles/<profile>/audit/depgate.jsonl (host side, so it
+#        survives `docker rm`). Read it back with `profile.sh <p> deps --history`.
+#
+# Requires python3 on the HOST (for the OSV check and JSON emission). Failure to
+# write the audit line warns; it never fails an otherwise-successful install.
+#
 # windows-ai-sandbox note: most [pypi]/[npm]/[git]/etc. sections are in the
 # PROJECT-PERSISTENT block (uncommented by default), unlike macolima where
 # they live in PLANNING-MODE and are commented. open_section() is idempotent
@@ -73,6 +92,13 @@ done
 
 [[ -n "$profile" ]] || { echo "Missing <profile>. Usage: scripts/with-egress.sh <profile> [--with list] -- <cmd>" >&2; exit 2; }
 [[ ${#cmd[@]} -gt 0 ]] || { echo "Missing -- <cmd>. Usage: scripts/with-egress.sh <profile> [--with list] -- <cmd>" >&2; exit 2; }
+
+# python3 is a hard requirement, not an optional enhancement: it runs the T18
+# pre-flight and emits the T22 audit record. Both are part of what this script
+# now IS. Degrading silently to an uninstrumented window would leave the audit
+# log with gaps that look identical to "no installs happened".
+command -v python3 >/dev/null 2>&1 \
+  || { echo "python3 not found on the host — required for the pre-flight check and audit log" >&2; exit 2; }
 
 IFS=',' read -ra SECTIONS <<< "$sections"
 
@@ -146,6 +172,228 @@ open_section() {
   ' "$ALLOWLIST" > "$ALLOWLIST.tmp" && cat "$ALLOWLIST.tmp" > "$ALLOWLIST" && rm -f "$ALLOWLIST.tmp"
 }
 
+# =============================================================================
+# Instrumentation (phase 3, T18-T22)
+# =============================================================================
+AGENT="ai-sandbox-$profile"
+PROXY="egress-proxy-$profile"
+DEPAUDIT="$REPO_ROOT/scripts/depaudit.py"
+AUDIT_DIR="$PROFILES_ROOT/$profile/audit"
+AUDIT_LOG="$AUDIT_DIR/depgate.jsonl"
+
+# T18 — extract explicitly-named packages from the command.
+#
+# Deliberately only EXPLICIT names. `npm ci`, `pnpm install --frozen-lockfile`
+# and `uv sync` install from a lockfile, whose contents were already gated at
+# resolution time by the age window (Gate 2) — there is no name here to check
+# that was not checked when it was written. Reporting them would be noise, and
+# noise is what got the G10 check rewritten.
+extract_specs() {
+  printf '%s\n' "$*" | tr ';|&' '\n' | awk '
+    # `name` and `i` MUST be declared as extra parameters. awk has no other way
+    # to make a function variable local, and `i` is the caller`s loop counter —
+    # assigning to a global `i` here rewinds the outer for-loop and the whole
+    # program spins forever. The extra spaces before them are the convention
+    # that marks them as locals; awk itself just sees unpassed arguments.
+    function emit(eco, tok,    name, i) {
+      if (tok ~ /^-/) return                       # flag
+      if (tok ~ /^[.\/]/) return                   # path / local install
+      if (tok ~ /^\$/ || tok ~ /[*?]/) return      # var or glob — cannot resolve statically
+      # strip a version specifier; npm scopes start with @ so only split a LATER one
+      name = tok
+      sub(/(==|>=|<=|~=|!=|[<>=~^]).*$/, "", name)
+      if (substr(name, 1, 1) == "@") {
+        i = index(substr(name, 2), "@")
+        if (i > 0) name = substr(name, 1, i)
+      } else {
+        i = index(name, "@")
+        if (i > 0) name = substr(name, 1, i - 1)
+      }
+      gsub(/^["'"'"']|["'"'"']$/, "", name)
+      if (name == "") return
+      if (name ~ /^[A-Za-z0-9@._\/-]+$/) print eco, name
+    }
+    {
+      eco = ""; start = 0
+      for (i = 1; i <= NF; i++) {
+        if ($i == "npm" || $i == "pnpm" || $i == "yarn" || $i == "bun") {
+          v = $(i+1)
+          if (v == "add" || v == "i" || v == "install") {
+            # bare `npm install` / `pnpm install` with no names = lockfile install
+            eco = "npm"; start = i + 2
+          }
+        } else if ($i == "pip" || $i == "pip3") {
+          if ($(i+1) == "install") { eco = "pypi"; start = i + 2 }
+        } else if ($i == "uv") {
+          if ($(i+1) == "add") { eco = "pypi"; start = i + 2 }
+          else if ($(i+1) == "pip" && $(i+2) == "install") { eco = "pypi"; start = i + 3 }
+        } else if ($i == "poetry") {
+          if ($(i+1) == "add") { eco = "pypi"; start = i + 2 }
+        } else if ($i == "cargo") {
+          if ($(i+1) == "add") { eco = "cargo"; start = i + 2 }
+        }
+        if (start > 0) {
+          for (j = start; j <= NF; j++) emit(eco, $j)
+          eco = ""; start = 0
+        }
+      }
+    }
+  ' | sort -u
+}
+
+# T18 — refuse the window on a live malicious-package record.
+#
+# Fails OPEN on UNKNOWN (offline, API error, rate limit). That is deliberate and
+# is the same argument depaudit itself makes: a clean OSV result means "nothing
+# known yet", never "safe", so the check is confidence and not a boundary. Since
+# this script is the only install route, hard-failing it on a network hiccup
+# would break all installs to defend against nothing.
+PREFLIGHT_JSON="[]"
+preflight() {
+  local specs; specs="$(extract_specs "${cmd[*]}")"
+  [[ -n "$specs" ]] || { echo "→ pre-flight: no explicitly-named packages in the command (lockfile install?)" >&2; return 0; }
+
+  local blocked=0 rows=""
+  while read -r eco name; do
+    [[ -n "$name" ]] || continue
+    local out verdict detail
+    out="$(python3 "$DEPAUDIT" pkg "$eco" "$name" --format json 2>/dev/null)" || out=""
+    if [[ -z "$out" ]]; then
+      verdict="UNKNOWN"; detail="depaudit produced no result"
+    else
+      verdict="$(printf '%s' "$out" | python3 -c 'import sys,json;r=json.load(sys.stdin)["results"];print(r[0]["verdict"] if r else "UNKNOWN")' 2>/dev/null || echo UNKNOWN)"
+      detail="$(printf '%s' "$out" | python3 -c 'import sys,json;r=json.load(sys.stdin)["results"];print(r[0].get("detail","") if r else "")' 2>/dev/null || echo '')"
+    fi
+    rows="${rows}${eco}"$'\t'"${name}"$'\t'"${verdict}"$'\t'"${detail}"$'\n'
+    case "$verdict" in
+      BLOCK)   echo "  ✗ BLOCK  $eco/$name — $detail" >&2; blocked=1 ;;
+      INFO)    echo "  ! INFO   $eco/$name — $detail" >&2 ;;
+      UNKNOWN) echo "  ? UNKNOWN $eco/$name — $detail (proceeding; the age gate still applies)" >&2 ;;
+      *)       echo "  ✓ $verdict $eco/$name" >&2 ;;
+    esac
+  done <<< "$specs"
+
+  PREFLIGHT_JSON="$(printf '%s' "$rows" | python3 -c '
+import sys, json
+out = []
+for line in sys.stdin.read().splitlines():
+    if not line.strip():
+        continue
+    parts = line.split("\t")
+    while len(parts) < 4:
+        parts.append("")
+    out.append({"eco": parts[0], "name": parts[1], "verdict": parts[2], "detail": parts[3]})
+print(json.dumps(out))
+' 2>/dev/null || echo '[]')"
+
+  if (( blocked )); then
+    echo "REFUSING to open the egress window: a live OSV malicious-package record names a package in this command." >&2
+    echo "If you believe the record is wrong, verify it at https://osv.dev and install with an explicit manual allowlist edit." >&2
+    return 1
+  fi
+  return 0
+}
+
+# Confirm the proxy is actually serving the bytes we just wrote, and repair it
+# if not.
+#
+# docker-compose.yml:245 bind-mounts the allowlist as a FILE. A file bind mount
+# resolves to an inode at container start, so any host-side operation that
+# REPLACES the file rather than truncating it in place leaves the container
+# bound to the old, now-deleted inode. From then on the container cannot see
+# host writes at all, and `squid -k reconfigure` re-reads its stale copy and
+# exits 0 — a silent no-op, indistinguishable from success.
+#
+# open_section() writes in place specifically to avoid this. What it CANNOT
+# avoid is the file having been replaced earlier by something else:
+#
+#     git checkout / git merge / git pull / git stash   <-- the common one
+#     an editor's atomic save (vim, VS Code), sed -i, mktemp && mv
+#
+# MEASURED 2026-08-03, and this is why the check exists rather than a comment:
+# merging a branch that touched proxy/allowed_domains.txt left two running
+# proxies on inode 275834 while the host file was 81188. `--with pypi` then
+# appeared to work — allowlist opened, reconfigure returned 0 — and the install
+# died with `tunnel error: unsuccessful`, naming nothing. The phase-3 audit
+# record would have logged an install window that could never have installed.
+#
+# `verify`'s content diff does NOT catch this on its own: if the replacement
+# only changed comments, the stripped domain lists still match.
+assert_proxy_sees() {
+  local host_doms ctr_doms
+  host_doms="$(grep -vE '^[[:space:]]*#|^[[:space:]]*$' "$ALLOWLIST" | sort)"
+  ctr_doms="$(docker exec -u proxy "$PROXY" \
+    grep -vE '^[[:space:]]*#|^[[:space:]]*$' /etc/squid/allowed_domains.txt 2>/dev/null | sort)" || return 1
+  [[ "$host_doms" == "$ctr_doms" ]]
+}
+
+require_proxy_sees_window() {
+  assert_proxy_sees && return 0
+  echo "WARN: $PROXY is not serving this allowlist — its bind mount is bound to a" >&2
+  echo "      replaced (deleted) inode, so the widened file is invisible to it." >&2
+  echo "      Restarting the proxy to re-resolve the mount." >&2
+  docker restart "$PROXY" >/dev/null 2>&1 || { echo "ERROR: could not restart $PROXY" >&2; return 1; }
+  local i
+  for i in 1 2 3 4 5 6 7 8 9 10; do
+    assert_proxy_sees && { echo "→ $PROXY restarted and now serving the widened allowlist" >&2; return 0; }
+    sleep 1
+  done
+  echo "ERROR: $PROXY still is not serving this allowlist after a restart." >&2
+  echo "       Refusing to run the command: the window is not actually open, and an" >&2
+  echo "       audit record for it would be false." >&2
+  return 1
+}
+
+# T19/T21 — one line per lockfile hash and per installed module entry.
+# node_modules and site-packages are pruned so nested copies are not walked;
+# their TOP-LEVEL entries are what a new package shows up in.
+snapshot() {
+  docker exec "$AGENT" bash -lc '
+    find /workspace -maxdepth 6 -name .git -prune -o \
+      -type d \( -name node_modules -o -name site-packages \) -prune -print 2>/dev/null |
+      while IFS= read -r d; do
+        ls -1 "$d" 2>/dev/null | sed "s|^|M ${d#/workspace/}/|"
+      done
+    find /workspace -maxdepth 6 \( -name node_modules -o -name .git -o -name .venv \) -prune -o \
+      -type f \( -name pnpm-lock.yaml -o -name package-lock.json -o -name yarn.lock \
+                 -o -name bun.lock -o -name bun.lockb -o -name uv.lock -o -name poetry.lock \
+                 -o -name Pipfile.lock -o -name "requirements*.txt" \) -print 2>/dev/null |
+      while IFS= read -r f; do
+        printf "L %s %s\n" "$(sha256sum "$f" 2>/dev/null | cut -d" " -f1)" "${f#/workspace/}"
+      done
+  ' 2>/dev/null | sort
+}
+
+# T20 — distinct hosts reached inside the bracket.
+#
+# `-u proxy` is LOAD-BEARING: the container is cap_drop:ALL + cap_add SETGID/SETUID
+# (CapEff 0xc0), so UID 0 has no CAP_DAC_OVERRIDE against the 0640 proxy:proxy
+# log and `docker exec` as root reads nothing. Measured 2026-07-31.
+#
+# Filtering by TIMESTAMP rather than a byte offset survives a proxy restart
+# mid-window, which reload_proxy can cause.
+egress_hosts() {
+  local from="$1" to="$2"
+  # `$1 < e + 1`, NOT `$1 <= e`. Squid logs epoch.MILLISECONDS while `date +%s`
+  # truncates to the second, so TS_CLOSE=...808 means "closed at some point
+  # during second 808" — and a request logged at ...808.063 is inside the window
+  # but fails `<= 808`. MEASURED 2026-08-03: a successful `uv pip install six`
+  # reached pypi.org at .063 of the closing second and the audit record claimed
+  # zero egress. Under-reporting is the worst failure mode an audit log has: it
+  # is indistinguishable from a clean run.
+  docker exec -u proxy "$PROXY" awk -v s="$from" -v e="$to" '
+    $1 >= s && $1 < e + 1 {
+      url = $7
+      sub(/^[a-z]+:\/\//, "", url)     # strip scheme on non-CONNECT lines
+      sub(/\/.*$/, "", url)            # strip path
+      sub(/:[0-9]+$/, "", url)         # strip port
+      if (url == "" || url == "-") next
+      split($4, st, "/")
+      print (st[1] ~ /DENIED/ ? "denied" : "allowed"), url
+    }
+  ' /var/log/squid/access.log 2>/dev/null | sort -u
+}
+
 # --- concurrency + drift guard --------------------------------------------
 # Two independent concerns:
 #   1. Concurrent invocations for the same profile would race on the shared
@@ -171,16 +419,40 @@ fi
 backup="$(mktemp -t with-egress.XXXXXX)"
 cp "$ALLOWLIST" "$backup"
 
-cleanup() {
-  local rc=$?
+snap_before="$(mktemp -t with-egress-snap.XXXXXX)"
+snap_after="$(mktemp -t with-egress-snap.XXXXXX)"
+
+# Split out of cleanup() so the window can be closed the instant the command
+# returns, rather than after the post-window analysis. The analysis is several
+# `docker exec` round-trips; holding a widened allowlist open across them is
+# exposure that buys nothing.
+WINDOW_OPEN=""
+close_window() {
+  [[ -n "$WINDOW_OPEN" ]] || return 0
+  WINDOW_OPEN=""
   echo "→ restoring allowlist + reloading proxy" >&2
   cp "$backup" "$ALLOWLIST"
-  rm -f "$backup" "$SENTINEL"
+  rm -f "$SENTINEL"
   reload_proxy || echo "WARN: proxy reload on cleanup failed" >&2
+}
+
+cleanup() {
+  local rc=$?
+  close_window
+  rm -f "$backup" "$snap_before" "$snap_after"
   # flock is released when fd 200 closes on shell exit.
   exit "$rc"
 }
 trap cleanup EXIT INT TERM
+
+# T18 — pre-flight BEFORE the window opens. A refusal here means nothing was
+# ever reachable, which is the whole point of checking at this position rather
+# than after the install.
+echo "→ pre-flight (OSV malicious-package check)" >&2
+preflight || exit 4
+
+TS_OPEN="$(date +%s)"
+snapshot > "$snap_before"
 
 # Drop the drift sentinel BEFORE widening — so if open_section / reload_proxy
 # fail and we hit the trap mid-widen, the sentinel still exists to flag drift.
@@ -188,10 +460,83 @@ trap cleanup EXIT INT TERM
   printf 'profile=%s\nsections=%s\npid=%s\nstarted=%s\ncmd=%s\n' \
     "$profile" "$sections" "$$" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${cmd[*]}"
 } > "$SENTINEL"
+WINDOW_OPEN=1
 
 echo "→ opening egress sections: ${SECTIONS[*]}" >&2
 for s in "${SECTIONS[@]}"; do open_section "$s"; done
 reload_proxy
 
-echo "→ exec ai-sandbox-$profile: ${cmd[*]}" >&2
-docker exec "ai-sandbox-$profile" bash -lc "${cmd[*]}"
+# The window is not open until the proxy says it is. Without this the command
+# runs against the OLD allowlist and fails in a way that names nothing.
+require_proxy_sees_window || exit 5
+
+echo "→ exec $AGENT: ${cmd[*]}" >&2
+rc=0
+docker exec "$AGENT" bash -lc "${cmd[*]}" || rc=$?
+
+close_window
+TS_CLOSE="$(date +%s)"
+snapshot > "$snap_after"
+
+# --- T20/T21/T22: what happened inside the bracket -------------------------
+# A changed lockfile shows up as a new `L <hash> <path>` line; a changed hash on
+# an existing path and a brand-new lockfile are the same signal here.
+locks_changed="$(comm -13 "$snap_before" "$snap_after" | awk '$1=="L"{print $3}' | sort -u)"
+mods_added="$(comm -13 "$snap_before" "$snap_after" | sed -n 's/^M //p')"
+mods_removed="$(comm -23 "$snap_before" "$snap_after" | sed -n 's/^M //p')"
+
+egress_raw="$(egress_hosts "$TS_OPEN" "$TS_CLOSE")"
+hosts_allowed="$(printf '%s\n' "$egress_raw" | awk '$1=="allowed"{print $2}')"
+hosts_denied="$(printf '%s\n' "$egress_raw" | awk '$1=="denied"{print $2}')"
+
+if [[ -n "$hosts_denied" ]]; then
+  echo "→ DENIED during the window (reached for, not allowlisted):" >&2
+  printf '     %s\n' $hosts_denied >&2
+fi
+echo "→ window ${TS_OPEN}..${TS_CLOSE} ($((TS_CLOSE - TS_OPEN))s) · hosts $(printf '%s' "$hosts_allowed" | grep -c . || true) permitted, $(printf '%s' "$hosts_denied" | grep -c . || true) denied · lockfiles changed $(printf '%s' "$locks_changed" | grep -c . || true) · modules +$(printf '%s' "$mods_added" | grep -c . || true)/-$(printf '%s' "$mods_removed" | grep -c . || true)" >&2
+
+mkdir -p "$AUDIT_DIR" 2>/dev/null || true
+if WE_TS_OPEN="$TS_OPEN" WE_TS_CLOSE="$TS_CLOSE" WE_PROFILE="$profile" \
+   WE_SECTIONS="$sections" WE_CMD="${cmd[*]}" WE_RC="$rc" \
+   WE_PREFLIGHT="$PREFLIGHT_JSON" WE_ALLOWED="$hosts_allowed" WE_DENIED="$hosts_denied" \
+   WE_LOCKS="$locks_changed" WE_ADDED="$mods_added" WE_REMOVED="$mods_removed" \
+   python3 - >> "$AUDIT_LOG" <<'PY'
+import os, json
+
+CAP = 50  # per-list cap; the count is always exact and truncation is flagged
+
+def lines(key):
+    return [x for x in os.environ.get(key, "").splitlines() if x.strip()]
+
+def capped(key):
+    v = lines(key)
+    return {"count": len(v), "sample": v[:CAP], "truncated": len(v) > CAP}
+
+try:
+    preflight = json.loads(os.environ.get("WE_PREFLIGHT") or "[]")
+except json.JSONDecodeError:
+    preflight = []
+
+rec = {
+    "ts_open":   int(os.environ["WE_TS_OPEN"]),
+    "ts_close":  int(os.environ["WE_TS_CLOSE"]),
+    "duration_s": int(os.environ["WE_TS_CLOSE"]) - int(os.environ["WE_TS_OPEN"]),
+    "profile":   os.environ["WE_PROFILE"],
+    "sections":  [s for s in os.environ.get("WE_SECTIONS", "").split(",") if s],
+    "cmd":       os.environ.get("WE_CMD", ""),
+    "rc":        int(os.environ.get("WE_RC") or 0),
+    "preflight": preflight,
+    "egress":    {"allowed": lines("WE_ALLOWED"), "denied": lines("WE_DENIED")},
+    "lockfiles_changed": lines("WE_LOCKS"),
+    "modules_added":     capped("WE_ADDED"),
+    "modules_removed":   capped("WE_REMOVED"),
+}
+print(json.dumps(rec, separators=(",", ":"), sort_keys=True))
+PY
+then
+  echo "→ audit: appended to ${AUDIT_LOG/#$HOME/\~}" >&2
+else
+  echo "WARN: could not append the audit record to $AUDIT_LOG (the install itself is unaffected)" >&2
+fi
+
+exit "$rc"

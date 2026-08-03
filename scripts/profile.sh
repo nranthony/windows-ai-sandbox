@@ -158,9 +158,38 @@ check_allowlist_sync() {
     printf '%s\n' "$delta" | sed 's/^>/        proxy permits (repo does NOT):/; s/^</        repo has (proxy lacks):     /' >&2
     printf '        fix: docker restart %s   (NOT squid -k reconfigure — silent no-op)\n' "$proxy" >&2
     rc=1
+    HOST_FAILS=$(( ${HOST_FAILS:-0} + 1 ))
   fi
 
-  # Mode A approximation: allowlist changed after the proxy started.
+  # Mode B, DECISIVE. docker-compose.yml bind-mounts the allowlist as a FILE, so
+  # the mount resolves to an inode at container start. Anything that REPLACES the
+  # host file — `git checkout`/`merge`/`pull`/`stash`, an editor's atomic save,
+  # `sed -i`, mktemp+mv — leaves the container bound to the old, deleted inode.
+  # From then on it cannot see host writes AT ALL and `squid -k reconfigure`
+  # re-reads the stale copy and exits 0.
+  #
+  # The content diff above cannot catch this by itself: if the replacement only
+  # changed comment lines, the stripped domain lists still match and it reports
+  # "in sync" while the proxy is blind. MEASURED 2026-08-03 — merging a branch
+  # that touched allowed_domains.txt left two proxies on inode 275834 against a
+  # host file of 81188, reported "in sync", and silently broke with-egress.sh.
+  local host_ino ctr_ino
+  host_ino=$(stat -c %i "$allowlist" 2>/dev/null || echo "")
+  ctr_ino=$(docker exec -u proxy "$proxy" stat -c %i /etc/squid/allowed_domains.txt 2>/dev/null || echo "")
+  if [[ -n "$host_ino" && -n "$ctr_ino" && "$host_ino" != "$ctr_ino" ]]; then
+    printf '\033[0;31m[FAIL]\033[0m  allowlist bind mount is STALE — %s holds inode %s, the repo file is %s.\n' \
+      "$proxy" "$ctr_ino" "$host_ino" >&2
+    printf '        The proxy cannot see host edits at all; squid -k reconfigure will no-op silently.\n' >&2
+    printf '        Cause is usually a git operation that rewrote proxy/allowed_domains.txt.\n' >&2
+    printf '        fix: docker restart %s\n' "$proxy" >&2
+    rc=1
+    HOST_FAILS=$(( ${HOST_FAILS:-0} + 1 ))
+  elif [[ -n "$host_ino" && "$host_ino" == "$ctr_ino" ]]; then
+    ok "allowlist bind mount is live (inode $host_ino) — proxy can see host edits"
+  fi
+
+  # Mode A approximation: in-place edit (inode intact) that squid has not
+  # re-parsed. Only a WARN — unlike Mode B this self-resolves on any reload.
   local started epoch_started epoch_file
   started=$(docker inspect -f '{{.State.StartedAt}}' "$proxy" 2>/dev/null) || started=""
   if [[ -n "$started" ]]; then
@@ -168,6 +197,7 @@ check_allowlist_sync() {
     epoch_file=$(stat -c %Y "$allowlist" 2>/dev/null || echo 0)
     if [[ "$epoch_started" -gt 0 && "$epoch_file" -gt "$epoch_started" ]]; then
       warn "allowlist mtime is newer than $proxy start — squid may still be enforcing the previous set (it parses at startup). Restart the proxy, or use the dashboard's 'Save & Reload Proxies'."
+      HOST_WARNS=$(( ${HOST_WARNS:-0} + 1 ))
     fi
   fi
   return "$rc"
@@ -877,11 +907,22 @@ case "$CMD" in
     # bind-mounted into /workspace) nor the proxy container. Anything comparing
     # host state against the proxy has to run here.
     verify_rc=0
+    HOST_WARNS=0; HOST_FAILS=0
     check_allowlist_sync || verify_rc=1
 
     info "Running verify-sandbox.sh inside $AGENT (streamed via stdin)"
     # NOT `exec` — the host-side result above still has to affect the exit code.
     docker exec -i "$AGENT" bash -s -- "$@" < "$src" || verify_rc=1
+
+    # The tally printed above is the CONTAINER's, and it cannot count these:
+    # the host-side checks run here, before the stream. Without this line a run
+    # prints a loud host-side WARN and then "0 warnings", and the summary is
+    # what gets read. That is not hypothetical — it is how a stale-inode proxy
+    # survived a full post-merge verification pass on 2026-08-02.
+    if (( HOST_WARNS > 0 || HOST_FAILS > 0 )); then
+      printf '\033[1;33m== host-side (not in the tally above): %d failed | %d warning(s) ==\033[0m\n' \
+        "$HOST_FAILS" "$HOST_WARNS" >&2
+    fi
     exit "$verify_rc"
     ;;
 
@@ -898,6 +939,67 @@ case "$CMD" in
     python3 -c 'import sys,tomllib' 2>/dev/null \
       || fail "python3 is too old for depaudit (needs 3.11+ for tomllib): $(python3 -V 2>&1)"
 
+    # --history reads back the T22 install-window log and returns. It is a
+    # different question from posture — "what came in, and what did it reach"
+    # rather than "how is this repo configured" — and needs no workspace, so it
+    # short-circuits before the workspace check below.
+    if [[ "${1:-}" == "--history" ]]; then
+      hist="$PROFILES_ROOT/$PROFILE/audit/depgate.jsonl"
+      [[ -f "$hist" ]] || { info "No install windows recorded yet for '$PROFILE'."; \
+        info "The log is written by scripts/with-egress.sh, which per ADR-0003 is the only route a dependency can take."; exit 0; }
+      shift
+      hist_n="${1:-20}"
+      python3 - "$hist" "$hist_n" <<'PY'
+import json, sys, datetime
+
+path, want = sys.argv[1], int(sys.argv[2])
+rows = []
+for line in open(path, encoding="utf-8"):
+    line = line.strip()
+    if not line:
+        continue
+    try:
+        rows.append(json.loads(line))
+    except json.JSONDecodeError:
+        # A partial line means a run was killed mid-append. Say so; do not
+        # silently drop it, or the log looks complete when it is not.
+        rows.append(None)
+
+shown = rows[-want:]
+bad = sum(1 for r in shown if r is None)
+print(f"{len(rows)} window(s) recorded; showing last {len(shown)}\n")
+for r in shown:
+    if r is None:
+        print("  ??  <unparseable line — a run was interrupted mid-write>")
+        continue
+    when = datetime.datetime.fromtimestamp(r["ts_open"]).strftime("%Y-%m-%d %H:%M")
+    eg = r.get("egress", {})
+    denied = eg.get("denied", [])
+    add = r.get("modules_added", {}).get("count", 0)
+    rem = r.get("modules_removed", {}).get("count", 0)
+    locks = r.get("lockfiles_changed", [])
+    flag = "!" if (denied or r.get("rc")) else " "
+    print(f"{flag} {when}  {r['duration_s']:>4}s  rc={r.get('rc',0)}  "
+          f"[{','.join(r.get('sections', [])) or '-'}]  modules +{add}/-{rem}  "
+          f"lockfiles {len(locks)}")
+    print(f"     cmd: {r.get('cmd','')[:100]}")
+    if eg.get("allowed"):
+        print(f"     reached: {', '.join(eg['allowed'][:8])}"
+              + (f" (+{len(eg['allowed'])-8} more)" if len(eg["allowed"]) > 8 else ""))
+    if denied:
+        print(f"     DENIED : {', '.join(denied)}")
+    for p in r.get("preflight", []):
+        if p.get("verdict") not in ("NO-KNOWN-MAL", ""):
+            print(f"     preflight {p['verdict']}: {p['eco']}/{p['name']} — {p.get('detail','')}")
+    if locks:
+        print(f"     lockfiles: {', '.join(locks)}")
+    print()
+if bad:
+    print(f"WARNING: {bad} unparseable line(s) in {path}")
+PY
+      exit 0
+    fi
+
     ws="$REPO_ROOT/$PROFILE"
     [[ -d "$ws" ]] || fail "Workspace does not exist: $ws"
 
@@ -909,7 +1011,8 @@ case "$CMD" in
         --strict)  dep_failon="fail" ;;
         --quiet)   dep_failon="never" ;;
         *) fail "Unknown flag for deps: $a
-      Usage: scripts/profile.sh $PROFILE deps [--osv] [--json] [--strict|--quiet]" ;;
+      Usage: scripts/profile.sh $PROFILE deps [--osv] [--json] [--strict|--quiet]
+             scripts/profile.sh $PROFILE deps --history [N]" ;;
       esac
     done
 

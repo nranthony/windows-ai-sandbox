@@ -52,6 +52,10 @@ These files carry the sandbox's guarantees:
   Finding B/C in `docs/vscode-integration-security.md`; never remove it as
   "redundant")
 - `scripts/run-ephemeral.sh` (raw `docker run` — mirrors compose hardening by hand)
+- `scripts/with-egress.sh` — per [ADR-0003](docs/adr/0003-strict-egress-default.md)
+  this is the **only** route by which a dependency can enter a profile. It widens
+  the allowlist, so a bug here is an egress hole; and it writes the install audit
+  log, so a bug here silently *under-reports* — which reads exactly like a clean run.
 
 Any change to them requires:
 1. The commit message states the security impact.
@@ -64,6 +68,17 @@ Hook edits additionally require
 Edits to `scripts/depaudit.py` require `bash scripts/depaudit.test.sh` (26/26
 offline; `--online` adds the OSV corpus). Two of its assertions are regression
 locks for checks that shipped **inverted** — read the header before changing them.
+Edits to `scripts/with-egress.sh` require `bash scripts/with-egress.test.sh`
+(29/29, offline — no docker or network). It covers the two parsers; one of its
+assertions locks a bracket bug that made a real install log zero egress.
+
+**Restart the proxy after any git operation that touches
+`proxy/allowed_domains.txt`.** The file is bind-mounted *as a file*, so
+`git checkout`/`merge`/`pull`/`stash` gives the host a new inode while the
+running proxy stays bound to the old one — it then cannot see host edits at all,
+and `squid -k reconfigure` re-reads the stale copy and exits 0. `verify` now
+detects this by comparing inodes (a content diff alone misses it when only
+comments changed).
 
 ## Container state placement
 

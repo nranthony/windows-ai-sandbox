@@ -59,6 +59,10 @@ See `sandbox-hardening-package.md` §4 and `docs/compose-network-ipam.md`.
 ├── config/            → /root/.config           (gh/, glab-cli/, git/config, pnpm/rc)
 ├── gemini-home/       → /root/.gemini           (Antigravity CLI `agy` home)
 ├── kaggle/            → /root/.kaggle           (kaggle.json, chmod 600; optional — egress gated by [kaggle] allowlist)
+├── audit/             (depgate.jsonl — one JSON line per with-egress.sh install
+│                       window: bracket, egress hosts, lockfile + module delta.
+│                       NOT mounted into any container; the proxy's own
+│                       access.log is tmpfs and dies with it)
 ├── subnet-octet       (this profile's 172.30.<octet>.0/24 allocation)
 └── db.env             (optional; postgres/mongo credentials — see
                         sandbox_templates/common/db.env.template)
@@ -77,7 +81,7 @@ See `sandbox-hardening-package.md` §4 and `docs/compose-network-ipam.md`.
 | Network | internal-only agent net + Squid allowlist sidecar (see above) |
 | DNS | sinkholed + `extra_hosts` |
 | Agent tools | `sandbox_templates/claude/claude-settings.json` deny-lists Claude's Bash/Read tools (network clients, git write ops, package installs, secrets reads — **the JSON file is the authoritative list**, don't trust prose mirrors); `deny-destructive.sh` PreToolUse hook closes the bypass class |
-| Dependencies | Registries **unreachable by default** ([ADR-0003](docs/adr/0003-strict-egress-default.md)); installs go through `scripts/with-egress.sh`. Resolution is quarantined — `min-release-age=7` (npm, `/usr/etc/npmrc`) and `minimum-release-age=10080` min (pnpm), so nothing published this week resolves. Install scripts blocked (`allow-scripts` empty; pnpm 10 blocks by default). `verify` asserts all of it; drift fails |
+| Dependencies | Registries **unreachable by default** ([ADR-0003](docs/adr/0003-strict-egress-default.md)); installs go through `scripts/with-egress.sh`, which pre-flights named packages against OSV, refuses to open on a live `MAL-` record, and appends an audit record per window. Resolution is quarantined — `min-release-age=7` (npm, `/usr/etc/npmrc`) and `minimum-release-age=10080` min (pnpm), so nothing published this week resolves. Install scripts blocked (`allow-scripts` empty; pnpm 10 blocks by default). `verify` asserts all of it; drift fails |
 | GPU (WSL only) | `docker-compose.wsl-gpu.yml` overlay — `/dev/dxg` + `/usr/lib/wsl`; auto-layered on detection |
 | Restart policy | `restart: "no"` — explicit `up` after host reboot (prevents silent config-drift recovery) |
 
