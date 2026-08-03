@@ -75,8 +75,9 @@ can only build from source. Same discipline as npm's `allow-scripts` allowlist.
   existing, which is exactly what a slopsquat miss looks like. Anyone debugging a
   "nonexistent package" under pip should check this ADR before concluding the name is
   wrong. uv's message is the reason to prefer uv here.
-- `verify` gains three tripwires (36 → 39 checks; the third is behavioural — see the addendum). Both are asserted separately because
-  checking one would leave the other silently open.
+- `verify` gains three tripwires (36 → 39 checks). uv and pip are asserted separately
+  because checking one would leave the other silently open; the third is behavioural, and
+  the addendum below explains why a file check alone was not enough.
 - ML/CUDA packages are unaffected in practice — torch, numpy, scipy and friends all ship
   manylinux wheels. The friction lands on small pure-Python packages whose maintainers
   never uploaded one.
