@@ -322,10 +322,11 @@ print(json.dumps(out))
 # with an error that names nothing — which is exactly how the 2026-08-03
 # incident presented.
 #
-# The definitive check would be an egress probe against a just-opened host.
-# Deliberately not built: it needs a section -> canonical-host mapping, and with
-# the silent-no-op mode removed the marginal value is small. Revisit if a window
-# is ever observed opening without taking effect.
+# The definitive check is the enforcement probe below, which now runs alongside
+# this one. That earlier note said a probe "needs a section -> canonical-host
+# mapping" and was therefore not worth building; that objection was wrong. No
+# mapping is needed — diffing the backup against the widened file names the
+# domains this run just opened, and squid can be asked about those directly.
 assert_allowlist_visible() {
   local host_doms ctr_doms
   host_doms="$(grep -vE '^[[:space:]]*#|^[[:space:]]*$' "$ALLOWLIST" | sort)"
@@ -350,6 +351,71 @@ require_allowlist_visible() {
   echo "       Refusing to run the command: the window may not be open, and an audit" >&2
   echo "       record for an install that could not reach a registry is worse than none." >&2
   echo "       Fix: scripts/profile.sh $profile up   (recreates with the directory mount)" >&2
+  return 1
+}
+
+# newly_opened_domains <backup> <current> — domains this run just uncommented.
+#
+# Text only, so it is testable offline. Idempotent opens (the section was already
+# uncommented) legitimately yield nothing; the caller treats empty as "nothing to
+# probe", not as a failure.
+newly_opened_domains() {
+  local before="$1" after="$2" strip='^[[:space:]]*#|^[[:space:]]*$'
+  comm -13 <(grep -vE "$strip" "$before" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//; s/^\.//' | sort -u) \
+           <(grep -vE "$strip" "$after"  | sed 's/^[[:space:]]*//; s/[[:space:]]*$//; s/^\.//' | sort -u)
+}
+
+# Is squid ENFORCING the widened list? assert_allowlist_visible above compares
+# file bytes, which under the directory mount is very nearly tautological — it
+# cannot distinguish "reloaded" from "not reloaded". This can.
+#
+# Probes one just-opened domain from inside the proxy container and expects
+# anything other than 403. Unlike verify's deny sweep this costs a real upstream
+# connect, which is free here: the window is open precisely so that host can be
+# reached, and the command about to run will connect to it anyway.
+#
+# Fails CLOSED, consistent with the refusal policy above: an audit record for an
+# install that could never have reached its registry is worse than no record.
+assert_window_enforced() {
+  local domain="$1" code
+  code="$(printf '%s\n' "$domain" | timeout 30 docker exec -i "$PROXY" bash -c '
+      read -r d
+      code=TIMEOUT
+      if exec 3<>/dev/tcp/127.0.0.1/3128 2>/dev/null; then
+        printf "CONNECT %s:443 HTTP/1.1\r\nHost: %s:443\r\n\r\n" "$d" "$d" >&3
+        read -t 5 -r _proto code _rest <&3 || code=TIMEOUT
+        exec 3<&- 3>&-
+      else
+        code=NOCONNECT
+      fi
+      printf "%s\n" "$code"' 2>/dev/null)" || code=""
+  # Only an explicit 403 is a verdict that the ACL still denies the host. A
+  # timeout or a 5xx means the request got PAST the ACL and something upstream
+  # failed — not an enforcement problem, and not this check's business.
+  [[ "$code" != "403" ]]
+}
+
+require_window_enforced() {
+  local opened first
+  opened="$(newly_opened_domains "$backup" "$ALLOWLIST")"
+  first="$(printf '%s\n' "$opened" | grep -m1 . || true)"
+  [[ -n "$first" ]] || { echo "→ no new domains to probe (sections already open)" >&2; return 0; }
+
+  assert_window_enforced "$first" && {
+    echo "→ $PROXY is enforcing the widened list (probed $first)" >&2; return 0; }
+
+  echo "WARN: $PROXY still DENIES $first after a reload — the widened list is not" >&2
+  echo "      being enforced. Restarting the proxy and re-probing." >&2
+  docker restart "$PROXY" >/dev/null 2>&1 || { echo "ERROR: could not restart $PROXY" >&2; return 1; }
+  local i
+  for i in 1 2 3 4 5 6 7 8 9 10; do
+    sleep 1
+    assert_window_enforced "$first" && {
+      echo "→ $PROXY restarted and now enforcing the widened list" >&2; return 0; }
+  done
+  echo "ERROR: $PROXY denies $first even after a restart." >&2
+  echo "       Refusing to run the command: the window is not actually open, and the" >&2
+  echo "       install would fail with an error naming nothing (see docs/squid-internals.md)." >&2
   return 1
 }
 
@@ -477,7 +543,10 @@ reload_proxy
 
 # The window is not open until the proxy can serve it. Without this the command
 # runs against the OLD allowlist and fails in a way that names nothing.
+# Two layers: the file is readable at the expected path (mount health), and squid
+# is actually enforcing it (reload health). The second is the decisive one.
 require_allowlist_visible || exit 5
+require_window_enforced || exit 5
 
 echo "→ exec $AGENT: ${cmd[*]}" >&2
 rc=0

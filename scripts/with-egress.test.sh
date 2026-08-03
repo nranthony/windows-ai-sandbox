@@ -55,6 +55,7 @@ import_fn() {
 }
 import_fn extract_specs
 import_fn egress_hosts
+import_fn newly_opened_domains
 import_fn list_denied_domains "$PROFILE_SRC"
 
 PASS=0; FAIL=0
@@ -301,6 +302,46 @@ if list_denied_domains "$ROOT/proxy/allowed_domains.txt" | grep -qx 'github.com'
 else
   ok "real allowlist: github.com excluded  <-- FALSE-FAIL LOCK"
 fi
+
+# ---------------------------------------------------------------------------
+# newly_opened_domains() — what the window just widened, i.e. what to probe
+# ---------------------------------------------------------------------------
+echo
+echo "newly_opened_domains() — window diff"
+
+cat > "$DENYFIX/before.txt" <<'EOF'
+api.anthropic.com
+github.com
+# --- Python package ecosystem [pypi] ---
+# .pypi.org
+# .files.pythonhosted.org
+EOF
+
+cat > "$DENYFIX/after.txt" <<'EOF'
+api.anthropic.com
+github.com
+# --- Python package ecosystem [pypi] ---
+.pypi.org
+.files.pythonhosted.org
+EOF
+
+expect_opened() {
+  local desc="$1" before="$2" after="$3" want="$4" got
+  got="$(newly_opened_domains "$before" "$after" | sort | tr '\n' ' ' | sed 's/ $//')"
+  if [[ "$got" == "$want" ]]; then ok "$desc"; else bad "$desc" "$want" "$got"; fi
+}
+
+expect_opened "opening [pypi] names both registry hosts" \
+  "$DENYFIX/before.txt" "$DENYFIX/after.txt" "files.pythonhosted.org pypi.org"
+
+# An already-open section must yield nothing, or every idempotent re-open would
+# probe a stale domain and could refuse a perfectly good window.
+expect_opened "idempotent re-open yields nothing to probe" \
+  "$DENYFIX/after.txt" "$DENYFIX/after.txt" ""
+
+# Direction matters: closing a section is not an opening.
+expect_opened "closing a section yields nothing (wrong direction)" \
+  "$DENYFIX/after.txt" "$DENYFIX/before.txt" ""
 
 printf "\n  %d passed, %d failed\n" "$PASS" "$FAIL"
 [[ "$FAIL" -eq 0 ]]

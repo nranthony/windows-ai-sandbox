@@ -69,7 +69,7 @@ Edits to `scripts/depaudit.py` require `bash scripts/depaudit.test.sh` (27/27
 offline; `--online` adds the OSV corpus). Two of its assertions are regression
 locks for checks that shipped **inverted** — read the header before changing them.
 Edits to `scripts/with-egress.sh` require `bash scripts/with-egress.test.sh`
-(47/47, offline — no docker or network). It covers three parsers — two here and
+(50/50, offline — no docker or network). It covers four parsers — two here and
 `list_denied_domains` in `profile.sh`, which reads the same file — locks a
 bracket bug that made a real install log zero egress, and asserts the
 container-side allowlist path agrees across all five places it appears. Edits to
