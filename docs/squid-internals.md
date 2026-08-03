@@ -72,3 +72,41 @@ not preferred. It also previously appeared that reconfigure *killed* the proxy (
 exit 129); that is refuted — squid runs as a child of `entrypoint.sh` (PID 1), handles
 SIGHUP as a reconfigure, and the container survives. The real defect is the silent no-op
 above, not a crash.
+
+### The trigger is ordinary git workflow (measured 2026-08-03)
+
+The table above lists `git checkout` under "atomic replace", which undersells it. **Every
+branch switch, merge, pull, rebase or stash that touches `proxy/allowed_domains.txt`
+replaces the inode** and blinds every running proxy. This is not an editor quirk to
+remember — it is the normal development loop of this repo, and it fires without anyone
+editing the allowlist deliberately.
+
+Observed: merging a branch whose only allowlist change was the **comment header** left two
+of three proxies bound to inode 275834 against a host file of 81188. Consequences, in the
+order they were noticed:
+
+1. `verify` reported **"allowlist in sync"**. Its content diff strips comments, and only
+   comments had changed — so the domain lists matched while the proxy was blind. A content
+   comparison cannot detect this mode on its own.
+2. `with-egress.sh --with pypi` appeared to work: the section opened, `reconfigure`
+   returned 0, and the audit record logged a window.
+3. The install died with `tunnel error: unsuccessful`, naming nothing. Because
+   [ADR-0003](adr/0003-strict-egress-default.md) makes `with-egress.sh` the only install
+   route, that is the entire dependency pipeline failing with an error that points nowhere
+   near the cause.
+
+Two defences were added, and the split matters:
+
+- **`verify` compares inodes** (`stat -c %i` host vs container) and hard-FAILs on a
+  mismatch. Decisive rather than heuristic — unlike the mtime check, which only
+  approximates the *other* staleness mode.
+- **`with-egress.sh` self-heals.** After opening a section it confirms the proxy is serving
+  the widened list, and restarts the proxy if not. A window that cannot be verified as open
+  refuses to run the command, because an audit record for an install that could never have
+  reached a registry is worse than no record.
+
+The general rule this is an instance of: **a bind-mounted file is a snapshot; a
+bind-mounted directory is a view.** Mounting `./proxy/` as a directory instead would make
+the whole class disappear, at the cost of exposing `squid.conf` to the same edit path.
+That trade has not been taken — [ADR-0002](adr/0002-dependency-guardrail-scope.md)'s
+minimalism argument cuts both ways here — but it is the obvious lever if this recurs.

@@ -42,6 +42,7 @@ right: an **RFC** proposes → an **ADR** records → **work/** implements → t
 | 1 | [`scripts/verify-sandbox.sh`](../scripts/verify-sandbox.sh) | Fast tripwire (~57 pass/fail/warn outcomes across ~28 checks) |
 | 2 | [`scripts/audit/`](../scripts/audit/) | ~80 structured probes, JSON output ([README](../scripts/audit/README.md)) |
 | — | [`scripts/depaudit.test.sh`](../scripts/depaudit.test.sh) | depaudit regression suite (26 offline, `--online` adds the OSV corpus) over [fixtures](../scripts/depaudit-fixtures/) |
+| — | [`scripts/with-egress.test.sh`](../scripts/with-egress.test.sh) | install-window parser suite (29, fully offline — no docker, no network) |
 | 3 | [`sandbox_templates/skills/audit-sandbox/SKILL.md`](../sandbox_templates/skills/audit-sandbox/SKILL.md) | Agent-side judgment over tier-2 JSON (staged into container by `profile.sh audit`) |
 
 ## Agent Tool Controls
@@ -79,7 +80,7 @@ Guides in [`host_setup/`](../host_setup/):
 ## Scripts Reference
 
 - [`scripts/profile.sh`](../scripts/profile.sh) — profile lifecycle (up, down, attach, auth, verify, audit, rebuild, clean)
-- [`scripts/with-egress.sh`](../scripts/with-egress.sh) — temporarily widen Squid allowlist for installs
+- [`scripts/with-egress.sh`](../scripts/with-egress.sh) — temporarily widen the Squid allowlist for one install command, and the **only** route a dependency can take in ([ADR-0003](adr/0003-strict-egress-default.md)). Instrumented: OSV pre-flight, egress + filesystem diff per window, one JSON line to `~/.ai-sandbox/profiles/<p>/audit/depgate.jsonl`. Read back with `scripts/profile.sh <p> deps --history`
 - [`scripts/depaudit.py`](../scripts/depaudit.py) — dependency-supply-chain posture scanner (stdlib-only, read-only; `posture` is offline, `pkg`/`deps` cross-check OSV for malicious-package records). Surfaced as `scripts/profile.sh <p> deps`
 - [`scripts/run-ephemeral.sh`](../scripts/run-ephemeral.sh) — disposable one-shot containers
 - [`scripts/init-profile-state.sh`](../scripts/init-profile-state.sh) — idempotent state bootstrap per profile
