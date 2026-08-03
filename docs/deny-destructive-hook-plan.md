@@ -112,6 +112,41 @@ For `tool_name == "Bash"`, normalise the command (lowercase, strip leading
 | 12 | `workspace-overwrite` — `>` into `/workspace/` | **warn** |
 | 13 | `manifest-dep-add` (Edit/Write/MultiEdit) — a dependency **name not already in** `package.json` / `pyproject.toml` / `requirements*.txt` / `Pipfile` | block |
 | 14 | `docs-install-cmd` (Edit/Write/MultiEdit) — an install command naming a package, written into `AGENTS.md`, `CLAUDE.md`, `SKILL.md`, `README.md`, `CONTRIBUTING.md`, `agent-notice.md`, `.cursorrules`, `*.mdc` | **warn** |
+| 15 | `quarantine-tamper` (Edit/Write/MultiEdit, **by path**) — any write to the sandbox's own package-manager config: `/root/.config/pnpm/rc`, `/root/.npmrc`, `/usr/etc/npmrc` | block |
+| 16 | `quarantine-weaken` (Edit/Write/MultiEdit, **by content**) — a payload setting `min-release-age` / `minimum-release-age` / `minimumReleaseAge` to `0` or to a suffixed value, in a project `.npmrc` / `pnpm-workspace.yaml` | block |
+| 16b | `quarantine-touch` — any other payload naming those keys, or `registry=`, in the same files | **warn** |
+
+### Rules 15–16 — resolution quarantine overrides
+
+Added 2026-08-03, after the [dependency-guardrails
+handoff](dependency-guardrails-handoff.md) analysis found that **writing a file
+switched Gate 2 off**. npm/pnpm config precedence is
+`cli > env > project > user > global`, so a per-directory `.npmrc` or
+`pnpm-workspace.yaml` overrides the sandbox-wide age gate for installs run from
+there. Rules 1–14 could not see it: the deny-list and rule 13 key on commands and
+on *manifest* files, not on config.
+
+The **path** tier (rule 15) is unconditional because those three files are
+sandbox-owned — `/root/.config/pnpm/rc` is rewritten by `profile.sh ensure_state`
+on every `up`, and `/usr/etc/npmrc` is baked into the image. A project needing
+different settings uses its own `.npmrc`, which rule 16 governs. The pnpm file is
+matched on full path, not basename: its basename is the bare word `rc`.
+
+The **content** tier splits on whether a legitimate authoring path exists.
+Zeroing the gate has none. Neither does a suffixed value, which is *worse* than
+off — pnpm computes `value*60*1e3`, so `7d` yields `NaN` → `Invalid Date` and
+**every version is rejected**, failing closed and presenting as a broken
+registry. Strengthening the window is legitimate and common (this repo's own
+plans tell people to commit `10080`), so it warns instead; a naive block there
+would fire on correct work and train people to route around the hook. A shell
+redirect bypasses this arm entirely, which is the second reason not to over-block
+— the warn log is the promotion path.
+
+Detection is layered, and only this rule is preventive: `depaudit`'s **N03**
+finds these files statically in any repo, and `verify-sandbox.sh`'s G10 sweep
+compares them against the live in-container baseline. `with-egress.sh` records
+any override in the install window's audit record, so a window that resolved
+packages under a weakened gate cannot later read as a clean quarantined install.
 
 ### Rules 13–14 — dependency guardrails
 

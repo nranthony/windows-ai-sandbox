@@ -56,6 +56,7 @@ import_fn() {
 import_fn extract_specs
 import_fn egress_hosts
 import_fn newly_opened_domains
+import_fn scan_workspace_rc
 import_fn list_denied_domains "$PROFILE_SRC"
 
 PASS=0; FAIL=0
@@ -342,6 +343,72 @@ expect_opened "idempotent re-open yields nothing to probe" \
 # Direction matters: closing a section is not an opening.
 expect_opened "closing a section yields nothing (wrong direction)" \
   "$DENYFIX/after.txt" "$DENYFIX/before.txt" ""
+
+# ---------------------------------------------------------------------------
+# scan_workspace_rc() — does the tree we are about to install into weaken the gate?
+# ---------------------------------------------------------------------------
+# Classes: OK / WEAKER / OFF / MALFORMED. MALFORMED is its own class rather than
+# a flavour of OFF because it fails CLOSED (pnpm computes value*60*1e3 -> NaN ->
+# Invalid Date -> every version rejected), which presents as a broken registry
+# and sends people looking in the wrong place.
+echo
+echo "scan_workspace_rc() — workspace quarantine overrides"
+
+WSFIX="$(mktemp -d "${TMPDIR:-/tmp}/wsfix.XXXXXX")"
+mkdir -p "$WSFIX"/{off,weak,strong,malformed,yamlweak,ignored/node_modules/pkg}
+printf 'minimum-release-age=0\n'       > "$WSFIX/off/.npmrc"
+printf 'minimum-release-age=60\n'      > "$WSFIX/weak/.npmrc"
+printf 'minimum-release-age=10080\n'   > "$WSFIX/strong/.npmrc"
+printf 'min-release-age=7\n'          >> "$WSFIX/strong/.npmrc"   # 7 DAYS = same window
+printf 'minimum-release-age=7d\n'      > "$WSFIX/malformed/.npmrc"
+printf 'minimumReleaseAge: 5\n'        > "$WSFIX/yamlweak/pnpm-workspace.yaml"
+printf 'minimum-release-age=0\n'       > "$WSFIX/ignored/node_modules/pkg/.npmrc"
+
+# Keyed on path AND setting: one file can carry several settings (strong/.npmrc
+# deliberately does), so a path-only lookup would return more than one class.
+ws_class() {  # <relative path> <setting> -> class, or MISSING
+  scan_workspace_rc "$WSFIX" \
+    | awk -F'\t' -v p="$1" -v s="$2" '$1==p && $2==s {print $3; f=1} END{if(!f) print "MISSING"}'
+}
+expect_class() {
+  local desc="$1" path="$2" setting="$3" want="$4" got; got="$(ws_class "$path" "$setting")"
+  if [[ "$got" == "$want" ]]; then ok "$desc"; else bad "$desc" "$want" "$got"; fi
+}
+
+expect_class "quarantine set to 0 is OFF" \
+  "off/.npmrc" "minimum-release-age=0" "OFF"
+expect_class "60 minutes is WEAKER than the 10080 baseline" \
+  "weak/.npmrc" "minimum-release-age=60" "WEAKER"
+expect_class "10080 minutes is OK" \
+  "strong/.npmrc" "minimum-release-age=10080" "OK"
+expect_class "suffixed '7d' is MALFORMED, not merely weak" \
+  "malformed/.npmrc" "minimum-release-age=7d" "MALFORMED"
+expect_class "child pnpm-workspace.yaml is scanned too" \
+  "yamlweak/pnpm-workspace.yaml" "minimumReleaseAge=5" "WEAKER"
+
+# npm counts DAYS, pnpm counts MINUTES. `min-release-age=7` and
+# `minimum-release-age=10080` are the SAME window; comparing the day-form against
+# the minute baseline would read as 7 minutes and report WEAKER — a 1440x error.
+expect_class "min-release-age=7 (DAYS) is OK, not WEAKER  <-- UNIT LOCK" \
+  "strong/.npmrc" "min-release-age=7" "OK"
+
+# node_modules holds thousands of vendored .npmrc files; scanning them would bury
+# the real finding.
+if scan_workspace_rc "$WSFIX" | grep -q node_modules; then
+  bad "node_modules is excluded" "no node_modules rows" "node_modules row present"
+else
+  ok "node_modules is excluded from the scan"
+fi
+
+# A clean tree must emit nothing at all, so the audit field stays empty rather
+# than carrying a reassuring "checked: 0 problems" that hides a scan that ran on
+# the wrong directory.
+if [[ -z "$(scan_workspace_rc "$WSFIX/strong/nonexistent" 2>/dev/null)" ]]; then
+  ok "a missing directory yields no rows (and no error)"
+else
+  bad "missing directory" "no output" "output present"
+fi
+rm -rf "$WSFIX"
 
 printf "\n  %d passed, %d failed\n" "$PASS" "$FAIL"
 [[ "$FAIL" -eq 0 ]]

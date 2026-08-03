@@ -227,5 +227,68 @@ else
   FAIL=$((FAIL+1)); printf "  FAIL lockfile form wrongly warned: $(cat "$DENY_DESTRUCTIVE_LOG")\n"
 fi
 
+# ============================================================================
+# quarantine-tamper / quarantine-weaken / quarantine-touch
+# ============================================================================
+# The age gate (Gate 2) is overridable by writing a FILE, which no Bash matcher
+# can see. Three tiers, and the split is the whole design:
+#   path block   — sandbox-owned config, no legitimate agent edit
+#   content block— zeroed/malformed value, no legitimate authoring path
+#   warn         — everything else touching those keys (strengthening is normal)
+printf 'minimum-release-age=10080\n' > "$FIX/.npmrc"
+printf 'minimumReleaseAge: 10080\n'  > "$FIX/pnpm-workspace.yaml"
+
+# --- path tier: sandbox-owned files ---
+assert "edit to /root/.config/pnpm/rc is denied" \
+  "$(ed /root/.config/pnpm/rc '"minimum-release-age=0"')" deny quarantine-tamper
+assert "edit to /usr/etc/npmrc is denied" \
+  "$(ed /usr/etc/npmrc '"min-release-age=0"')" deny quarantine-tamper
+
+# --- content tier: values with no legitimate form ---
+assert "project .npmrc zeroing the gate is denied" \
+  "$(ed "$FIX/.npmrc" '"minimum-release-age=0"')" deny quarantine-weaken
+assert "project .npmrc npm-form zero is denied" \
+  "$(ed "$FIX/.npmrc" '"min-release-age=0"')" deny quarantine-weaken
+assert "suffixed value (Invalid Date, rejects everything) is denied" \
+  "$(ed "$FIX/.npmrc" '"minimum-release-age=7d"')" deny quarantine-weaken
+assert "pnpm-workspace.yaml zeroing the gate is denied" \
+  "$(ed "$FIX/pnpm-workspace.yaml" '"minimumReleaseAge: 0"')" deny quarantine-weaken
+assert "pnpm-workspace.yaml suffixed value is denied" \
+  "$(ed "$FIX/pnpm-workspace.yaml" '"minimumReleaseAge: 30m"')" deny quarantine-weaken
+
+# --- MERGE GATE: strengthening must pass. If these fail the rule is a
+# --- false-positive generator and gets reverted, not shipped.
+assert "raising the window to 7d passes" \
+  "$(ed "$FIX/.npmrc" '"minimum-release-age=10080"')" pass
+assert "a weak-but-nonzero value passes (warn tier, not block)" \
+  "$(ed "$FIX/.npmrc" '"minimum-release-age=1440"')" pass
+assert "yaml strengthening passes" \
+  "$(ed "$FIX/pnpm-workspace.yaml" '"minimumReleaseAge: 10080"')" pass
+assert "an unrelated .npmrc edit passes" \
+  "$(ed "$FIX/.npmrc" '"registry=https://registry.npmjs.org/"')" pass
+# `0` inside a longer number must not match — 10080 ends in 0, and a naive
+# `=[[:space:]]*0` would still be fine, but `=0` anywhere would not be.
+assert "a value merely containing 0 is not treated as zero" \
+  "$(ed "$FIX/.npmrc" '"minimum-release-age=20160"')" pass
+
+# --- warn tier ---
+: > "$DENY_DESTRUCTIVE_LOG"
+assert "strengthening logs a quarantine-touch warn" \
+  "$(ed "$FIX/.npmrc" '"minimum-release-age=20160"')" pass
+if jq -e 'select(.rule=="quarantine-touch")' < "$DENY_DESTRUCTIVE_LOG" >/dev/null 2>&1; then
+  PASS=$((PASS+1)); printf "  ok   quarantine-touch warn logged for a strengthening edit\n"
+else
+  FAIL=$((FAIL+1)); printf "  FAIL quarantine-touch not logged\n"
+fi
+
+: > "$DENY_DESTRUCTIVE_LOG"
+assert "an .npmrc edit naming no quarantine key does not warn" \
+  "$(ed "$FIX/.npmrc" '"save-exact=true"')" pass
+if [ ! -s "$DENY_DESTRUCTIVE_LOG" ]; then
+  PASS=$((PASS+1)); printf "  ok   unrelated .npmrc key does not warn\n"
+else
+  FAIL=$((FAIL+1)); printf "  FAIL unrelated key wrongly warned: $(cat "$DENY_DESTRUCTIVE_LOG")\n"
+fi
+
 printf "\n  %d passed, %d failed\n" "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

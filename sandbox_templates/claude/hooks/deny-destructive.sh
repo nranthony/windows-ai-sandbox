@@ -107,6 +107,15 @@ case "$tool_name" in
         # arbitrary execution — the tail end of the chain is pre-approved, so
         # this write is the only place left to stop it.
         emit_block "git-hook-tamper" "write to a .git/hooks/ script is denied; git executes these on commit — ask the user to install it" ;;
+      /root/.config/pnpm/rc|/root/.npmrc|/usr/etc/npmrc)
+        # Sandbox-owned quarantine config, not project config: /root/.config/pnpm/rc
+        # is written by profile.sh ensure_state on every `up`, and /usr/etc/npmrc is
+        # baked into the image. These hold the age gate (Gate 2) that stops a
+        # freshly-published slopsquat from resolving. An agent edit here is tamper
+        # with no legitimate form — a project that needs different settings uses its
+        # own .npmrc, which is handled by the content rule below. Matched on full
+        # path because the pnpm file's basename is the bare word `rc`.
+        emit_block "quarantine-tamper" "edit to the sandbox's own package-manager config ($rp) is denied; it holds the resolution age gate. A per-project setting belongs in that project's .npmrc; a change to the sandbox default is the user's to make." ;;
     esac
 
     # Payload actually being written: Edit(new_string) / Write(content) /
@@ -158,6 +167,36 @@ case "$tool_name" in
       AGENTS.md|CLAUDE.md|GEMINI.md|SKILL.md|README.md|CONTRIBUTING.md|agent-notice.md|.cursorrules|*.mdc)
         if printf '%s' "$payload" | grep -Eq '(npm[[:space:]]+(i|install|add)|pnpm[[:space:]]+(add|install|dlx)|yarn[[:space:]]+add|bun[[:space:]]+add|pip3?[[:space:]]+install|uv[[:space:]]+add|uv[[:space:]]+pip[[:space:]]+install|pipx[[:space:]]+install|poetry[[:space:]]+add|cargo[[:space:]]+(install|add)|go[[:space:]]+(install|get))[[:space:]]+[^-[:space:]]' 2>/dev/null; then
           warn_log "docs-install-cmd" "$envelope"
+        fi
+        ;;
+      # ---------- project-level quarantine overrides ----------
+      # A PROJECT .npmrc or pnpm-workspace.yaml is legitimate config, so this is
+      # not a path block. But config precedence is cli > env > project > user >
+      # global, which means one of these files switches the age gate off for its
+      # directory — no install command, nothing for a Bash matcher to see.
+      #
+      # Two tiers, split on whether a legitimate authoring path exists:
+      #
+      #   BLOCK — zeroed or malformed. Nobody has a reason to write
+      #     `minimum-release-age=0`, and a suffixed value is worse than off (pnpm
+      #     computes value*60*1e3 -> NaN -> Invalid Date -> every version
+      #     rejected, which fails closed and reads as a broken registry). Both are
+      #     targeted enough for rule-13 treatment.
+      #
+      #   WARN — any other touch of these keys. STRENGTHENING is legitimate and
+      #     common (this repo's own plans tell people to commit 10080), and a
+      #     registry pin is ordinary config; blocking those would fire on correct
+      #     work and train evasion. Note a shell redirect bypasses this arm
+      #     entirely, which is the other reason not to over-block here: the warn
+      #     log is the promotion path, not a wall.
+      .npmrc|pnpm-workspace.yaml|npmrc)
+        if [ -n "$payload" ] && printf '%s' "$payload" | grep -Eq \
+             '^[[:space:]]*(min-release-age|minimum-release-age)[[:space:]]*=[[:space:]]*(0([^0-9]|$)|[0-9]+[A-Za-z])|^[[:space:]]*minimumReleaseAge[[:space:]]*:[[:space:]]*(0([^0-9]|$)|[0-9]+[A-Za-z])' 2>/dev/null; then
+          emit_block "quarantine-weaken" \
+"this write switches OFF or breaks the resolution age gate in $(basename "$rp"). The gate is what stops a package published (or hijacked) minutes ago from resolving — it is the main defence against slopsquatting, and project config overrides the sandbox-wide setting. A value of 0 disables it; a suffixed value (e.g. 7d) makes pnpm compute an Invalid Date and reject EVERY version, which looks like a broken registry. If a specific install genuinely needs a newer package, that is the user's call to make explicitly."
+        elif [ -n "$payload" ] && printf '%s' "$payload" | grep -Eq \
+             '(min-release-age|minimum-release-age|minimumReleaseAge)|^[[:space:]]*registry[[:space:]]*=' 2>/dev/null; then
+          warn_log "quarantine-touch" "$envelope"
         fi
         ;;
     esac

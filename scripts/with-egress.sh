@@ -299,6 +299,96 @@ print(json.dumps(out))
   return 0
 }
 
+# scan_workspace_rc <dir> — release-age overrides in the tree about to install.
+#
+# The install is the moment this matters: a child .npmrc or pnpm-workspace.yaml
+# that zeroes the quarantine means the packages resolved inside THIS window were
+# never held to the age gate, and the audit record would otherwise claim a
+# quarantined install. depaudit's N03 and verify's G10 sweep both find these, but
+# neither runs here, and this is the only route by which a dependency enters.
+#
+# Baselines are the sandbox's own constants because the host cannot read the
+# container's live npm/pnpm config: npm min-release-age=7 DAYS (/usr/etc/npmrc,
+# set in the Dockerfile) and pnpm minimum-release-age=10080 MINUTES
+# (~/.config/pnpm/rc, written by profile.sh ensure_state). Same window, 1440x
+# apart in unit — do not "harmonise" them.
+#
+# Emits `path<TAB>key=value<TAB>CLASS` lines; never blocks. A weakened window is
+# confidence, not a boundary, and hard-failing the only install route over it
+# would break installs to defend against something already reported elsewhere.
+scan_workspace_rc() {
+  local dir="$1" f key val mins base class
+  [[ -d "$dir" ]] || return 0
+  while IFS= read -r f; do
+    case "$f" in
+      *pnpm-workspace.yaml)
+        while IFS= read -r line; do
+          val="${line#*:}"; val="${val//[[:space:]]/}"
+          key="minimumReleaseAge"; base=10080
+          if [[ -n "$val" && "$val" != *[!0-9]* ]]; then mins="$val"; else mins=""; fi
+          if   [[ -z "$mins" ]];        then class=MALFORMED
+          elif (( mins == 0 ));         then class=OFF
+          elif (( mins < base ));       then class=WEAKER
+          else                               class=OK; fi
+          printf '%s\t%s=%s\t%s\n' "${f#$dir/}" "$key" "$val" "$class"
+        done < <(grep -hE '^[[:space:]]*minimumReleaseAge[[:space:]]*:' "$f" 2>/dev/null)
+        ;;
+      *)
+        while IFS= read -r line; do
+          key="${line%%=*}"; key="${key//[[:space:]]/}"
+          val="${line#*=}";  val="${val//[[:space:]]/}"
+          case "$key" in
+            min-release-age)     base=10080
+                                 if [[ -n "$val" && "$val" != *[!0-9]* ]]; then mins=$(( val * 1440 )); else mins=""; fi ;;
+            minimum-release-age) base=10080
+                                 if [[ -n "$val" && "$val" != *[!0-9]* ]]; then mins="$val"; else mins=""; fi ;;
+            *) continue ;;
+          esac
+          if   [[ -z "$mins" ]];  then class=MALFORMED
+          elif (( mins == 0 ));   then class=OFF
+          elif (( mins < base )); then class=WEAKER
+          else                         class=OK; fi
+          printf '%s\t%s=%s\t%s\n' "${f#$dir/}" "$key" "$val" "$class"
+        done < <(grep -hE '^[[:space:]]*(min-release-age|minimum-release-age)[[:space:]]*=' "$f" 2>/dev/null)
+        ;;
+    esac
+  done < <(find "$dir" -maxdepth 4 \( -name .npmrc -o -name pnpm-workspace.yaml \) \
+             -not -path '*/node_modules/*' 2>/dev/null | sort)
+}
+
+RC_OVERRIDE_JSON="[]"
+posture_preflight() {
+  # NB: REPO_ROOT here is the SANDBOX repo, not the workspace parent. The
+  # workspace is ${HOME}/repo/<profile>, mounted at /workspace in the agent
+  # (docker-compose.yml), which is the tree the install will actually resolve in.
+  local rows; rows="$(scan_workspace_rc "${HOME}/repo/$profile")"
+  [[ -n "$rows" ]] || return 0
+
+  local bad_rows
+  bad_rows="$(printf '%s\n' "$rows" | grep -vE '\tOK$' || true)"
+  if [[ -n "$bad_rows" ]]; then
+    echo "WARN: the workspace weakens the resolution quarantine — packages resolved in" >&2
+    echo "      this window may NOT have been held to the 7-day age gate:" >&2
+    printf '%s\n' "$bad_rows" | while IFS=$'\t' read -r p kv c; do
+      printf '        %-10s %s  (%s)\n' "$c" "$p" "$kv" >&2
+    done
+    echo "      Proceeding — this is recorded in the audit log, not enforced here." >&2
+  fi
+
+  RC_OVERRIDE_JSON="$(printf '%s\n' "$rows" | python3 -c '
+import sys, json
+out = []
+for line in sys.stdin.read().splitlines():
+    if not line.strip():
+        continue
+    parts = line.split("\t")
+    while len(parts) < 3:
+        parts.append("")
+    out.append({"path": parts[0], "setting": parts[1], "class": parts[2]})
+print(json.dumps(out))
+' 2>/dev/null || echo '[]')"
+}
+
 # Confirm the proxy can READ the widened allowlist at the expected path.
 #
 # BE CLEAR ABOUT WHAT THIS DOES AND DOES NOT PROVE. It compares file contents,
@@ -526,6 +616,11 @@ trap cleanup EXIT INT TERM
 echo "→ pre-flight (OSV malicious-package check)" >&2
 preflight || exit 4
 
+# Posture pre-flight: does the workspace itself weaken the age gate? Warn-only,
+# recorded in the audit record. Runs here so the finding describes the tree as it
+# was when the window opened, not after the install rewrote lockfiles.
+posture_preflight
+
 TS_OPEN="$(date +%s)"
 snapshot > "$snap_before"
 
@@ -576,7 +671,8 @@ echo "→ window ${TS_OPEN}..${TS_CLOSE} ($((TS_CLOSE - TS_OPEN))s) · hosts $(p
 mkdir -p "$AUDIT_DIR" 2>/dev/null || true
 if WE_TS_OPEN="$TS_OPEN" WE_TS_CLOSE="$TS_CLOSE" WE_PROFILE="$profile" \
    WE_SECTIONS="$sections" WE_CMD="${cmd[*]}" WE_RC="$rc" \
-   WE_PREFLIGHT="$PREFLIGHT_JSON" WE_ALLOWED="$hosts_allowed" WE_DENIED="$hosts_denied" \
+   WE_PREFLIGHT="$PREFLIGHT_JSON" WE_RC_OVERRIDES="$RC_OVERRIDE_JSON" \
+   WE_ALLOWED="$hosts_allowed" WE_DENIED="$hosts_denied" \
    WE_LOCKS="$locks_changed" WE_ADDED="$mods_added" WE_REMOVED="$mods_removed" \
    python3 - >> "$AUDIT_LOG" <<'PY'
 import os, json
@@ -595,6 +691,15 @@ try:
 except json.JSONDecodeError:
     preflight = []
 
+# Release-age overrides found in the workspace when the window opened. An entry
+# whose class is not OK means the packages resolved in this window may not have
+# been held to the age gate — without which the record would read as a clean
+# quarantined install.
+try:
+    rc_overrides = json.loads(os.environ.get("WE_RC_OVERRIDES") or "[]")
+except json.JSONDecodeError:
+    rc_overrides = []
+
 rec = {
     "ts_open":   int(os.environ["WE_TS_OPEN"]),
     "ts_close":  int(os.environ["WE_TS_CLOSE"]),
@@ -604,6 +709,7 @@ rec = {
     "cmd":       os.environ.get("WE_CMD", ""),
     "rc":        int(os.environ.get("WE_RC") or 0),
     "preflight": preflight,
+    "rc_overrides": rc_overrides,
     "egress":    {"allowed": lines("WE_ALLOWED"), "denied": lines("WE_DENIED")},
     "lockfiles_changed": lines("WE_LOCKS"),
     "modules_added":     capped("WE_ADDED"),
