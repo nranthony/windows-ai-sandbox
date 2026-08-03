@@ -8,6 +8,14 @@
 #   extract_specs()  T18 — which package names does a command actually name?
 #   egress_hosts()   T20 — which hosts did the proxy see inside the bracket?
 #
+# Plus the third allowlist parser, which lives in profile.sh but belongs with
+# these because it reads the same file and fails the same way:
+#
+#   list_denied_domains()  — which domains does the repo mean to DENY? This
+#     feeds verify's enforcement probe, so a parser that over-matches reports a
+#     healthy proxy as permitting revoked hosts (crying wolf), and one that
+#     under-matches verifies nothing while printing a reassuring count.
+#
 # This is not incidental caution. The identical class of bug has now shipped
 # three times on this workstream: T04's dep-name extractor was line-oriented and
 # silently matched nothing on compact manifests; depaudit's lockfile parser put
@@ -26,22 +34,28 @@
 set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 SRC="$HERE/with-egress.sh"
+PROFILE_SRC="$HERE/profile.sh"
 [[ -f "$SRC" ]] || { echo "missing $SRC" >&2; exit 1; }
+[[ -f "$PROFILE_SRC" ]] || { echo "missing $PROFILE_SRC" >&2; exit 1; }
 
-# Pull a top-level `name() { ... }` block out of the real script and define it
-# here. Anchored on column-0 braces, which is how the file is written.
+# Pull a top-level `name() { ... }` block out of a real script and define it
+# here. Anchored on column-0 braces, which is how both files are written.
+# Second argument is the source file; it defaults to with-egress.sh because most
+# of what this suite covers lives there, but the allowlist parsers are split
+# across two scripts and both are locked here (see the header).
 import_fn() {
-  local fn="$1" body
+  local fn="$1" src="${2:-$SRC}" body
   body="$(awk -v f="$fn" '
     $0 ~ "^" f "\\(\\) \\{" { inside = 1 }
     inside { print }
     inside && /^\}$/ { exit }
-  ' "$SRC")"
-  [[ -n "$body" ]] || { echo "could not extract $fn() from $SRC" >&2; exit 1; }
+  ' "$src")"
+  [[ -n "$body" ]] || { echo "could not extract $fn() from $src" >&2; exit 1; }
   eval "$body"
 }
 import_fn extract_specs
 import_fn egress_hosts
+import_fn list_denied_domains "$PROFILE_SRC"
 
 PASS=0; FAIL=0
 ok()   { PASS=$((PASS+1)); printf "  ok   %s\n" "$1"; }
@@ -201,6 +215,91 @@ if [[ -z "$stale" ]]; then
   ok "no code references the old /etc/squid/allowed_domains.txt path"
 else
   bad "stale path references remain" "none" "$(printf '%s' "$stale" | tr '\n' ' ')"
+fi
+
+# ---------------------------------------------------------------------------
+# list_denied_domains() — the enforcement probe's input set
+# ---------------------------------------------------------------------------
+# Every case below is a shape that actually occurs in proxy/allowed_domains.txt.
+# The two that matter most are the last two: they are false-FAIL generators, and
+# a false FAIL on every healthy profile is how a check becomes furniture.
+echo
+echo "list_denied_domains() — denied-set parser"
+
+DENYFIX="$(mktemp -d "${TMPDIR:-/tmp}/denyfix.XXXXXX")"
+trap 'rm -rf "$DENYFIX"' EXIT
+
+cat > "$DENYFIX/allowlist.txt" <<'EOF'
+# =============================================================================
+# Prose header. Not a domain. Mentions example.com in passing, with words.
+# =============================================================================
+api.anthropic.com
+github.com
+api.github.com
+
+# # --- Playwright browser binaries [playwright-install] ---
+# # Used by `playwright install chromium` etc.
+# cdn.playwright.dev
+# playwright.download.prss.microsoft.com
+
+# --- Quarto CLI install [quarto-install] ---
+# github.com
+# objects.githubusercontent.com
+
+# --- Python package ecosystem [pypi] ---
+# .files.pythonhosted.org
+
+# --- Wildcard-covered child ---
+.covered.example
+# child.covered.example
+EOF
+
+expect_denied() {
+  local desc="$1" want="$2" got
+  got="$(list_denied_domains "$DENYFIX/allowlist.txt" | sort | tr '\n' ' ' | sed 's/ $//')"
+  if [[ "$got" == "$want" ]]; then ok "$desc"; else bad "$desc" "$want" "$got"; fi
+}
+
+expect_denied "denied set: commented domains only, traps excluded" \
+  "cdn.playwright.dev files.pythonhosted.org objects.githubusercontent.com playwright.download.prss.microsoft.com"
+
+# Spelled out individually so a regression names the specific trap it hit.
+got_all="$(list_denied_domains "$DENYFIX/allowlist.txt")"
+for probe in "example.com:prose comment is not a domain" \
+             "Playwright:double-commented '# #' section header is not a domain" \
+             "github.com:commented under one tag but ACTIVE under another" \
+             "child.covered.example:covered by an active .wildcard parent" \
+             "api.anthropic.com:active domain is not in the denied set"; do
+  needle="${probe%%:*}"; why="${probe#*:}"
+  if printf '%s\n' "$got_all" | grep -qx "$needle"; then
+    bad "excluded: $why" "$needle absent" "$needle present"
+  else
+    ok "excluded: $why"
+  fi
+done
+
+# files.pythonhosted.org is written `# .files.pythonhosted.org` — a commented
+# wildcard. Squid would match the bare parent too, so probe it without the dot.
+if printf '%s\n' "$got_all" | grep -qx 'files.pythonhosted.org'; then
+  ok "included: commented wildcard, leading dot stripped for the probe"
+else
+  bad "included: commented wildcard, leading dot stripped" "files.pythonhosted.org" "absent"
+fi
+
+# The real file must yield a non-empty set, or the probe silently verifies
+# nothing while reporting success.
+real_count="$(list_denied_domains "$ROOT/proxy/allowed_domains.txt" | grep -c . || true)"
+if [[ "$real_count" -gt 0 ]]; then
+  ok "real allowlist yields a non-empty denied set ($real_count domains)"
+else
+  bad "real allowlist denied set" "at least 1 domain" "0 — probe would verify nothing"
+fi
+
+# github.com is the live instance of the commented-here-active-there trap.
+if list_denied_domains "$ROOT/proxy/allowed_domains.txt" | grep -qx 'github.com'; then
+  bad "real allowlist: github.com excluded" "absent (active under [git])" "present — would false-FAIL"
+else
+  ok "real allowlist: github.com excluded  <-- FALSE-FAIL LOCK"
 fi
 
 printf "\n  %d passed, %d failed\n" "$PASS" "$FAIL"
