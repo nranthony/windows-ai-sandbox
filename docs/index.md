@@ -29,6 +29,7 @@ right: an **RFC** proposes → an **ADR** records → **work/** implements → t
 - [.agents/skills/](../.agents/skills/) — operational guides: profile lifecycle, audit tiers, squid allowlist
 - [Sandbox design notes](sandbox-design-notes.md) — why rootfs is rw, bwrap is disabled, container runs as root, git config is denied
 - [Permissions model](permissions-model.md) — deny/allow posture, two-phase workflow, WebFetch exfil risk, hook self-protection
+- [**Dependency guardrails — build report, defect log, retrospective**](dependency-guardrails-handoff.md) — the complete slopsquatting-defence effort (phases 0–4, T00–T26) in one self-contained document: what exists and where, the four ADRs, **every defect and how it was caught**, what remains, and the transferable lessons. Written for someone with neither the repo nor the conversation. Start here before changing anything in the guardrail path
 - [VS Code integration security](vscode-integration-security.md) — SSH agent forwarding, gitconfig leaks, credential helper injection, orphaned root shells
 - [Sibling repo: macolima](sibling-repo-relationship.md) — shared vs divergent posture between the two repos, and how to mine the sister repo for flaws we might miss
 - [Portability assessment + plan](portability-assessment-plan.md) — running on bare-Ubuntu rootless (validated 2026-07-04, incl. GPU-overlay auto-detect design) and why rootful Docker is a redesign, not a toggle
