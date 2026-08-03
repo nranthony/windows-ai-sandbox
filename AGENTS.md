@@ -65,7 +65,7 @@ Any change to them requires:
 
 Hook edits additionally require
 `bash sandbox_templates/claude/hooks/deny-destructive.test.sh` (95/95).
-Edits to `scripts/depaudit.py` require `bash scripts/depaudit.test.sh` (31/31
+Edits to `scripts/depaudit.py` require `bash scripts/depaudit.test.sh` (38/38
 offline; `--online` adds the OSV corpus). Two of its assertions are regression
 locks for checks that shipped **inverted** — read the header before changing them.
 Edits to `scripts/with-egress.sh` require `bash scripts/with-egress.test.sh`

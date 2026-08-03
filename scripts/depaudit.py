@@ -273,7 +273,7 @@ def discover(root: Path, rep: Report) -> dict:
         for name in ("package.json", "pyproject.toml")
         for pat in (f"*/{name}", f"*/*/{name}")
         for p in root.glob(pat)
-        if not (SKIP_DIRS & set(p.parts))
+        if not skipped(p, root)
     })
     if nested and not node and not py and not reqs:
         rep.add("D03", WARN, "No manifests at the repo root, but nested projects exist",
@@ -306,6 +306,27 @@ def discover(root: Path, rep: Report) -> dict:
 SKIP_DIRS = {"node_modules", ".venv", ".git", "venv", "__pycache__"}
 
 
+def skipped(p: Path, root: Path) -> bool:
+    """Is this path inside vendored / installed third-party code?
+
+    A literal name set is not enough. Virtualenvs are routinely named `.venv-linux`,
+    `.venv311`, `env`, and their `site-packages` trees carry thousands of READMEs
+    and `.npmrc` files belonging to OTHER projects. One live example: scanning a
+    real workspace surfaced `pip install babel` from
+    `pipeline/.venv-linux/.../jupyter_server/i18n/README.md` — a third party's
+    documentation, reported as if the user's own repo had written it.
+
+    `site-packages` / `dist-packages` are the reliable markers, since any venv
+    layout ends up with one regardless of what the top directory is called.
+    """
+    parts = p.relative_to(root).parts
+    if SKIP_DIRS & set(parts):
+        return True
+    return any(part in ("site-packages", "dist-packages") or part.startswith(".venv")
+               or part in ("venv", "env", ".env", ".tox", ".nox", "vendor")
+               for part in parts)
+
+
 def _child_rc_files(root: Path, max_depth: int = 4) -> list[Path]:
     """Config files below the root that can override the quarantine.
 
@@ -318,8 +339,8 @@ def _child_rc_files(root: Path, max_depth: int = 4) -> list[Path]:
             rel = p.relative_to(root)
             if len(rel.parts) < 2 or len(rel.parts) > max_depth:
                 continue  # root-level file is N02/N02p's job
-            if SKIP_DIRS & set(rel.parts) or any(q.is_symlink() for q in p.parents
-                                                 if q != root and root in q.parents):
+            if skipped(p, root) or any(q.is_symlink() for q in p.parents
+                                       if q != root and root in q.parents):
                 continue
             out.append(p)
     return sorted(out)
@@ -719,17 +740,46 @@ def check_cross(root: Path, rep: Report, ctx: dict) -> None:
     # --- X04: instruction files are executable surfaces -------------------
     # The check most implementations skip, and the one this estate is most
     # exposed to: an install command in AGENTS.md is executed by the next agent.
+    # Scans the WHOLE tree, not just the root and docs/. The previous globs were
+    # `<name>` plus `docs/**/<name>`, which missed the shape that matters most in
+    # a monorepo: apps/<x>/README.md and packages/<x>/AGENTS.md are read by an
+    # agent working in that subdirectory, and are exactly where a per-app setup
+    # instruction lives.
+    #
+    # Fenced code blocks are NOT excluded, deliberately. An install command inside
+    # a ``` block is if anything more likely to be copied verbatim — being tracked
+    # here is the point. (An earlier version computed an `in_fence` flag and never
+    # used it, so this was already the behaviour; the dead variable is gone.)
     hits: list[tuple[str, int, str, str]] = []
+    seen_docs: set[Path] = set()
     for name in DOC_TARGETS:
-        for p in list(root.glob(name)) + list(root.glob(f"docs/**/{name}")):
-            text = read(p)
-            in_fence = False
-            for n, line in enumerate(text.splitlines(), 1):
-                if line.lstrip().startswith("```"):
-                    in_fence = not in_fence
+        for p in sorted(root.rglob(name)):
+            if skipped(p, root) or p in seen_docs:
+                continue
+            seen_docs.add(p)
+            for n, line in enumerate(read(p).splitlines(), 1):
                 m = INSTALL_CMD.search(line)
-                if m:
-                    hits.append((str(p.relative_to(root)), n, m.group(1).strip(), m.group(2)))
+                if not m:
+                    continue
+                arg = m.group(2)
+                # A flag is not a package name. `pnpm install --frozen-lockfile`
+                # and `npm install -g` name nothing to verify — the first is a
+                # LOCKFILE install, whose versions were already held to the age
+                # gate when the lockfile was written (the same reason
+                # with-egress.sh's extract_specs skips them). Counting them
+                # inflates X04 and puts flags in front of the reader as though
+                # they were packages.
+                if arg.startswith("-"):
+                    continue
+                # Nor is a shell operator. `npm install && npm run build` captured
+                # `&&` and then reported it as a phantom package, which is the
+                # false-phantom failure mode in its purest form. A package name
+                # starts alphanumeric or `@` (npm scopes) — prose words that happen
+                # to follow an install verb still slip through, which is why X04 is
+                # a WARN and not a FAIL.
+                if not re.match(r"^[@A-Za-z0-9][A-Za-z0-9._@/+-]*$", arg):
+                    continue
+                hits.append((str(p.relative_to(root)), n, m.group(1).strip(), arg))
     if hits:
         rep.add("X04", WARN, "Install commands in instruction files",
                 f"{len(hits)} occurrence(s) — these are run by the next agent and pasted by "
@@ -742,25 +792,48 @@ def check_cross(root: Path, rep: Report, ctx: dict) -> None:
                 f"checked {', '.join(DOC_TARGETS)}")
 
     # --- X05: docs name packages the manifests do not have ----------------
+    # Reads CHILD manifests as well as the root's, because X04 now finds hits in
+    # child docs. An `npm install express` in apps/web/README.md is declared if
+    # apps/web/package.json declares it — comparing against the root manifest
+    # alone would report it as a phantom, and a false phantom is worse than a
+    # missed one: it sends someone hunting for an injection that is not there.
     declared: set[str] = set()
-    pkg = root / "package.json"
-    if pkg.exists():
+    for pkg in [root / "package.json",
+                *sorted(root.glob("*/package.json")),
+                *sorted(root.glob("*/*/package.json"))]:
+        if not pkg.exists() or skipped(pkg, root):
+            continue
         try:
             j = json.loads(read(pkg)) or {}
             for k in ("dependencies", "devDependencies", "optionalDependencies"):
                 declared |= set((j.get(k) or {}).keys())
         except json.JSONDecodeError:
             pass
-    pyproject = root / "pyproject.toml"
-    if pyproject.exists():
+    for pyproject in [root / "pyproject.toml",
+                      *sorted(root.glob("*/pyproject.toml")),
+                      *sorted(root.glob("*/*/pyproject.toml"))]:
+        if not pyproject.exists() or skipped(pyproject, root):
+            continue
         try:
             d = tomllib.loads(read(pyproject))
             for dep in (d.get("project", {}) or {}).get("dependencies", []) or []:
                 declared.add(re.split(r"[<>=!~\[ ]", dep)[0])
         except (tomllib.TOMLDecodeError, ValueError):
             pass
-    phantom = sorted({pkg_ for _, _, _, pkg_ in hits
-                      if pkg_ not in declared and not pkg_.startswith(("-", "."))})
+    # Normalise the doc-named package the SAME way the declared set is built
+    # (`re.split(r"[<>=!~\[ ]", dep)[0]` above), or an extras/version form reports
+    # as a phantom while the plain name is declared. Live example: docs say
+    # `pip install paperbridge[zotero,bibtex]`, pyproject declares
+    # `paperbridge[zotero,bibtex] @ git+...` which normalises to `paperbridge` —
+    # comparing the raw strings made a correctly-declared package a phantom.
+    # A false phantom is worse than a missed one: it sends someone hunting for an
+    # injection that does not exist.
+    def _norm(name: str) -> str:
+        return re.split(r"[<>=!~\[@ ]", name)[0].strip()
+
+    phantom = sorted({_norm(pkg_) for _, _, _, pkg_ in hits
+                      if _norm(pkg_) and _norm(pkg_) not in declared
+                      and not pkg_.startswith(("-", "."))})
     if phantom:
         rep.add("X05", WARN, "Packages named in docs but absent from manifests",
                 "Phantom instruction — a future agent installs a name nothing has vetted: "
