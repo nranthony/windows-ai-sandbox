@@ -91,6 +91,7 @@ Guides in [`host_setup/`](../host_setup/):
 - [`scripts/init-profile-state.sh`](../scripts/init-profile-state.sh) — idempotent state bootstrap per profile
 - [`scripts/sync-agent-notice.sh`](../scripts/sync-agent-notice.sh) — inject/refresh the managed sandbox-notice block into repo `AGENTS.md` / global `CLAUDE.md` (source: `sandbox_templates/common/agent-notice.md`)
 - [`scripts/sync-skills-from-conventions.sh`](../scripts/sync-skills-from-conventions.sh) — vendor shared skills from the `agentic-conventions` checkout into `sandbox_templates/skills/` (developer action, never runs during a build; source path from `$CONVENTIONS_DIR` / `.conventions-dir.local`)
+- [`scripts/vendor-myclickup.sh`](../scripts/vendor-myclickup.sh) — vendor the private `myclickup` payload (wheel + its agent skill) into the build context, or `--check` it for drift against the source tree. Payload is **gitignored** — public repo, private tool — so the `Dockerfile` installs it conditionally and a clone without it still builds. Developer action; `just vendor-myclickup` / `just vendor-check`
 
 ## Operational
 

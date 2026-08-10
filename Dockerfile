@@ -457,6 +457,57 @@ RUN mkdir -p /etc/uv \
     > /etc/pip.conf \
  && uv --version
 
+# ---------- myclickup — vendored ClickUp CLI (OPTIONAL payload) --------------
+# Zero-dependency pure-Python wheel from the PRIVATE nranthony/myclickup repo
+# (its ADR-0002). `docker-compose.yml` sets `build.context: .`, so a sibling
+# checkout is unreachable from the build and the artifact has to be inside the
+# context; a network install would need a deploy token inside the build of a
+# security-critical image. Host-side `scripts/vendor-myclickup.sh` puts it here.
+#
+# THE PAYLOAD IS GITIGNORED — this repo is public, myclickup is not, and a
+# py3-none-any wheel is a zip of the .py files. Two consequences are encoded in
+# the two unusual things about this block:
+#
+#   1. DIRECTORY copy, not `COPY …/myclickup-*.whl`. A COPY whose glob matches
+#      nothing is a hard build failure, so the paste-ready form would break every
+#      clone that lacks the payload. `.gitkeep` keeps the directory in the context.
+#   2. CONDITIONAL install. No wheel ⇒ no myclickup, build still green. A clone of
+#      this repo therefore does NOT reproduce this image bit-for-bit; that is the
+#      accepted cost of not publishing a private tool.
+#
+# Two wheels is a REFUSAL, not a pick-one: the vendor script rotates the file on
+# every bump, so two means a failed rotation and choosing silently would ship the
+# wrong version behind a correct-looking `myclickup --version`.
+#
+# Verified 2026-08-10 in a throwaway container with `--network none`: the install
+# needs no network (zero deps) and passes Gate 3's `no-build = true` above,
+# because a wheel is never built. UV_TOOL_DIR=/opt/uv/tools +
+# UV_TOOL_BIN_DIR=/usr/local/bin (~:148) keep it off the noexec /root/.local.
+#
+# Placed BELOW the AI-CLI refresh cache-buster and both gates deliberately,
+# against the original spec's "beside the webfetch block" (that ARG is named in
+# the layer-order block above; naming it again here would make its anchor
+# ambiguous and dockerfile-order.test.sh rightly refuses that): pre-1.0 this wheel
+# is the most frequently re-vendored artifact in the tree, and above the
+# cache-buster every bump would re-run the Claude Code/agy install and both gate
+# layers.
+#
+# In-container upgrades are impossible by design (`uv tool install` is denied to
+# the agent) — bumps are host-side: vendor, `profile.sh build`, then recreate.
+COPY sandbox_templates/wheels/ /tmp/wheels/
+RUN set -eu; \
+    n="$(find /tmp/wheels -maxdepth 1 -name 'myclickup-*.whl' | wc -l)"; \
+    if [ "$n" -gt 1 ]; then \
+      echo "myclickup: $n wheels in sandbox_templates/wheels/ — refusing to guess" >&2; \
+      exit 1; \
+    elif [ "$n" -eq 1 ]; then \
+      whl="$(find /tmp/wheels -maxdepth 1 -name 'myclickup-*.whl')"; \
+      uv tool install "$whl" && myclickup --version; \
+    else \
+      echo "myclickup: no vendored wheel — skipping (scripts/vendor-myclickup.sh)"; \
+    fi; \
+    rm -rf /tmp/wheels
+
 # ---------- runtime layout ---------------------------------------------------
 # Expected bind mounts (see docker-compose.yml):
 #   /workspace                <- ~/repo/<profile>/

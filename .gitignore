@@ -39,6 +39,19 @@ AGENTS.local.md
 # where agentic-conventions is checked out on THIS machine — the only
 # machine-specific fact in the skill-vendoring flow (sync-skills-from-conventions.sh)
 .conventions-dir.local
+# same, for the myclickup checkout (scripts/vendor-myclickup.sh)
+.myclickup-dir.local
+
+# vendored myclickup payload — NEVER commit. This repo is public and
+# nranthony/myclickup is private; a py3-none-any wheel is a zip of the .py
+# files, so committing it would publish the tool's source. The Dockerfile
+# installs it conditionally, so a clone without the payload still builds — it
+# just has no `myclickup`. Regenerate with scripts/vendor-myclickup.sh.
+sandbox_templates/wheels/*.whl
+sandbox_templates/skills/myclickup/
+# but keep the directory in the Docker build context: a COPY of a missing
+# directory fails the build for everyone (see the myclickup block in Dockerfile)
+!sandbox_templates/wheels/.gitkeep
 
 # native plan-mode drafts (plansDirectory in .claude/settings.json) — drafts, not the
 # durable artifact; a draft becomes durable by promotion to work/NNNN-slug/plan.md

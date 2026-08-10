@@ -41,6 +41,8 @@
   "permissions": {
     "_comment": "Plan interactively (you drive the shell, install deps), execute autonomously (tight denies, Anthropic-only egress through Squid). acceptEdits lets Claude freely edit code but still prompts for Bash not on the allow list. The REAL boundary is the egress proxy (domain allowlist) + seccomp (no user namespaces) + cap_drop + rootless userns; this deny list is defense-in-depth and surface-reducing, not the boundary itself. Claude Code's Bash matcher keys off the command prefix, so denies here can be routed around by wrapper commands (env, xargs, find -exec, make targets, language interpreters running local scripts). We deny the obvious routes; the proxy catches anything that makes it through.",
     "defaultMode": "auto",
+    "_myclickup_note": "The 14 myclickup entries in `allow` are READS ONLY, deliberately. Its surface is 19 commands: 13 read, and the 6 writes (create/update/claim/comment/tag/untag) are absent so they hit the defaultMode:auto prompt every time. `Bash(myclickup:*)` would have covered all 19 and was rejected — --dry-run is opt-in and therefore not a gate. No allowed entry is a prefix of a write: `comments` (allowed; reads a task's comments) cannot match `comment <id> …`. `Bash(myclickup task:*)` over-matching `tasks …` is harmless, both are reads. The two deny entries are forward guards: no delete command exists today (the only HTTP DELETE is `untag`, which removes a tag, not an object), and the point is that a future version adding one arrives DENIED rather than silently newly-permitted — the allow list is reviewed at paste time, the CLI is upgraded by image rebuild, and those two events are months apart. Accepted residual, same as the wrapper-routing caveat above: `Bash(just:*)` and `Bash(make:*)` are allowed, so a workspace recipe wrapping a write runs unprompted.",
+    "_myclickup_dryrun_note": "`Bash(myclickup --dry-run:*)` is the inert form of the six writes, and what makes a reads-only list workable rather than merely restrictive. myclickup >= 0.2.0 accepts --dry-run BEFORE the subcommand (its ADR-0007) precisely so a prefix pattern can match it — the trailing form is indistinguishable from a live write to a prefix matcher. It prints the RESOLVED request, which matters because the permission prompt shows argv: only the dry-run reveals that --list \"Team/Build/Action Items\" became a list ID and --due 2026-09-01 became epoch-ms. It widens nothing (the 13 reads were already allowed), and verified 2026-08-10 in a throwaway container that a dry-run needs no CLICKUP_TOKEN at all — so it is inert even before auth exists.",
     "_acceptEdits_note": "auto prompts on Bash not on the allow list and on tool calls that are not Read/Glob/Grep. Combined with the /workspace bind mount this means the agent can still autonomously rewrite host-visible files when you approve. To skip per-edit confirmation, change defaultMode to acceptEdits.",
     "allow": [
       "Read",
@@ -79,7 +81,21 @@
       "Bash(bd:*)",
       "Bash(jq:*)",
       "Bash(webfetch:*)",
-      "Bash(nvidia-smi:*)"
+      "Bash(nvidia-smi:*)",
+      "Bash(myclickup whoami:*)",
+      "Bash(myclickup accounts:*)",
+      "Bash(myclickup members:*)",
+      "Bash(myclickup spaces:*)",
+      "Bash(myclickup lists:*)",
+      "Bash(myclickup tasks:*)",
+      "Bash(myclickup find:*)",
+      "Bash(myclickup task:*)",
+      "Bash(myclickup comments:*)",
+      "Bash(myclickup attachments:*)",
+      "Bash(myclickup goals:*)",
+      "Bash(myclickup status:*)",
+      "Bash(myclickup sync:*)",
+      "Bash(myclickup --dry-run:*)"
     ],
     "deny": [
       "Bash(curl:*)",
@@ -99,6 +115,8 @@
       "Bash(git pull:*)",
       "Bash(git submodule:*)",
       "Bash(git config:*)",
+      "Bash(myclickup delete:*)",
+      "Bash(myclickup rm:*)",
       "Bash(bd dolt:*)",
       "Bash(bd init:*)",
       "Bash(bd setup:*)",

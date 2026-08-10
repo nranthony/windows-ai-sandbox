@@ -84,15 +84,47 @@ platform.claude.com
 claude.ai
 
 # --- ClickUp MCP/API [clickup] ---
-# Remote MCP server (mcp.clickup.com) driven through Claude, plus the OAuth
-# authorize (app.clickup.com) + token-exchange (api.clickup.com) hosts the
-# sign-in flow redirects through. Pinned subdomains only — no `.clickup.com`
-# wildcard (M3). If sign-in or a tool call hits a TCP_DENIED on a sibling
-# host, check Squid access.log and add the specific host here.
-t90141364643.p.clickup-attachments.com
+# TWO independent access paths share this block, and both are live — do not prune
+# one as "the wrong description of the other":
+#
+#   1. Remote MCP server (mcp.clickup.com) driven through Claude, plus the OAuth
+#      authorize (app.clickup.com) + token-exchange (api.clickup.com) hosts the
+#      sign-in flow redirects through. Holds its own OAuth token, no key here.
+#   2. REST API v2 via the `myclickup` CLI baked into the image — personal tokens
+#      injected from the profile's secrets.env as CLICKUP_TOKEN, never on argv
+#      (nranthony/myclickup ADR-0003). Reaches api.clickup.com only.
+#
+# Attachment hosts are workspace-scoped: t<workspace_id>.p.clickup-attachments.com,
+# one per workspace, per-TENANT. A wrong ID here does not fail closed — it
+# allow-lists egress from a hardened image to a third party's attachment bucket,
+# which is why each is annotated with how its ID was established. IDs are
+# configuration, not secrets (myclickup ADR-0005), so they are fine in this public
+# file. One shared list feeds every profile: per-profile trimming is possible but
+# all four workspaces are the same owner's projects, not external sources.
+#
+# Pinned subdomains only — no `.clickup.com` wildcard (M3). If sign-in or a tool
+# call hits a TCP_DENIED on a sibling host, check Squid access.log and add the
+# specific host here.
 mcp.clickup.com
 app.clickup.com
 api.clickup.com
+# Neil In Progress 90141364643 (nranthony) — live-verified 2026-08-06.
+# NOT fluidmomenta: the 2026-07-31 survey assumed it was, and this entry
+# predates the correction.
+t90141364643.p.clickup-attachments.com
+# FluidMomenta 9017949595 — live-verified 2026-08-06.
+t9017949595.p.clickup-attachments.com
+# Jeremy Dahl 9017997919 — live-verified 2026-08-06.
+t9017997919.p.clickup-attachments.com
+# therapod 90141295179 — UNVERIFIED. Read off a source constant
+# (therapod clickup_client.py:44 DEFAULT_WORKSPACE_ID) during the 2026-07-31
+# survey and never confirmed against the live API; the nranthony token cannot
+# settle it (different account). Confirm from inside the therapod profile with
+# `myclickup spaces --live --workspace 90141295179`. Nothing depends on it yet —
+# these hosts serve attachment DOWNLOADS and myclickup has no --download flag.
+t90141295179.p.clickup-attachments.com
+# My Quantum Journey 90171003671 is visible to the nranthony token but gets NO
+# attachment host on purpose: it has no profile.
 
 # --- OpenRouter [openrouter] ---
 # claude, fill in here

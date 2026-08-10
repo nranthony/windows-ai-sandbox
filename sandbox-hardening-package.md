@@ -289,4 +289,31 @@ Any FAIL indicates the corresponding fix didn't stick — most likely the host V
 - **Don't install `bubblewrap` or `socat` in the image.** The first was only for the disabled in-process sandbox. The second was a raw-TCP exfil channel that bypasses Squid's HTTP-only egress.
 - **Don't widen the proxy allowlist to include `host.docker.internal` or equivalents** so the container can reach host services. That's the exact coupling the sandbox exists to prevent. If the agent needs real data, dump it into a sibling container on `sandbox-internal`.
 - **Don't bind-mount `~/.gitconfig` as a single file** to "fix" Finding B. `git config --global` writes via `rename()` atomically and atomic rename across a single-file bind mount returns `EBUSY` on virtiofs (and has its own quirks on WSL 9p). Use `GIT_CONFIG_GLOBAL` pointing to a file inside a **directory** bind mount instead.
+- **Don't "simplify" the `myclickup` allow list to `Bash(myclickup:*)`.** The
+  template allows the tool's 13 read commands plus the inert
+  `Bash(myclickup --dry-run:*)`; the 6 write commands are absent **on purpose** so
+  they prompt. One entry covering all 19 would let an agent create and comment on
+  tasks in a live shared workspace unprompted. Reasoning and the prefix-matching
+  details are in [`docs/permissions-model.md`](docs/permissions-model.md); the
+  two `myclickup delete`/`rm` denies are forward guards for a command that does
+  not exist yet, not dead entries to tidy away.
+- **Don't treat `t90141295179.p.clickup-attachments.com` as a verified
+  allowlist entry.** Of the four ClickUp attachment hosts in
+  `proxy/allowed_domains.txt`, three were confirmed against the live API on
+  2026-08-06; that one was read off a source constant during the 2026-07-31
+  survey and has never been checked, because it belongs to a different account
+  than the token used for the enumeration. These hosts are per-tenant, so a wrong
+  ID does not fail closed — it allow-lists egress from a hardened image to a
+  third party's attachment bucket. Nothing depends on it yet (the hosts serve
+  attachment downloads and the CLI has no `--download` flag). Settle it from
+  inside the therapod profile with `myclickup spaces --live --workspace
+  90141295179`, then correct the entry; the annotation in `allowed_domains.txt`
+  carries the same warning inline.
+- **Don't commit the vendored `myclickup` payload.** This repo is public and
+  `nranthony/myclickup` is private; a `py3-none-any` wheel is a zip of the `.py`
+  files, so committing it publishes the tool's source. `.gitignore` covers
+  `sandbox_templates/wheels/*.whl` and `sandbox_templates/skills/myclickup/`, and
+  the `Dockerfile` installs conditionally so a clone without the payload still
+  builds. The accepted cost is that the image is not reproducible from this repo
+  alone.
 - **Don't set `read_only: true` on the agent container.** It breaks VS Code Dev Containers' environment setup (specifically writes to `/etc/environment`). The security gain is zero given non-root + `cap_drop: ALL` already blocks system-dir writes.

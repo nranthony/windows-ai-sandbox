@@ -29,6 +29,7 @@ setup_sh   := justfile_directory() / "scripts" / "setup.sh"
 code_sh    := justfile_directory() / "scripts" / "code-attach.sh"
 gc_sh      := justfile_directory() / "scripts" / "docker-gc.sh"
 skillsync_sh := justfile_directory() / "scripts" / "sync-skills-from-conventions.sh"
+myclickup_sh := justfile_directory() / "scripts" / "vendor-myclickup.sh"
 
 # default: banner + recipe list (a bare `just` lists, never runs a recipe).
 _default:
@@ -172,20 +173,32 @@ db-reset profile *args:
 reset-settings profile:
     {{profile_sh}} {{profile}} reset-settings
 
-# overwrite this profile's claude skills from sandbox_templates/skills/ (backs up old)
+# converge this profile's claude skills to sandbox_templates/skills/ (no backups, ADR-0005)
 reset-skills profile:
     {{profile_sh}} {{profile}} reset-skills
 
-# ---- vendored skill refresh (host-side, no profile arg) ---------------------
+# ---- vendored payload refresh (host-side, no profile arg) -------------------
 #
-# Developer action, NOT lifecycle: pulls shared skills from the agentic-conventions
-# checkout into the committed sandbox_templates/skills/ tree. Never runs during a
-# build or `up`. Follow with `just reset-skills <profile>` to push edits into a
-# live profile. Source path: $CONVENTIONS_DIR or .conventions-dir.local.
+# Developer actions, NOT lifecycle: they pull material from a sibling checkout
+# into this build context. Never run during a build or `up`. Seeding converges
+# (ADR-0005), so a synced skill reaches a live profile on its next `up` — or now,
+# via `just reset-skills <profile>`. A vendored WHEEL is different: it is baked
+# into the image, so it needs `just build` and then a recreate.
 
+# Source path: $CONVENTIONS_DIR or .conventions-dir.local.
 # refresh vendored skills from agentic-conventions. Accepts --dry-run / <skill>...
 sync-skills *args:
     {{skillsync_sh}} {{args}}
+
+# Payload is GITIGNORED (public repo, private tool) — see the script's header.
+# Source path: $MYCLICKUP_DIR or .myclickup-dir.local.
+# vendor the myclickup payload (wheel + skill) into the build context
+vendor-myclickup:
+    {{myclickup_sh}}
+
+# fail if the vendored myclickup payload has drifted from its source tree
+vendor-check:
+    {{myclickup_sh}} --check
 
 # ---- host Docker hygiene (docker-gc.sh) -------------------------------------
 #

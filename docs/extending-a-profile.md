@@ -176,6 +176,40 @@ in `~/repo/<p>/dist/`, install from `/workspace/dist/` inside the container, and
 declare it in `[tool.uv.sources]` with a platform marker — otherwise the next
 `uv sync` removes it. Do not widen egress to a private index for this.
 
+**A private CLI the whole fleet needs, shipped as a wheel.** The pattern
+`myclickup` establishes, and the one to copy for any sibling tool: build a
+zero-dependency wheel, vendor it into `sandbox_templates/wheels/` with a
+host-side script, install it in the `Dockerfile` tail. Four things make it work,
+and each is a trap if skipped:
+
+1. **`build.context: .` is the whole reason for vendoring.** `COPY` cannot read a
+   sibling checkout however the host is laid out, and a network install would put
+   a deploy token inside the build of a security-critical image.
+2. **A gitignored payload needs a directory `COPY` and a conditional install.**
+   `COPY …/foo-*.whl` is a hard build failure when the glob matches nothing, so
+   the paste-obvious form breaks every clone that lacks the payload. Keep a
+   `.gitkeep` so the directory exists in the context. The trade is explicit: the
+   image is no longer reproducible from a clone alone.
+3. **The wheel and its skill are one payload.** The skill describes a tool
+   *version* — its commands, its flags — so a hand-copied skill drifts from the
+   CLI, and a stale skill is worse than none: it sends an agent to run commands
+   that no longer exist, in a container where it cannot install a fix. Vendor
+   both, and have the check compare **content, not version strings** (pre-1.0 the
+   version changes rarely and the tree changes constantly, so the common drift is
+   a rebuilt same-version wheel with different bytes).
+4. **A vendored wheel is not a vendored skill, lifecycle-wise.** The skill
+   converges on the next `up`; the wheel is baked into the image, so it needs
+   `profile.sh build` and then a recreate. `up` does not rebuild.
+
+Two things bite in practice. Zero runtime dependencies is an invariant, not a
+starting point — the agent cannot repair a broken dependency, since every
+installer is denied to it. And if the tool's source repo is bind-mounted into a
+profile, its `.venv` may have been created in-container, where console scripts
+carry an absolute `#!/workspace/...` shebang; a host-side build then fails with
+"Failed to spawn: pytest", which reads like a missing dev dependency rather than
+a path mismatch. Point `UV_PROJECT_ENVIRONMENT` outside the checkout rather than
+rebuilding a `.venv` that the container also uses.
+
 **A tool the whole fleet needs.** Prototype in an attached shell inside a
 `with-egress.sh` window, confirm the install prefix is exec-capable and
 persistent, then promote it to the `Dockerfile` at the correct point in the
