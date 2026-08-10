@@ -105,6 +105,31 @@ deny-list are the controls. Following them means the controls fire less often.
   (passthrough is `/dev/dxg`, not the NVIDIA Container Toolkit) — don't reason
   from their values.
 
+### Adding a capability — where the bytes have to live
+
+If a task involves *deploying* something into this environment — a tool, a
+skill, a plugin, a template set, a library — the constraint is durability, not
+just permission. Three classes:
+
+- **Persists**: `/workspace` (the repo tree) and the agent home
+  (`/root/.claude` — skills at `~/.claude/skills/<name>/SKILL.md`, plugins and
+  marketplaces at `~/.claude/plugins/`, standing instructions at
+  `~/.claude/CLAUDE.md`), plus `/root/.config` and `/root/.cache`. These are
+  host bind mounts, and a human can pre-populate them from the host *before*
+  the container starts — that is the supported way in.
+- **Dies on the next container recreate**: anything installed into `/usr`,
+  `/opt`, or `/etc` — a globally installed CLI included. Durable tooling is an
+  image change, which is a human step.
+- **Dies and cannot execute**: `/tmp`, `/root/.local`, `/root/.npm-global` are
+  `noexec` tmpfs. A vendor installer defaulting to `~/.local/bin` will report
+  success and then fail with `EACCES`.
+
+So **prefer designs whose durable artifact is a file in a git-tracked tree or
+the agent home, over designs that install something at first use** — the latter
+also needs network the allowlist won't give it. Anything whose first step is
+"push a repo" or "run the vendor's install one-liner" has a human in it: say so
+in the plan rather than attempting it.
+
 ### What works
 
 Read/edit files; `git add/commit/diff/log/show/checkout/stash`; run tests &

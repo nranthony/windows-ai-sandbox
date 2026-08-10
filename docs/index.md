@@ -29,6 +29,7 @@ right: an **RFC** proposes → an **ADR** records → **work/** implements → t
 - [ARCHITECTURE.md](../ARCHITECTURE.md) — system map: substrates, network model, state layout, security posture, repo map
 - [.agents/skills/](../.agents/skills/) — operational guides: profile lifecycle, audit tiers, squid allowlist
 - [Sandbox design notes](sandbox-design-notes.md) — why rootfs is rw, bwrap is disabled, container runs as root, git config is denied
+- [**Extending a profile**](extending-a-profile.md) — where a tool, skill, plugin, library, key or API has to live to survive a recreate: the three durability classes, the bind-mount-shadows-the-image rule, the seeding seams, and a self-contained brief to hand an agent in another repo that must deploy into a profile
 - [Permissions model](permissions-model.md) — deny/allow posture, two-phase workflow, WebFetch exfil risk, hook self-protection
 - [**Dependency guardrails — build report, defect log, retrospective**](dependency-guardrails-handoff.md) — the complete slopsquatting-defence effort (phases 0–4, T00–T26) in one self-contained document: what exists and where, the four ADRs, **every defect and how it was caught**, what remains, and the transferable lessons. Written for someone with neither the repo nor the conversation. Start here before changing anything in the guardrail path
 - [VS Code integration security](vscode-integration-security.md) — SSH agent forwarding, gitconfig leaks, credential helper injection, orphaned root shells
