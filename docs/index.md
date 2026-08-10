@@ -11,6 +11,7 @@ right: an **RFC** proposes → an **ADR** records → **work/** implements → t
   - [ADR-0002](adr/0002-dependency-guardrail-scope.md) — dependency guardrails: what we deliberately do not build *(Accepted 08-02)*
   - [ADR-0003](adr/0003-strict-egress-default.md) — registries unreachable by default; installs open a bounded window *(Accepted 08-02)*
   - [ADR-0004](adr/0004-python-wheels-only.md) — Python installs are wheels-only; source builds opted into per project *(Accepted 08-03)*
+  - [ADR-0005](adr/0005-skill-templates-are-source-of-truth.md) — skill templates are the source of truth; profile copies converge on `up` and keep no backups *(Accepted 08-10)*
 - [docs/rfcs/](rfcs/) — proposals, with their resolution ([TEMPLATE.md](rfcs/TEMPLATE.md))
   - [DEPENDENCY_GUARDRAILS.md](rfcs/DEPENDENCY_GUARDRAILS.md) — slopsquatting threat + agent behavioural rules — **shipped**, phase 0
   - [01-posture-scanner-plan.md](rfcs/01-posture-scanner-plan.md) — `depaudit` posture/inventory scanner — **built in part** as `scripts/depaudit.py`
@@ -45,6 +46,7 @@ right: an **RFC** proposes → an **ADR** records → **work/** implements → t
 | 2 | [`scripts/audit/`](../scripts/audit/) | ~80 structured probes, JSON output ([README](../scripts/audit/README.md)) |
 | — | [`scripts/depaudit.test.sh`](../scripts/depaudit.test.sh) | depaudit regression suite (27 offline, `--online` adds the OSV corpus) over [fixtures](../scripts/depaudit-fixtures/) |
 | — | [`scripts/with-egress.test.sh`](../scripts/with-egress.test.sh) | install-window parser suite (29, fully offline — no docker, no network) |
+| — | [`scripts/profile-skills.test.sh`](../scripts/profile-skills.test.sh) | `converge_skills` suite (19, offline) — locks backup-pruning and the never-prune-unmanaged rule ([ADR-0005](adr/0005-skill-templates-are-source-of-truth.md)) |
 | 3 | [`sandbox_templates/skills/audit-sandbox/SKILL.md`](../sandbox_templates/skills/audit-sandbox/SKILL.md) | Agent-side judgment over tier-2 JSON (staged into container by `profile.sh audit`) |
 
 ## Agent Tool Controls

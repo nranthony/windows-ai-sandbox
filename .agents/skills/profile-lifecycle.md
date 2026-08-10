@@ -63,10 +63,20 @@ Skills are **seeded per profile, never baked into the image** — the profile's
 `claude-home` bind mount shadows `/root/.claude`, so anything `COPY`d there in
 the `Dockerfile` is invisible at runtime.
 
-Seeding is **create-only**: `up` copies in a skill that is MISSING from the
-profile but never overwrites one that exists, so local tweaks survive. So a
-NEW skill lands on the next `up`; an EDITED one needs `reset-skills`, which
-backs up the old copy first. Either way, restart `claude` in the container.
+Seeding **converges** ([ADR-0005](../../docs/adr/0005-skill-templates-are-source-of-truth.md)):
+`sandbox_templates/skills/` is the source of truth and the profile's copy is a
+derived cache, so every `up` reconciles it. A NEW or EDITED skill lands on the
+next `up`; a skill REMOVED from the template is pruned. Restart `claude` in the
+container to pick it up.
+
+No backups are taken, and a divergent copy is replaced with a WARN naming it —
+recover local edits from git, or make the edit in the template. A
+`<name>.bak.<stamp>` inside `claude-home/skills/` would be a second LIVE copy of
+the skill (for a skills-dir plugin the backup wins the name race), so stale ones
+are pruned on sight. Directories the sandbox never seeded — e.g. `claude plugin
+init` output — are reported and left alone.
+
+`reset-skills` runs the same convergence without touching the container.
 
 `sandbox_templates/skills/` mixes sandbox-native skills (this repo is their
 source of truth) with copies VENDORED from the shared agentic-conventions repo

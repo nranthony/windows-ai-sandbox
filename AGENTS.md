@@ -81,7 +81,15 @@ time too: write it above the CLI install and `@anthropic-ai/claude-code@latest`
 becomes unresolvable whenever the newest release is inside the quarantine window.
 That break is intermittent (it depends on when upstream last published) and
 surfaces on a routine `--refresh-ai`, not just a cold build.
-`just test-offline` runs all four suites.
+Edits to `converge_skills` / `reset-skills` in `scripts/profile.sh` require
+`bash scripts/profile-skills.test.sh` (19/19, offline — no docker). Two of its
+assertions are regression locks measured in-container: a `<name>.bak.<stamp>`
+inside `claude-home/skills/` is a second LIVE copy (for a skills-dir plugin the
+backup WINS the name race and the fresh copy reports `✘ Not loaded`), and a
+directory the sandbox never seeded must survive convergence because `claude
+plugin init` scaffolds into `~/.claude/skills/<name>/`. See
+[ADR-0005](docs/adr/0005-skill-templates-are-source-of-truth.md).
+`just test-offline` runs all five suites.
 
 **`proxy/` is mounted as a DIRECTORY (`./proxy:/etc/squid/host:ro`), and that is
 load-bearing.** A single-file bind mount pins an inode at container start, so

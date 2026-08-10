@@ -142,6 +142,7 @@ test-offline:
     bash {{justfile_directory()}}/scripts/depaudit.test.sh
     bash {{justfile_directory()}}/scripts/with-egress.test.sh
     bash {{justfile_directory()}}/scripts/dockerfile-order.test.sh
+    bash {{justfile_directory()}}/scripts/profile-skills.test.sh
 
 # build-layer ordering tripwire (Dockerfile only; see the header for why the
 # order is load-bearing)

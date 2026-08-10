@@ -383,6 +383,100 @@ prune_logs() {
 # ---------------------------------------------------------------------------
 # ensure_state — idempotent per-profile dir bootstrap
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# converge_skills — reconcile claude-home/skills/ to the template tree
+# ---------------------------------------------------------------------------
+# ADR-0005: `sandbox_templates/skills/` is the SOURCE OF TRUTH and a profile's
+# `claude-home/skills/` is a DERIVED CACHE. So this REPLACES divergent copies
+# instead of preserving them, and takes NO backups.
+#
+# Backups are what this function exists to stop making. `reset-skills` used to
+# leave `<name>.bak.<stamp>` next to the live copy — inside the very directory
+# Claude Code scans — which produced two live skills under one `name:` and, for
+# a skills-dir plugin (`<dir>/.claude-plugin/plugin.json`), a name race the
+# BACKUP wins: measured 2026-08-10 in-container (claude 2.1.223), the fresh copy
+# reported `✘ Not loaded — same plugin name`. Every profile here was carrying an
+# 11-day-old `audit-sandbox.bak` whose description still pointed the tier-3 audit
+# skill at "the staged CLAUDE.md" — a file `stage-audit-package.sh` no longer
+# puts in the package. Stale copies in a scanned directory are not inert.
+#
+# Nothing durable is lost: every seeded skill is a copy of a git-tracked
+# template, so `git` is the backup. Divergence and pruning are both WARNed —
+# loudly, because the alternative is a silent overwrite.
+#
+# WHAT IS NEVER PRUNED: a directory this function did not put there. Claude
+# Code's own `claude plugin init` scaffolds into `~/.claude/skills/<name>/`, so
+# "delete anything not in the template" would eat an agent's own work. Pruning
+# is scoped to `*.bak.*` plus names recorded in the manifest below.
+SEED_MANIFEST=".sandbox-seeded"
+
+converge_skills() {
+  local dst="$PROFILES_ROOT/$PROFILE/claude-home/skills"
+  local src="$SCRIPT_DIR/sandbox_templates/skills"
+  [[ -d "$src" ]] || return 0
+  mkdir -p "$dst"
+
+  # Names previously seeded from the template tree, space-padded for a bash-3.2
+  # safe membership test (case-glob, not an associative array — this function
+  # ports verbatim to the macOS sibling repo).
+  local seeded=" "
+  if [[ -f "$dst/$SEED_MANIFEST" ]]; then
+    local line
+    while IFS= read -r line || [[ -n "$line" ]]; do
+      [[ -n "$line" ]] && seeded="$seeded$line "
+    done < "$dst/$SEED_MANIFEST"
+  fi
+
+  local skill_src name stage current=" "
+  for skill_src in "$src"/*/; do
+    [[ -d "$skill_src" ]] || continue
+    name="$(basename "$skill_src")"
+    current="$current$name "
+    if [[ ! -d "$dst/$name" ]]; then
+      cp -R "$skill_src" "$dst/$name"
+      info "seeded skill '$name'"
+    elif ! diff -rq "$skill_src" "$dst/$name" >/dev/null 2>&1; then
+      # Staged replace: a mid-copy failure can't leave a half-written skill.
+      stage="$(mktemp -d)"
+      cp -R "$skill_src" "$stage/$name"
+      rm -rf "$dst/$name"
+      mv "$stage/$name" "$dst/$name"
+      rmdir "$stage" 2>/dev/null || true
+      warn "skill '$name' differed from the template — OVERWRITTEN from sandbox_templates/skills/$name (no backup kept; recover local edits from git or re-apply upstream)"
+    fi
+  done
+
+  # Prune: stale backups first, then names we seeded that the template dropped.
+  local dst_dir
+  for dst_dir in "$dst"/*/; do
+    [[ -d "$dst_dir" ]] || continue
+    name="$(basename "$dst_dir")"
+    case "$current" in *" $name "*) continue ;; esac
+    case "$name" in
+      *.bak.*)
+        rm -rf "$dst/$name"
+        warn "pruned stale skill backup '$name' (backups are no longer kept — ADR-0005)"
+        continue
+        ;;
+    esac
+    case "$seeded" in
+      *" $name "*)
+        rm -rf "$dst/$name"
+        warn "pruned retired skill '$name' (no longer in sandbox_templates/skills/)"
+        ;;
+      *)
+        info "skill '$name' is not from the template tree — leaving it alone"
+        ;;
+    esac
+  done
+
+  # Rewrite the manifest from what the template tree now owns.
+  : > "$dst/$SEED_MANIFEST"
+  for name in $current; do
+    printf '%s\n' "$name" >> "$dst/$SEED_MANIFEST"
+  done
+}
+
 ensure_state() {
   local p="$PROFILES_ROOT/$PROFILE"
   mkdir -p "$p/claude-home" "$p/cache" "$p/config" "$p/gemini-home" "$p/kaggle"
@@ -413,16 +507,9 @@ ensure_state() {
   if [[ ! -f "$p/claude-home/settings.json" ]] && [[ -f "$SCRIPT_DIR/sandbox_templates/claude/claude-settings.json" ]]; then
     cp "$SCRIPT_DIR/sandbox_templates/claude/claude-settings.json" "$p/claude-home/settings.json"
   fi
-  if [[ -d "$SCRIPT_DIR/sandbox_templates/skills" ]]; then
-    mkdir -p "$p/claude-home/skills"
-    for skill_src in "$SCRIPT_DIR/sandbox_templates/skills"/*/; do
-      [[ -d "$skill_src" ]] || continue
-      name="$(basename "$skill_src")"
-      if [[ ! -d "$p/claude-home/skills/$name" ]]; then
-        cp -R "$skill_src" "$p/claude-home/skills/$name"
-      fi
-    done
-  fi
+  # Skills converge to the template tree on every up (ADR-0005) — they are no
+  # longer seeded create-only, which is what let profiles drift behind it.
+  converge_skills
   # Refresh the managed sandbox-notice in the agent's GLOBAL memory
   # (~/.claude/CLAUDE.md, auto-loaded every session) so Claude Code agents see
   # the capabilities/prohibitions even in a workspace repo whose AGENTS.md
@@ -1273,23 +1360,15 @@ PY
     ;;
 
   reset-skills)
-    src_dir="$SCRIPT_DIR/sandbox_templates/skills"
-    dst_dir="$PROFILES_ROOT/$PROFILE/claude-home/skills"
-    [[ -d "$src_dir" ]] || fail "no skills templates: $src_dir"
-    mkdir -p "$dst_dir"
-    stamp="$(date +%Y%m%d-%H%M%S)"
-    for skill_src in "$src_dir"/*/; do
-      [[ -d "$skill_src" ]] || continue
-      name="$(basename "$skill_src")"
-      if [[ -d "$dst_dir/$name" ]]; then
-        backup="$dst_dir/$name.bak.$stamp"
-        mv "$dst_dir/$name" "$backup"
-        info "backed up existing skill → $backup"
-      fi
-      cp -R "$skill_src" "$dst_dir/$name"
-      ok "skill '$name' reset for '$PROFILE'"
-    done
-    ok "all skills reset. Restart claude inside the container to pick up."
+    # Same convergence `up` performs — kept as a command for the case where you
+    # want it WITHOUT touching the container. No longer takes backups: the
+    # template tree is the source of truth (ADR-0005), and a `<name>.bak.<stamp>`
+    # left inside claude-home/skills/ is a second live copy of every skill it
+    # backs up (see converge_skills).
+    [[ -d "$SCRIPT_DIR/sandbox_templates/skills" ]] \
+      || fail "no skills templates: $SCRIPT_DIR/sandbox_templates/skills"
+    converge_skills
+    ok "skills converged to sandbox_templates/skills/. Restart claude inside the container to pick up."
     ;;
 
   db)

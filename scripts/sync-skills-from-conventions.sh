@@ -25,12 +25,17 @@
 #   3. fail with instructions
 #
 # AFTER SYNCING: this only updates the committed TEMPLATE tree. Live profiles
-# are unaffected until you re-seed them, because ensure_state's skill loop is
-# create-only (profile.sh) — it seeds a skill that is missing but never
-# overwrites one that exists, so a profile keeps any local customisation:
+# are unaffected until the next `up`, which CONVERGES each profile's
+# claude-home/skills/ to this tree (ADR-0005 — the template is the source of
+# truth, the profile copy is a derived cache):
 #
 #   NEW skill      -> lands in each profile on its next `profile.sh <p> up`
-#   EDITED skill   -> needs `scripts/profile.sh <p> reset-skills` (backs up old)
+#   EDITED skill   -> same; the profile copy is replaced, with a WARN
+#   REMOVED skill  -> pruned from each profile on its next `up`
+#
+# `reset-skills` performs the same convergence without touching the container.
+# Neither takes a backup: a `<name>.bak.<stamp>` inside claude-home/skills/ is a
+# second LIVE copy of the skill it backs up (see converge_skills in profile.sh).
 #
 # Sandbox-native skills (audit-sandbox, web-read) have no upstream counterpart
 # and are never touched by this script.
@@ -231,9 +236,10 @@ if [[ "$dry" != "1" ]]; then
     printf '|---|---|---|\n'
     printf '%s' "$rows"
     printf '\nRefresh: `just sync-skills` (or `scripts/sync-skills-from-conventions.sh`).\n'
-    printf 'Then re-seed live profiles — `ensure_state` seeds only MISSING skills:\n\n'
+    printf 'Live profiles converge to this tree on their next `up` (ADR-0005). To push\n'
+    printf 'the change now without touching the container:\n\n'
     printf '```\n'
-    printf 'scripts/profile.sh <profile> reset-skills   # overwrite (backs up old)\n'
+    printf 'scripts/profile.sh <profile> reset-skills   # converge (no backups kept)\n'
     printf '```\n'
   } > "$MANIFEST"
 fi
@@ -249,8 +255,8 @@ ok "synced: $n_new new, $n_upd updated, $n_same unchanged"
 if [[ $((n_new + n_upd)) -gt 0 ]]; then
   echo
   info "template tree updated — live profiles are NOT yet refreshed:"
-  [[ $n_new -gt 0 ]] && echo "    new skills land on each profile's next: scripts/profile.sh <p> up"
-  [[ $n_upd -gt 0 ]] && echo "    edited skills need:                     scripts/profile.sh <p> reset-skills"
+  echo "    new AND edited skills land on each profile's next: scripts/profile.sh <p> up"
+  echo "    to push now without touching the container:        scripts/profile.sh <p> reset-skills"
   echo "    then restart claude inside the container to pick them up."
   echo
   info "review + commit the vendored change: git diff sandbox_templates/skills/"

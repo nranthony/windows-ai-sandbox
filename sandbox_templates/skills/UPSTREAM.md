@@ -15,8 +15,9 @@ this repo is their source of truth and the sync never touches them.
 | `wrap-up` | `templates/.claude/skills/wrap-up/` | `5477ec4` |
 
 Refresh: `just sync-skills` (or `scripts/sync-skills-from-conventions.sh`).
-Then re-seed live profiles — `ensure_state` seeds only MISSING skills:
+Live profiles converge to this tree on their next `up` (ADR-0005). To push
+the change now without touching the container:
 
 ```
-scripts/profile.sh <profile> reset-skills   # overwrite (backs up old)
+scripts/profile.sh <profile> reset-skills   # converge (no backups kept)
 ```
