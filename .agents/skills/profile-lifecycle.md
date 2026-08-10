@@ -79,10 +79,18 @@ init` output — are reported and left alone.
 `reset-skills` runs the same convergence without touching the container.
 
 `sandbox_templates/skills/` mixes sandbox-native skills (this repo is their
-source of truth) with copies VENDORED from the shared agentic-conventions repo
+source of truth) with material VENDORED from the shared agentic-conventions repo
 — `sandbox_templates/skills/UPSTREAM.md` says which is which. Edit a vendored
 skill upstream, not here; the next sync silently reverts local edits. Refresh
 host-side, never during a build:
+
+A vendored entry may be a loose skill or a **plugin** — a directory carrying
+`.claude-plugin/plugin.json`, which loads as `<name>@skills-dir` with its own
+skills namespaced (`/myconv:make-plan`, not `/make-plan`). The sync validates
+each shape on its own terms and defaults to the plugin surface; upstream's loose
+`templates/.claude/skills/` copies of `make-plan`/`wrap-up` are deliberately NOT
+vendored, since the plugin supersedes them and carrying both re-creates the
+duplicate-procedure drift. Check with `claude plugin list` inside the container.
 
 ```bash
 scripts/sync-skills-from-conventions.sh [--dry-run] [<skill> ...]   # just sync-skills

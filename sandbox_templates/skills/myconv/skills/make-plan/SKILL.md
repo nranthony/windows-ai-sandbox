@@ -35,8 +35,10 @@ everything yourself. Summarize only the facts that shape the plan.
 ## 2. Where the plan lives
 
 - If the repo keeps `work/`: create `work/NNNN-slug/` (next free number) with `plan.md`,
-  plus `spec.md` first if the "what/why" needed pinning down. The exit rule applies:
-  this folder is deleted or archived when the work merges.
+  plus `spec.md` first if the "what/why" needed pinning down. If the work traces to an
+  existing item (e.g. an accepted `proposal.md`), put `plan.md` in that folder instead
+  of opening a new number. The exit rule applies: when the work merges, durable
+  rationale is distilled out (ADR/docs) and the folder is archived or deleted.
 - If the repo has its own planning location, use that. If it has neither, ask where the
   plan should live — don't invent a new top-level directory.
 - If the repo uses beads (`.beads/` present): file the task breakdown as a bd epic with

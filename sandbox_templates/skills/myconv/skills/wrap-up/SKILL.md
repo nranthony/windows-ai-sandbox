@@ -27,12 +27,12 @@ propose direction-setting ones) per §10.
 Look at the tree. This repo follows lean-core + opt-in, so **most repos will not have
 every file below.** Only run the steps for machinery that exists.
 
-- **Skip absent pieces silently** — do not report `ARCHITECTURE.md`, `docs/rfcs/`,
-  `work/`, `CHANGELOG.md`, `CODEOWNERS`, or `.claude/skills/` as "gaps" just because
+- **Skip absent pieces silently** — do not report `ARCHITECTURE.md`, `work/`,
+  `CHANGELOG.md`, `CODEOWNERS`, or `.claude/skills/` as "gaps" just because
   they're missing. Their absence is usually a deliberate choice.
 - **Do not propose *adding* opt-in machinery** as part of a wrap-up. Standing up a new
-  `docs/rfcs/`, `work/`, or CI gate is a direction-setting change that deserves its own
-  conversation (and often an ADR) — never a cleanup side-effect.
+  `work/` tier, proposal tier, or CI gate is a direction-setting change that deserves
+  its own conversation (and often an ADR) — never a cleanup side-effect.
 
 ## 1. RECAP
 
@@ -69,15 +69,19 @@ diagram/boundaries only — not implementation detail. If the repo deliberately 
 - Check for two ADRs contradicting each other on the same topic; resolve which is
   current.
 
-## 5. docs/rfcs/ *(only if present)*
+## 5. Proposals *(only if the repo keeps a proposal tier)*
 
-If an RFC discussed this thread reached a decision, note it should move to
-"Accepted → ADR-NNNN" and out of active discussion.
+Whether proposals live as `work/NNNN-slug/proposal.md` (this repo's shape) or in a
+classic `docs/rfcs/`: if a proposal discussed this thread reached a decision, note
+that its rationale belongs in an ADR and its status should flip to
+"Accepted → ADR-NNNN" (or Rejected) and out of active discussion.
 
 ## 6. work/NNNN-slug/ *(only if the repo tracks in-flight work in-repo)*
 
-- If this thread's work merged or is done, the folder should be deleted or moved to
-  `work/archive/` — a stale `spec.md` poisons future agent searches.
+- If this thread's work merged or is done: distill anything durable first (decision
+  rationale → ADR; reference knowledge → docs/ or a skill), then move the folder to
+  `work/archive/` — or delete it if nothing durable remains. A stale `spec.md` left
+  active poisons future agent searches.
 - If still in flight, make sure `plan.md`/`notes.md` reflect where you *actually* left
   off, not the original plan.
 
@@ -93,8 +97,8 @@ Add an entry if anything user-visible shipped.
 
 ## 9. Traceability & write-back
 
-- **Commits → decisions:** did commits made this thread reference the ADR/RFC they trace
-  back to? Flag any direction-setting commit that doesn't.
+- **Commits → decisions:** did commits made this thread reference the ADR/proposal they
+  trace back to? Flag any direction-setting commit that doesn't.
 - **Write-back loop:** was anything durable learned this thread (a gotcha, a convention,
   a procedure) that currently has no home? Propose where it should land — a new ADR, a
   new skill, or a line in `AGENTS.md` — so the next session doesn't re-derive it.
@@ -107,7 +111,7 @@ Add an entry if anything user-visible shipped.
   link, a missing/malformed `CLAUDE.md` stub, an out-of-date skill description, a
   CHANGELOG line for something already shipped.
 - **Draft and flag — do not auto-write** anything direction-setting: new ADRs,
-  supersessions, RFC status changes. Present these for review before committing.
+  supersessions, proposal status changes. Present these for review before committing.
 - Never push without approval.
 
 ## 11. Flag anything ambiguous
@@ -117,6 +121,6 @@ really done, or how to word a skill trigger — list these separately for me.
 
 ---
 
-**End with a short summary:** files changed by category (AGENTS/CLAUDE, ADR, RFC,
-`work/`, skills, CHANGELOG), what you applied vs. what you drafted, and open items
-needing my review before I clear.
+**End with a short summary:** files changed by category (AGENTS/CLAUDE, ADR,
+`work/` — proposals included — skills, CHANGELOG), what you applied vs. what you
+drafted, and open items needing my review before I clear.

@@ -1,0 +1,5 @@
+# CODEOWNERS — opt-in. Only add this file when the repo actually has reviewers.
+# CAUTION: this changes PR approval requirements. The default below is correct for
+# personal repos; for org repos (e.g. experiencetherapod/*, fluidmomenta/*) set the
+# real owner/team, not @nranthony. Solo repos usually don't need this file at all.
+* @nranthony

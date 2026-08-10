@@ -6,13 +6,17 @@ Skills listed here are VENDORED COPIES from the shared `agentic-conventions`
 repo. Edit them upstream and re-run the sync; a local edit here is silently
 reverted by the next sync.
 
-Skills NOT listed here (e.g. `audit-sandbox`, `web-read`) are sandbox-native —
-this repo is their source of truth and the sync never touches them.
+Entries NOT listed here (e.g. `audit-sandbox`, `web-read`) are sandbox-native —
+this repo is their source of truth and the sync never touches them. Entries
+vendored from a DIFFERENT upstream (e.g. a tool shipping its own skill beside
+its wheel) are not listed either; only `agentic-conventions` material is.
 
-| Skill | Upstream source | Synced from rev |
-|---|---|---|
-| `make-plan` | `templates/.claude/skills/make-plan/` | `5477ec4` |
-| `wrap-up` | `templates/.claude/skills/wrap-up/` | `5477ec4` |
+A `plugin` entry carries `.claude-plugin/plugin.json` and loads as
+`<name>@skills-dir`, so its own skills are namespaced `/<name>:<skill>`.
+
+| Name | Kind | Upstream source | Synced from rev |
+|---|---|---|---|
+| `myconv` | plugin | `plugins/myconv/` | `3f60422` |
 
 Refresh: `just sync-skills` (or `scripts/sync-skills-from-conventions.sh`).
 Live profiles converge to this tree on their next `up` (ADR-0005). To push

@@ -6,6 +6,15 @@ guardrails thread** ([`work/0001`](../../docs/_archive/dependency-guardrails-pla
 
 **Exit rule:** delete this folder, or move to `work/archive/`, when the work merges.
 
+**Premise changed 2026-08-10.** The loose `make-plan` / `wrap-up` copies this plan is
+written against are gone from `sandbox_templates/skills/`: both now ship inside the
+`myconv` plugin (vendored from `agentic-conventions` `plugins/myconv/`, loaded as
+`myconv@skills-dir`), so container-side they are `/myconv:make-plan` and
+`/myconv:wrap-up`. The problem below is UNCHANGED — they are still container-only and the
+host agent still cannot reach them — but any solution must now target the plugin
+directory as the unit, not two loose skill folders. See
+[ADR-0005](../../docs/adr/0005-skill-templates-are-source-of-truth.md).
+
 ---
 
 ## Problem

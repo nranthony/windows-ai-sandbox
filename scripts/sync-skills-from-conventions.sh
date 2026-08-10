@@ -50,9 +50,23 @@ DEST_ROOT="$REPO_ROOT/sandbox_templates/skills"
 POINTER_FILE="$REPO_ROOT/.conventions-dir.local"
 MANIFEST="$DEST_ROOT/UPSTREAM.md"
 
-# Upstream's genericised "for other repos" surface — deliberately NOT its live
-# .claude/skills/, which may carry conventions-repo-specific wording.
+# TWO upstream surfaces, both vendored into sandbox_templates/skills/ because
+# that is the one directory `converge_skills` seeds from (ADR-0005):
+#
+#   templates/.claude/skills/<name>/   loose skill  — validated by SKILL.md
+#   plugins/<name>/                    PLUGIN       — validated by
+#                                      .claude-plugin/plugin.json
+#
+# A directory under ~/.claude/skills/ holding `.claude-plugin/plugin.json`
+# auto-loads as `<name>@skills-dir` with its nested skills namespaced
+# (`/<name>:<skill>`). So a plugin needs no separate seeding path — only a
+# different validity test, which is why this script carries both.
+#
+# Deliberately NOT upstream's live `.claude/skills/`, which may carry
+# conventions-repo-specific wording; `templates/` and `plugins/` are its
+# genericised "for other repos" surfaces.
 SRC_SUBPATH="templates/.claude/skills"
+SRC_SUBPATH_PLUGINS="plugins"
 
 info() { printf '\033[0;36m[INFO]\033[0m  %s\n' "$*"; }
 ok()   { printf '\033[0;32m[ OK ]\033[0m  %s\n' "$*"; }
@@ -102,7 +116,25 @@ esac
 [[ -d "$src_root" ]] || fail "conventions dir does not exist (from $src_origin): $src_root"
 src_root="$(cd "$src_root" && pwd)"
 SRC_ROOT="$src_root/$SRC_SUBPATH"
+SRC_ROOT_PLUGINS="$src_root/$SRC_SUBPATH_PLUGINS"
 [[ -d "$SRC_ROOT" ]] || fail "not an agentic-conventions checkout (no $SRC_SUBPATH): $src_root"
+
+# Which surface a name lives on, and whether it is a valid member of it.
+# Plugins win a name collision: a directory carrying plugin.json is a plugin
+# even if it also happens to hold a top-level SKILL.md.
+surface_root_of() {  # <name> -> upstream dir, or "" if on neither surface
+  if [[ -f "$SRC_ROOT_PLUGINS/$1/.claude-plugin/plugin.json" ]]; then
+    printf '%s' "$SRC_ROOT_PLUGINS"
+  elif [[ -f "$SRC_ROOT/$1/SKILL.md" ]]; then
+    printf '%s' "$SRC_ROOT"
+  fi
+}
+surface_subpath_of() {  # <name> -> the subpath to record in UPSTREAM.md
+  case "$(surface_root_of "$1")" in
+    "$SRC_ROOT_PLUGINS") printf '%s' "$SRC_SUBPATH_PLUGINS" ;;
+    "$SRC_ROOT")         printf '%s' "$SRC_SUBPATH" ;;
+  esac
+}
 
 [[ -d "$DEST_ROOT" ]] || fail "vendored skills dir missing: $DEST_ROOT"
 
@@ -125,16 +157,41 @@ info "dest:   $DEST_ROOT"
 skills=""
 if [[ -n "$want" ]]; then
   for name in $want; do
-    [[ -d "$SRC_ROOT/$name" ]] || fail "no such upstream skill: $name (looked in $SRC_ROOT)"
+    [[ -n "$(surface_root_of "$name")" ]] \
+      || fail "no such upstream skill or plugin: $name
+       looked for $SRC_SUBPATH/$name/SKILL.md
+              and $SRC_SUBPATH_PLUGINS/$name/.claude-plugin/plugin.json"
     skills="$skills $name"
   done
 else
-  for d in "$SRC_ROOT"/*/; do
+  # DEFAULT = the PLUGIN surface only. Upstream keeps `templates/.claude/skills/`
+  # as its adapt-by-hand surface for consumers who want committed loose skills,
+  # and deliberately still ships make-plan/wrap-up there — but here they are
+  # superseded by the same skills inside the `myconv` plugin, where they are
+  # namespaced (`/myconv:make-plan`) and carry a version. Enumerating both
+  # surfaces would re-vendor the loose twins on every sync and re-create the
+  # duplicate-procedure drift that ADR-0007 upstream exists to remove.
+  #
+  # An explicit name still resolves on EITHER surface, so
+  # `sync-skills-from-conventions.sh make-plan` remains available for a
+  # deliberate one-off.
+  for d in "$SRC_ROOT_PLUGINS"/*/; do
     [[ -d "$d" ]] || continue
     skills="$skills $(basename "$d")"
   done
+  # Name what is being passed over, so the choice stays visible instead of
+  # looking like the loose surface was forgotten.
+  skipped=""
+  for d in "$SRC_ROOT"/*/; do
+    [[ -d "$d" ]] || continue
+    sname="$(basename "$d")"
+    [[ -d "$DEST_ROOT/$sname" ]] && continue
+    skipped="$skipped $sname"
+  done
+  [[ -n "$skipped" ]] && \
+    info "not vendored (loose upstream skills superseded by a plugin):$skipped"
 fi
-[[ -n "$skills" ]] || fail "no skills found in $SRC_ROOT"
+[[ -n "$skills" ]] || fail "nothing found in $SRC_ROOT_PLUGINS"
 
 # ---------------------------------------------------------------------------
 # Sync
@@ -143,19 +200,29 @@ n_new=0; n_upd=0; n_same=0
 synced=""
 
 for name in $skills; do
-  src="$SRC_ROOT/$name"
+  # A top-level SKILL.md is what makes a directory a skill; a
+  # .claude-plugin/plugin.json is what makes it a plugin. Anything else is a
+  # stray folder and is refused rather than vendored into every profile's
+  # ~/.claude/skills/. (A plugin has NO top-level SKILL.md — validating on that
+  # alone silently skipped the whole plugin surface.)
+  src_surface="$(surface_root_of "$name")"
+  if [[ -z "$src_surface" ]]; then
+    warn "skipping '$name': neither a skill (SKILL.md) nor a plugin (.claude-plugin/plugin.json)"
+    continue
+  fi
+  src="$src_surface/$name"
   dst="$DEST_ROOT/$name"
-
-  # A SKILL.md is what makes a directory a skill; refuse anything else rather
-  # than vendoring a stray folder into every profile's ~/.claude/skills/.
-  [[ -f "$src/SKILL.md" ]] || { warn "skipping '$name': no SKILL.md"; continue; }
 
   # Stage the copy so per-surface variants/ (claude.ai bodies — Claude
   # Code-incompatible) never reach the container, and so a mid-copy failure
   # cannot leave a half-written skill in the committed tree.
   stage="$(mktemp -d)"
   cp -R "$src" "$stage/$name"
-  rm -rf "$stage/$name/variants"
+  # RECURSIVE on purpose. A loose skill keeps variants/ at its root, but a
+  # plugin's live one level deeper (plugins/<p>/skills/<skill>/variants/), so a
+  # root-only `rm -rf "$stage/$name/variants"` silently stops stripping the
+  # moment the payload becomes a plugin — the guard would lapse, not fail.
+  find "$stage/$name" -type d -name variants -prune -exec rm -rf {} + 2>/dev/null || true
 
   if [[ ! -d "$dst" ]]; then
     status="new"
@@ -196,9 +263,13 @@ done
 # Rev previously recorded for a skill, or "unknown" if it has no row yet.
 prev_rev() {
   [[ -f "$MANIFEST" ]] || { printf 'unknown'; return; }
+  # Field positions follow the generated table: | name | kind | source | rev |
+  # (leading pipe makes $1 empty). This tracked the 4-column layout before the
+  # `kind` column landed; reading the wrong field yields a PATH where a rev
+  # belongs, which then gets written back as the provenance.
   awk -v n="$1" -F'|' '
-    NF >= 4 {
-      k = $2; r = $4
+    NF >= 5 {
+      k = $2; r = $5
       gsub(/[ `]/, "", k); gsub(/[ `]/, "", r)
       if (k == n && r != "") { print r; found = 1; exit }
     }
@@ -211,16 +282,20 @@ if [[ "$dry" != "1" ]]; then
   # when the group opens, so any prev_rev() lookup made inside it would read an
   # already-empty manifest and report every carried-forward skill as "unknown".
   rows=""
-  for d in "$SRC_ROOT"/*/; do
+  for d in "$SRC_ROOT"/*/ "$SRC_ROOT_PLUGINS"/*/; do
     [[ -d "$d" ]] || continue
     mname="$(basename "$d")"
-    # Upstream-managed = present upstream AND vendored here.
+    # Upstream-managed = a valid member of a surface AND vendored here.
+    msub="$(surface_subpath_of "$mname")"
+    [[ -n "$msub" ]] || continue
     [[ -d "$DEST_ROOT/$mname" ]] || continue
     case " $synced " in
       *" $mname "*) rev="$src_rev" ;;
       *)            rev="$(prev_rev "$mname")" ;;
     esac
-    rows="$rows$(printf '| `%s` | `%s/%s/` | `%s` |' "$mname" "$SRC_SUBPATH" "$mname" "$rev")
+    kind="skill"
+    [[ "$msub" == "$SRC_SUBPATH_PLUGINS" ]] && kind="plugin"
+    rows="$rows$(printf '| `%s` | %s | `%s/%s/` | `%s` |' "$mname" "$kind" "$msub" "$mname" "$rev")
 "
   done
 
@@ -230,10 +305,14 @@ if [[ "$dry" != "1" ]]; then
     printf 'Skills listed here are VENDORED COPIES from the shared `agentic-conventions`\n'
     printf 'repo. Edit them upstream and re-run the sync; a local edit here is silently\n'
     printf 'reverted by the next sync.\n\n'
-    printf 'Skills NOT listed here (e.g. `audit-sandbox`, `web-read`) are sandbox-native —\n'
-    printf 'this repo is their source of truth and the sync never touches them.\n\n'
-    printf '| Skill | Upstream source | Synced from rev |\n'
-    printf '|---|---|---|\n'
+    printf 'Entries NOT listed here (e.g. `audit-sandbox`, `web-read`) are sandbox-native —\n'
+    printf 'this repo is their source of truth and the sync never touches them. Entries\n'
+    printf 'vendored from a DIFFERENT upstream (e.g. a tool shipping its own skill beside\n'
+    printf 'its wheel) are not listed either; only `agentic-conventions` material is.\n\n'
+    printf 'A `plugin` entry carries `.claude-plugin/plugin.json` and loads as\n'
+    printf '`<name>@skills-dir`, so its own skills are namespaced `/<name>:<skill>`.\n\n'
+    printf '| Name | Kind | Upstream source | Synced from rev |\n'
+    printf '|---|---|---|---|\n'
     printf '%s' "$rows"
     printf '\nRefresh: `just sync-skills` (or `scripts/sync-skills-from-conventions.sh`).\n'
     printf 'Live profiles converge to this tree on their next `up` (ADR-0005). To push\n'
