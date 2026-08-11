@@ -17,6 +17,7 @@ right: an **RFC** proposes → an **ADR** records → **work/** implements → t
   - [01-posture-scanner-plan.md](rfcs/01-posture-scanner-plan.md) — `depaudit` posture/inventory scanner — **built in part** as `scripts/depaudit.py`
   - [02-layered-gates-plan.md](rfcs/02-layered-gates-plan.md) — `depgate`, five-gate model — **rejected as a system → ADR-0002**; the gate model is retained as vocabulary
   - [04-portable-guardrails-outside-sandbox.md](rfcs/04-portable-guardrails-outside-sandbox.md) — what applies on the host, outside the egress boundary — **partially applied, unowned**
+  - [05-deps-repo-filter.md](rfcs/05-deps-repo-filter.md) — `--repo <name>` for `profile.sh deps`, to scan one repo instead of the whole workspace — **draft, not implemented** *(2026-08-06)*
 - [work/](../work/) — in-flight items, deleted or archived on merge ([README](../work/README.md))
   - 0001-dependency-guardrails — **complete (T00–T26), archived 2026-08-03**; live record is the [handoff](dependency-guardrails-handoff.md), plan preserved at [_archive/](_archive/dependency-guardrails-plan.md)
   - [0002-host-side-skill-slot](../work/0002-host-side-skill-slot/plan.md) — `make-plan`/`wrap-up` are container-only *(premise updated 08-10: both now ship inside the `myconv` plugin as `/myconv:*`)*
