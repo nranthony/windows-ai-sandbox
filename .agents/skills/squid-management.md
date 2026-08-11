@@ -36,37 +36,46 @@ but no-ops (already open).
 ## Permanent additions
 
 1. Add the pinned host under the right tier with a `# --- name [tag] ---` header.
-2. **Apply it with a restart, not a reconfigure** — see below. Easiest is the
-   dashboard's **"Save & Reload Proxies"** button (`just dashboard`), which edits
-   the file and restarts every running proxy in one action. By hand:
+2. **Reload the proxy** — see below; restart and `squid -k reconfigure` both
+   apply since the directory mount landed. Easiest is the dashboard's
+   **"Save & Reload Proxies"** button (`just dashboard`), which edits the file
+   and restarts every running proxy in one action. By hand:
    `docker restart egress-proxy-<profile>`.
 3. Verify: from inside the agent, the new host resolves through the proxy and
    `https://example.com` is still blocked (`scripts/profile.sh <p> verify`).
 
-## Applying an edit — use restart, never `squid -k reconfigure`
+## Applying an edit — restart or reconfigure, both work
 
-**`squid -k reconfigure` exits 0 while silently doing nothing, for the most common
-kind of edit.** Measured 2026-07-31:
+Either applies the edit:
 
-| Edit style | Container sees new bytes? | `reconfigure` | `docker restart` |
-|---|---|---|---|
-| In-place (dashboard save, `>` truncate) | yes — inode preserved | ✅ applies | ✅ applies |
-| Atomic replace (`vim`, `sed -i`, `git checkout`) | **no — inode swapped** | ❌ **silent no-op** | ✅ applies |
+```bash
+docker restart egress-proxy-<profile>
+docker exec egress-proxy-<profile> squid -k reconfigure
+```
 
-After an atomic-replace edit commenting out `arxiv.org`, `reconfigure` returned 0,
-logged "Processing Configuration File", and `arxiv.org` still tunnelled (`200`).
-Most editors and every git operation replace atomically, so this is the normal
-case, not the edge case.
+**This changed on 2026-08-03 (16ae1b1).** Until then this section said
+`reconfigure` exits 0 while applying nothing, and that was accurate — but the
+cause was the *mount*, not the command. `proxy/allowed_domains.txt` was
+bind-mounted as a single FILE, which pins an inode at container start, so any
+atomic replace on the host (vim, `sed -i`, every `git checkout`/`merge`/`pull`)
+left the container reading a deleted copy it could never escape. `reconfigure`
+dutifully re-read the stale inode and returned 0.
 
-A second, separate point: squid parses the allowlist into memory at start. Even
-with a live inode, an edit is not *enforced* until a reload — so grepping
-`allowed_domains.txt` **inside** the container tells you what the file says, not
-what squid is enforcing. Only an egress probe or a reload settles it.
+`docker-compose.yml` now mounts the whole `./proxy` DIRECTORY, so the path
+resolves on every read and the container always sees current bytes. The
+silent-no-op mode is gone. `scripts/profile.sh <profile> verify` fails loudly
+if the mount ever regresses to a file.
 
-> Earlier notes here and in the dashboard claimed `reconfigure` *killed* the proxy
-> (SIGHUP → exit 129). That is refuted: squid is a child of `entrypoint.sh` (PID 1),
-> handles SIGHUP as a reconfigure, and the container survives. The defect is the
-> silent no-op, not a crash — but the fix is the same one, so `restart` stands.
+What has NOT changed: squid parses the allowlist into memory at start, so an
+edit is not *enforced* until one of the two commands above runs. Grepping
+`allowed_domains.txt` inside the container tells you what the file says, not
+what squid enforces. `verify` now asks squid directly (de20901) instead of
+inferring from mtime, so it catches file↔proxy drift; short of that, only an
+egress probe settles it.
+
+> A separate, older claim — that `reconfigure` *killed* the proxy (SIGHUP →
+> exit 129) — is refuted. Squid is a child of `entrypoint.sh` (PID 1), handles
+> SIGHUP as a reconfigure, and the container survives.
 
 ## The dashboard is the supported path
 
