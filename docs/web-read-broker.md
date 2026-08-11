@@ -25,7 +25,10 @@ Backends (pluggable):
 |-------------|------------------------------|-----------------------|-----|
 | `tavily` (default) | `api.tavily.com`      | **yes** (already)     | `TAVILY_API_KEY` (required) |
 | `jina`      | `r.jina.ai` / `s.jina.ai`    | no — add first        | `JINA_API_KEY` (optional; keyless = rate-limited) |
-| `firecrawl` | `api.firecrawl.dev`          | no — add first        | `FIRECRAWL_API_KEY` (required) |
+| `firecrawl` | `api.firecrawl.dev`          | **yes** (since 08-08) | `FIRECRAWL_API_KEY` (required) |
+
+Note the host is `api.firecrawl.**dev**` — `api.firecrawl.com` is not what the
+broker calls, and allowlisting it yields a TCP_DENIED that reads like a bad key.
 
 ## Usage (from inside the agent)
 
@@ -44,8 +47,11 @@ ever removed.
 
 ## Security properties
 
-- **No new egress.** Default backend uses `api.tavily.com`, already allowlisted.
-  Enabling Jina/Firecrawl requires an explicit allowlist edit (+ restart) first.
+- **No new egress.** The backends resolve to two allowlisted hosts
+  (`api.tavily.com`, `api.firecrawl.dev`) — arbitrary-URL fetching happens on
+  *their* infrastructure, so the sandbox's own surface does not grow with the
+  pages read. Each backend is, however, one more host the agent can POST to;
+  enabling Jina requires an explicit allowlist edit (+ reload) first.
 - **Keys never on argv.** Read from the environment only, so they stay out of
   the Bash-tool transcript, shell history, and Squid's URL log.
 - **Bounded output.** Per-source character cap (`--max`, default 20 000) so a
@@ -73,10 +79,20 @@ scripts/profile.sh <profile> up
 `scripts/profile.sh <profile> up` also drops a `secrets.env.example` copy of the
 template into the profile dir.
 
-## Adding Jina or Firecrawl later
+## Enabling Firecrawl
 
-1. Add the host(s) to `proxy/allowed_domains.txt` (`r.jina.ai` [+ `s.jina.ai`],
-   or `api.firecrawl.dev`) and `docker restart egress-proxy-<profile>`
-   (allowlist edits need a restart, not just reconfigure).
+`api.firecrawl.dev` is allowlisted (block `[firecrawl]`), so only the key is
+left:
+
+1. Set `FIRECRAWL_API_KEY=fc-...` in `~/.ai-sandbox/profiles/<p>/secrets.env`.
+2. `scripts/profile.sh <p> recreate` — `env_file` is read at container CREATE,
+   and a plain `up` will not re-read it for an already-running agent.
+3. `webfetch extract <url> --via firecrawl`.
+
+## Adding Jina later
+
+1. Add `r.jina.ai` (+ `s.jina.ai` for search) to `proxy/allowed_domains.txt`
+   and reload the proxy (`docker restart egress-proxy-<profile>`, or
+   `squid -k reconfigure` — both apply since the directory mount).
 2. Add the key to `secrets.env` (Jina's is optional) and recreate the agent.
-3. The agent selects it with `--via jina` / `--via firecrawl`.
+3. The agent selects it with `--via jina`.

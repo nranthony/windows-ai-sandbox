@@ -289,6 +289,21 @@ www.biorxiv.org
 www.medrxiv.org
 chemrxiv.org
 
+# --- Firecrawl web-read broker [firecrawl] ---
+# Second backend for the `webfetch` broker (`--via firecrawl`, key
+# FIRECRAWL_API_KEY in the profile's secrets.env). Same class as api.tavily.com
+# above: the arbitrary-URL fetch happens on Firecrawl's infrastructure and only
+# clean text comes back, so this adds ONE host, not the open web
+# (docs/web-read-broker.md).
+#
+# It is also one more host the agent can POST to, i.e. one more exfil channel —
+# that is the cost of every broker backend and the reason they are pinned to
+# the exact API host, never a `.firecrawl.dev` wildcard (M3).
+#
+# Host confirmed against the broker's own call site: it posts to
+# https://api.firecrawl.dev/v1/scrape (sandbox_templates/bin/webfetch).
+api.firecrawl.dev
+
 # --- Grants.gov REST APIs [grants-gov] ---
 # Federal grants search/opportunity APIs for a grant-admin research
 # workload. Read-only REST; pinned api.* subdomains only, never a `.grants.gov`
