@@ -123,6 +123,14 @@ t9017997919.p.clickup-attachments.com
 # `myclickup spaces --live --workspace 90141295179`. Nothing depends on it yet —
 # these hosts serve attachment DOWNLOADS and myclickup has no --download flag.
 t90141295179.p.clickup-attachments.com
+# The Vault 90141509251 — live-verified 2026-08-11 via
+# `myclickup spaces --live --workspace 90141509251` in the nranthony profile:
+# the ID resolves and the nranthony token can read it (one space, "Codebase"),
+# so it is this owner's workspace, not a third party's. The v2 API surface here
+# returns no team NAME, so "The Vault" is per nranthony, unconfirmed; the
+# remote-MCP OAuth session is not authorized for this workspace and could not
+# settle it either.
+t90141509251.p.clickup-attachments.com
 # My Quantum Journey 90171003671 is visible to the nranthony token but gets NO
 # attachment host on purpose: it has no profile.
 
