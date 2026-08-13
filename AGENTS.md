@@ -92,13 +92,35 @@ a skill rather than merging into it — a file deleted inside a skill must vanis
 from the profile, including at depth and behind a dot-directory (all three live
 profiles carried phantom skill copies four levels down for three upstream
 releases). See [ADR-0005](docs/adr/0005-skill-templates-are-source-of-truth.md).
-`just test-offline` runs all five suites, then `just skills-check` — a drift
-tripwire, not a suite: it fails when `sandbox_templates/skills/` is behind the
-agentic-conventions checkout, and SKIPs loudly where none is configured. It is
-the mirror of `just check-vendored` in that repo, which only ever told the
-*upstream* side it was ahead — the direction that let a three-release drift go
-unnoticed. Verify additionally asserts no `*.bak*` sits beside the seeded skills:
-`converge_skills` prunes only `*.bak.*`, so the unstamped form survives it.
+`just test-offline` runs all five suites, then `just check-upstreams`. Verify
+additionally asserts no `*.bak*` sits beside the seeded skills: `converge_skills`
+prunes only `*.bak.*`, so the unstamped form survives it.
+
+## Boundary monitors — every vendored payload gets a detector here
+
+`just check-upstreams` answers "am I current with both my upstreams?":
+`skills-check` (myconv, from agentic-conventions) and `vendor-check` (the
+myclickup wheel + skill). **Add a line to it whenever a new upstream payload is
+vendored into this repo.**
+
+The rule it encodes: *the detector belongs on the side that owns the stale copy.*
+It did not, and that is the whole reason the myconv payload sat three releases
+behind for days. `just check-vendored` lives in agentic-conventions and tells
+**that** repo it is ahead; nothing here said **this** repo was behind. The two
+boundaries also failed in opposite directions when unconfigured — `vendor-check`
+died (false alarm), `check-vendored` exited 0 (false pass) — so neither could be
+wired into anything automatic. Both now report a loud `[SKIP]` and exit 0 when
+the sibling checkout is absent, which is an ordinary state: the myclickup payload
+is gitignored and its source repo is private.
+
+**A skip is not a pass.** Both aggregate recipes say so on their closing line
+rather than claiming full coverage, because the failure that started this was a
+green summary printed over a check that never ran.
+
+Both monitors are offline — they read a sibling checkout, no network and no
+docker — which is why `test-offline` can call them. A real drift therefore turns
+`test-offline` red, deliberately: the alternative is the invisible drift this
+exists to prevent. Clear it by re-vendoring, not by muting the check.
 
 **`proxy/` is mounted as a DIRECTORY (`./proxy:/etc/squid/host:ro`), and that is
 load-bearing.** A single-file bind mount pins an inode at container start, so

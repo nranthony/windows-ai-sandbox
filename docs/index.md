@@ -50,6 +50,7 @@ right: an **RFC** proposes → an **ADR** records → **work/** implements → t
 | — | [`scripts/with-egress.test.sh`](../scripts/with-egress.test.sh) | install-window parser suite (58, fully offline — no docker, no network) |
 | — | [`scripts/profile-skills.test.sh`](../scripts/profile-skills.test.sh) | `converge_skills` suite (24, offline) — locks backup-pruning, the never-prune-unmanaged rule, and mirror-not-merge convergence ([ADR-0005](adr/0005-skill-templates-are-source-of-truth.md)) |
 | 3 | [`sandbox_templates/skills/audit-sandbox/SKILL.md`](../sandbox_templates/skills/audit-sandbox/SKILL.md) | Agent-side judgment over tier-2 JSON (staged into container by `profile.sh audit`) |
+| — | `just check-upstreams` | Boundary monitors, not tests: is each vendored payload current with its upstream? `skills-check` (myconv) + `vendor-check` (myclickup wheel/skill). Offline; each SKIPs loudly where its sibling checkout is absent. Run by `test-offline` |
 
 ## Agent Tool Controls
 

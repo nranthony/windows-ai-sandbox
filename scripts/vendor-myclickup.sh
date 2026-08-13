@@ -57,9 +57,18 @@ SKILL_DIR="$REPO_ROOT/sandbox_templates/skills/myclickup"
 
 die()  { printf 'vendor-myclickup: %s\n' "$*" >&2; exit 1; }
 info() { printf '  %s\n' "$*"; }
+# A drift check that cannot run must say so and stand down — NOT fail. This
+# repo is public and nranthony/myclickup is private, so "no checkout here" and
+# "nothing vendored here" are both ordinary states, not defects. Reporting them
+# as failures is a false alarm, and a check that cries wolf gets ignored, which
+# costs more than the check was ever worth.
+skip() { printf '\033[1;35m[SKIP]\033[0m  vendor-myclickup: %s\n' "$*"; }
 
-# --- resolve the source checkout ---------------------------------------------
-resolve_src() {
+# Where the checkout WOULD be — no validation, no exit. Split out because
+# resolve_src is called as `$(resolve_src)`, and an exit inside a command
+# substitution leaves only the SUBSHELL: the caller carries on with an empty
+# path and the message captured into a variable instead of printed.
+src_candidate() {
   local candidate=""
   if [[ -n "${MYCLICKUP_DIR:-}" ]]; then
     candidate="$MYCLICKUP_DIR"
@@ -70,6 +79,13 @@ resolve_src() {
   fi
   # shellcheck disable=SC2088  # deliberate: expand a leading ~ ourselves
   case "$candidate" in "~/"*) candidate="$HOME/${candidate#\~/}" ;; esac
+  printf '%s' "$candidate"
+}
+
+# --- resolve the source checkout ---------------------------------------------
+resolve_src() {
+  local candidate
+  candidate="$(src_candidate)"
   [[ -d "$candidate" ]] || die "source checkout not found: $candidate
   Set MYCLICKUP_DIR, or write the path into .myclickup-dir.local (gitignored)."
   [[ -f "$candidate/pyproject.toml" ]] || die "not a myclickup checkout (no pyproject.toml): $candidate"
@@ -131,14 +147,34 @@ do_vendor() {
 
 # --- check --------------------------------------------------------------------
 do_check() {
-  local src ver whl tmp
+  local src ver whl tmp cand
+  # Pre-flight: both "no source checkout" and "nothing vendored" mean there is
+  # nothing to compare, not that something has drifted. The payload is
+  # gitignored, so a fresh clone legitimately has neither.
+  cand="$(src_candidate)"
+  if [[ ! -d "$cand" || ! -f "$cand/pyproject.toml" ]]; then
+    skip "no myclickup checkout at $cand — payload drift NOT checked.
+       set MYCLICKUP_DIR, or: echo /path/to/myclickup > .myclickup-dir.local"
+    return 0
+  fi
+  shopt -s nullglob; local _w=("$WHEEL_DIR"/myclickup-*.whl); shopt -u nullglob
+  if [[ ${#_w[@]} -eq 0 ]]; then
+    skip "no vendored wheel in sandbox_templates/wheels/ — myclickup is not vendored on this machine, nothing to check"
+    return 0
+  fi
   src="$(resolve_src)"
   ver="$(src_version "$src")"
   whl="$(vendored_wheel)"
 
   case "$whl" in
     *"myclickup-${ver}-"*) : ;;
-    *) die "MISMATCH: $(basename "$whl") vs source version $ver" ;;
+    # Say what to DO. This check can sit red for days across unrelated work, and
+    # a failure nobody knows how to clear gets muted rather than fixed.
+    *) die "MISMATCH: $(basename "$whl") vs source version $ver
+       re-vendor:  just vendor-myclickup
+       then bake:  just build   (the wheel is baked into the image, so the
+                   build context going green does NOT mean running containers
+                   have the new version — recreate them too)" ;;
   esac
 
   tmp="$(mktemp -d)"
