@@ -1,0 +1,57 @@
+# myclickup pins — OPT-IN. Only add this file if this repo links work to ClickUp.
+# A repo with no tracker link should not carry an unused config file.
+#
+# Non-secret by design: workspace and list IDs are configuration, not secrets —
+# worthless without a token. A TOKEN NEVER BELONGS IN THIS FILE, on any platform.
+# myclickup rejects the file outright if a top-level key contains "token" or "key".
+
+# --- FILL THIS IN. Leave it empty rather than guessing. --------------------
+# Two behaviours, verified against myclickup 0.3.0:
+#   absent, or present but empty -> falls back to the token's FIRST workspace,
+#                                   printing a warning on every call
+#   present but wrong            -> resolves SILENTLY against another
+#                                   workspace's board (or 401s, if the token
+#                                   cannot see that workspace at all)
+# (Under 0.2.0 an empty pin 400'd instead; 0.3.0 folded it into the warned
+# fallback. The conclusion is unchanged.) Unset is the loud state — a warning
+# on every call — which is why this ships empty. Never ship a "sensible
+# default": a wrong ID is the one failure nothing surfaces.
+workspace_id = ""    # REQUIRED once set. The API boundary, not a scope.
+# list_id    = ""    # optional: default target for `myclickup create`
+
+
+# ---------------------------------------------------------------------------
+# Read by the ClickUp sync skills, not by myclickup itself. myclickup ignores
+# tables it does not know, so these are safe to carry.
+# ---------------------------------------------------------------------------
+
+[work_sync]
+# Which part of the workspace this repo draws work from — a repo may own a
+# whole workspace or one corner of a shared one. The queue is scope x status:
+# `scope` says which lists to scan, `statuses.agent_ready` says which tasks
+# in them are queued.
+#   ["Space/Folder/List", ...]  a subsection
+#   ["Space"]                   a whole Space
+#   []                          the whole workspace
+scope = []
+
+# queue     = "Space/Folder/List"   # where `Ready for Agent` is watched
+# wip_limit = 3                     # max items concurrently `Agent Working`
+
+[statuses]
+# Semantic role -> the status name as spelled in YOUR workspace. The left-hand
+# keys are what the skills look up; the right-hand side is per-Space and cannot
+# be defaulted. Status names vary per Space, which is why this is a mapping and
+# not a list — and why completion is judged by the status `type` (done/closed),
+# never by name.
+#
+# FILL THESE IN from your list's actual statuses — `myclickup statuses --list
+# "<Space/Folder/List>"` prints each name with its type — then
+# uncomment. Ship them unset rather than guessed: an unset role fails loudly
+# where a wrong name matches nothing and looks like an empty queue. The examples
+# below are one workspace's spelling, not a default.
+# agent_ready   = "Ready for Agent"
+# agent_working = "Agent Working"
+# human_active  = "In Progress"
+# review        = "In Review"
+# complete      = "Complete"

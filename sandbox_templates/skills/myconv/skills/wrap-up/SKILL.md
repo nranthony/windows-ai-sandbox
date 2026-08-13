@@ -71,8 +71,8 @@ diagram/boundaries only — not implementation detail. If the repo deliberately 
 
 ## 5. Proposals *(only if the repo keeps a proposal tier)*
 
-Whether proposals live as `work/NNNN-slug/proposal.md` (this repo's shape) or in a
-classic `docs/rfcs/`: if a proposal discussed this thread reached a decision, note
+Wherever proposals live — `work/NNNN-slug/proposal.md`, a classic `docs/rfcs/`, or
+somewhere else this repo chose: if a proposal discussed this thread reached a decision, note
 that its rationale belongs in an ADR and its status should flip to
 "Accepted → ADR-NNNN" (or Rejected) and out of active discussion.
 

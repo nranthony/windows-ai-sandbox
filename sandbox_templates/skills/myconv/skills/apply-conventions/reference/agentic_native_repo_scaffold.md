@@ -21,6 +21,7 @@ Two ideas carry the whole thing:
 ├── CONTRIBUTING.md            # how a change gets proposed → reviewed → merged
 ├── CODEOWNERS                 # which paths require which reviewers (enforcement)
 ├── AGENTS.local.md            # gitignored personal context, imported by AGENTS.md if present
+├── .myclickup.toml            # opt-in: committed non-secret tracker pins (no tokens, IDs empty not defaulted)
 │
 ├── .claude/
 │   ├── settings.json          # committed: permissions + hooks (the enforcement layer)
@@ -41,11 +42,15 @@ Two ideas carry the whole thing:
 │   ├── design/                # durable design references
 │   └── runbooks/             # operational how-tos that aren't skills
 │
-└── work/                      # ACTIVE-WORK PROVENANCE (optional): proposals + the in-flight trail
-    ├── README.md              #   the item lifecycle + proposal template
-    ├── NNNN-slug/             #   proposal.md → spec.md → plan.md → notes.md
-    ├── archive/               #   closed items, distilled first (durable "why" → docs/adr/)
-    └── plans/                 #   gitignored: native plan-mode drafts (via plansDirectory)
+├── work/                      # ACTIVE-WORK PROVENANCE (optional): proposals + the in-flight trail
+│   ├── README.md              #   the item lifecycle + proposal template
+│   ├── NNNN-slug/             #   proposal.md → spec.md → plan.md → notes.md
+│   ├── archive/               #   closed items, distilled first (durable "why" → docs/adr/)
+│   └── plans/                 #   gitignored: native plan-mode drafts (via plansDirectory)
+│
+└── validation/                # MEASURED-BEHAVIOUR EVIDENCE (optional): committed, gate-read
+    ├── README.md              #   index: what evidence exists, which gate reads it, how to regenerate
+    └── <corpus>/              #   expected.json (hand-edited, enforced) + measured.json/.md (regenerated)
 ```
 
 Per-language / per-package directories (each with its own `AGENTS.md` + generated `CLAUDE.md`) hang off this as needed; they hold the build/test/env specifics and are deliberately out of scope here.
@@ -74,7 +79,9 @@ add the rest only when a concrete need appears. Adopt in this order:
   **proposals included**: an item starts as `work/NNNN-slug/proposal.md`
   (`Draft | In review | Accepted → ADR-NNNN | Rejected`) and grows
   `spec.md`/`plan.md`/`notes.md` in the same folder if accepted. If in-flight work is
-  tracked outside the repo (issues, ClickUp, etc.), skip `work/` entirely. `work/`
+  tracked outside the repo (issues, ClickUp, Linear, etc.), you may still want `work/` —
+  see the external-tracker bullet below; skip it only if nothing needs a reference
+  bundle deeper than a ticket. `work/`
   carries an exit rule: **when the work merges or the question resolves, distill
   anything durable out (decision rationale → an ADR; reference knowledge → docs/ or a
   skill), then move the folder under `work/archive/`** — or delete it if nothing
@@ -86,9 +93,65 @@ add the rest only when a concrete need appears. Adopt in this order:
   being promoted to `work/NNNN-slug/plan.md`. Repos that skip `work/` should drop the
   `plansDirectory` line when adapting the settings template. The `work/` slot stays
   tool-neutral — plans are plain markdown any agent runtime can consume.
-  *(Team-scale alternative: repos where collaborators genuinely discuss proposals
-  asynchronously in-file can keep a classic `docs/rfcs/` as the proposal home instead —
-  same status header, proposals persisting in place after resolution.)*
+  There is deliberately **one** proposal home. A separate `docs/rfcs/` tier was tried and
+  retired: two numbered pipelines meant every proposal needed a "which one?" decision, and
+  the answer to "what's proposed?" and "what's in flight?" turned out to be the same folder.
+
+- **Opt-in — external tracker link (add when a tracker holds the backlog of record):** a
+  tracker and `work/` are **two projections of one item**, not competing homes for it. The
+  tracker answers *what needs doing, in what order, how it connects to the bigger picture*
+  — for a human, at a glance, including non-code work. `work/` answers *what an agent must
+  load to do this well*. Link them with an optional pointer in the work item's
+  front-matter and sync **partially and asymmetrically**: pull identity and intent in on
+  activation; push back only status transitions and short comments on hurdles or changes
+  of direction. Plans, notes, specs and diffs cross in **neither** direction — a tracker's
+  value is being low-cognitive-load, and pasting markdown into it destroys that. The
+  mapping is deliberately not 1:1 (one ticket may become several items; items and tickets
+  may each exist alone), so the link is a pointer and never a folder-naming scheme.
+  Keep tracker config in a committed, non-secret pins file with any ID left **empty rather
+  than defaulted** — an empty pin fails loudly, a wrong one resolves silently against
+  someone else's board.
+
+  **"Tracker link" is a property of the repo, not of an item**, and it has one operational
+  test: *does that committed pins file exist with its workspace/project ID filled in?*
+  Three states, and the middle one is real rather than a half-configured accident —
+
+  | State | Test | Behaviour |
+  |---|---|---|
+  | No link | no pins file | tracker tooling inert; the file is opt-in and never created uninvited |
+  | Declared, not pinned | file exists, ID empty | intent recorded but unusable — tooling stops and says why |
+  | Linked | file exists, ID set | tooling operates, within the configured scope |
+
+  A ticket URL in a commit message or a doc is a *mention*, not a link. What makes a repo
+  linked is the committed configuration that gives tracker tooling somewhere to point.
+  Recorded as **ADR-0008** in the conventions repo.
+
+- **Opt-in — validation evidence (add when a repo makes measurable claims about its own
+  behaviour):** a `validation/` tree holding *evidence* — a dated record of how the system
+  performed against a labelled corpus, committed on purpose because a gate reads it and a
+  reader audits it. It is a category the other tiers cannot hold: `docs/` is prose, `tests/`
+  holds checks rather than their inputs, `docs/adr/` records decisions rather than
+  measurements, and `work/` archives on completion, which an artifact a build depends on can
+  never do. One directory per corpus, with **authority encoded in the filename**:
+
+  | File | Written by | Role |
+  |---|---|---|
+  | `expected.json` | a human, by hand | what the gate enforces; every threshold carries a required `why` |
+  | `measured.json` | the harness | the record of the last run, opening with a `provenance` block |
+  | `measured.md` | the same command | the human-readable table, so a claim can be checked without running anything |
+
+  Two rules follow: nothing regenerates `expected.json`, and nobody hand-edits `measured.*`.
+  The point is **legibility, not prevention** — because the gate reads a different file from
+  the one the harness writes, regenerating a record can no longer change what passes, so
+  loosening a threshold becomes a one-line diff to a named file with its justification beside
+  it. Nothing stops it; it stops being invisible. Adopting this forces one question worth
+  answering early: *which measured numbers does the gate fail on, and which are merely
+  recorded?* One file doing both jobs never poses it.
+
+  Scoped to ground-truth accuracy evidence. Golden-output snapshots belong in `tests/`, the
+  ground-truth labels themselves belong with the corpus, and performance benchmarks are
+  environment-dependent enough that a committed record is usually noise. Recorded as
+  **ADR-0009** in the conventions repo.
 
 Rule of thumb: start at the core and let real need pull each further piece in. An empty
 `work/` no one uses is worse than not having it.
@@ -110,6 +173,8 @@ This is the core of "how agents know where to look." Each question has exactly o
 | Operational how-to (not a skill) | `docs/runbooks/` | Step-by-step |
 | Who must approve changes here? | `CODEOWNERS` | Path → reviewer |
 | What's in flight right now? | `work/NNNN-slug/` | spec → plan → notes |
+| Where does this sit in the plan / who else cares? | the external tracker | linked from the work item's front-matter (opt-in) |
+| How well does it actually perform, measured against what? | `validation/<corpus>/` | hand-edited `expected.json` (enforced) + regenerated `measured.json`/`.md` (recorded) |
 | How does a change get merged? | `CONTRIBUTING.md` | Process |
 
 The lifecycle reads left to right, mostly inside one numbered folder: a **proposal** (`work/NNNN-slug/proposal.md`) proposes → an **ADR** records the decision → the same item's **plan.md/notes.md** track the implementation → the **CHANGELOG** and commit (referencing the ADR) record the outcome, and the item archives. That chain is the provenance: any line of code can be traced back to the decision and the reasoning that produced it.
@@ -124,7 +189,7 @@ Design around this, because it's the difference between an elegant tree and an i
 - **Skills** (`.claude/skills/<name>/SKILL.md`) are the *one* offload mechanism for procedures: auto-discovered, invocable by the human as `/name` (with `$ARGUMENTS` / `argument-hint`), *and* auto-triggerable by the agent when the `description` matches. Each `SKILL.md` needs YAML frontmatter with a `name` and a sharp `description` — that description *is* the trigger the agent matches against, so write it for retrieval, not prose, and make it say *when* the skill applies so heavyweight ones don't misfire. For a procedure that must only ever run when a human asks, set `disable-model-invocation: true` in its frontmatter. (Claude Code does **not** read the `.agents/skills/` cross-tool location some other runtimes propose — use `.claude/skills/`; revisit if that changes.)
 - **Everything under `docs/`, `ARCHITECTURE.md`, `work/`** is **not** auto-loaded. It's only seen if `AGENTS.md` links to it *and* the workflow tells the agent when to read it. That's fine — it keeps context lean — but it means `AGENTS.md` must act as an index, and the links must be **relative** (`[docs/adr/](docs/adr/)`), never absolute `file://` paths, so they stay portable across checkouts, zips, and containers.
 
-- **Slash commands (`.claude/commands/*.md`) → migrate to skills.** Claude Code merged commands into skills: a skill creates the same `/name` invocation with the same frontmatter, plus supporting files and invocation control. Commands still work and aren't deprecated, but keep **one** slot — move each `commands/foo.md` to `skills/foo/SKILL.md` (add `name:` frontmatter; on a name collision the skill wins). The old fork "auto-invoke → skill; human-invoke → command" is now the per-skill `disable-model-invocation` flag. See [ADR-0004](../docs/adr/0004-skills-replace-slash-commands.md).
+- **Slash commands (`.claude/commands/*.md`) → migrate to skills.** Claude Code merged commands into skills: a skill creates the same `/name` invocation with the same frontmatter, plus supporting files and invocation control. Commands still work and aren't deprecated, but keep **one** slot — move each `commands/foo.md` to `skills/foo/SKILL.md` (add `name:` frontmatter; on a name collision the skill wins). The old fork "auto-invoke → skill; human-invoke → command" is now the per-skill `disable-model-invocation` flag. Recorded as **ADR-0004** in the conventions repo (`docs/adr/0004-skills-replace-slash-commands.md`) — deliberately not a link, because this file ships inside a plugin and a relative path out of the payload resolves nowhere.
 
 So the rule of thumb: **rules and the index** go in `AGENTS.md`; **procedures** — whether the agent reaches for them or a human invokes them — become skills; **everything else** is referenced on demand.
 

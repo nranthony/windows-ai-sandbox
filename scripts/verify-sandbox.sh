@@ -120,6 +120,30 @@ else
   fail "deny-destructive hook missing or not executable at $HOOK (rebuild image)"
 fi
 
+# --- no backup copies inside the scanned skills dir -------------------------
+# ADR-0005, measured in-container 2026-08-10 (claude 2.1.223): a `<name>.bak*`
+# sibling in ~/.claude/skills/ is a SECOND LIVE COPY, and for a skills-dir
+# plugin the BACKUP wins the name race — the fresh copy reports
+# "✘ Not loaded — same plugin name". The failure is silent: the skill list looks
+# populated, and the body being executed is the stale one.
+#
+# converge_skills prunes these on every `up`, but its pattern is `*.bak.*` —
+# an UNSTAMPED `myconv.bak`, or anything created in-container after the last
+# convergence, survives it. That gap is exactly what this check exists to catch,
+# which is why it runs here and not only in the host-side test suite.
+SKILLS_DIR=/root/.claude/skills
+if [[ -d "$SKILLS_DIR" ]]; then
+  BAKS=$(find "$SKILLS_DIR" -maxdepth 1 -name '*.bak*' 2>/dev/null)
+  if [[ -z "$BAKS" ]]; then
+    pass "no backup copies beside the seeded skills ($SKILLS_DIR)"
+  else
+    fail "backup copies in $SKILLS_DIR shadow the live skill (a plugin backup WINS the name race — ADR-0005): $(printf '%s' "$BAKS" | tr '\n' ' ')
+       fix from the host: scripts/profile.sh <profile> reset-skills"
+  fi
+else
+  warn "$SKILLS_DIR missing — skills were never seeded (host: scripts/profile.sh <profile> reset-skills)"
+fi
+
 # --- deliberately-absent tools ----------------------------------------------
 # ssh: openssh-client purged in Dockerfile so VS Code's SSH_AUTH_SOCK
 # forwarding has no tool to weaponize even if the host setting reverts.

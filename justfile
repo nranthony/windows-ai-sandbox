@@ -144,6 +144,7 @@ test-offline:
     bash {{justfile_directory()}}/scripts/with-egress.test.sh
     bash {{justfile_directory()}}/scripts/dockerfile-order.test.sh
     bash {{justfile_directory()}}/scripts/profile-skills.test.sh
+    @just --justfile {{justfile()}} check-upstreams
 
 # build-layer ordering tripwire (Dockerfile only; see the header for why the
 # order is load-bearing)
@@ -186,9 +187,30 @@ reset-skills profile:
 # into the image, so it needs `just build` and then a recreate.
 
 # Source path: $CONVENTIONS_DIR or .conventions-dir.local.
-# refresh vendored skills from agentic-conventions. Accepts --dry-run / <skill>...
+# refresh vendored skills from agentic-conventions. Accepts --dry-run / --check / <skill>...
 sync-skills *args:
     {{skillsync_sh}} {{args}}
+
+# fail if the vendored skills have drifted from agentic-conventions (SKIPs if unconfigured).
+# The mirror of `just check-vendored` upstream — that one only tells the conventions repo
+# it is ahead; this tells THIS repo it is behind, which is the direction that went unnoticed.
+skills-check:
+    {{skillsync_sh}} --check
+
+# ---- boundary monitors ------------------------------------------------------
+#
+# "Am I current with both my upstreams?" — one command, because the answer used
+# to require running two different recipes in two different checkouts, and the
+# one that mattered lived in the OTHER repo. myconv sat three releases behind
+# for days with nothing anywhere reporting it.
+#
+# Every vendored payload this repo carries gets a detector HERE, on the side
+# that owns the stale copy. Both are offline (they read a sibling checkout — no
+# network, no docker) and both SKIP loudly rather than failing where the source
+# isn't present, so this is safe to run anywhere and safe to wire into
+# test-offline. Add a line here whenever a new upstream payload is vendored.
+check-upstreams: skills-check vendor-check
+    @echo "upstream boundaries checked (review any [SKIP] above — a skip is not a pass)"
 
 # Payload is GITIGNORED (public repo, private tool) — see the script's header.
 # Source path: $MYCLICKUP_DIR or .myclickup-dir.local.

@@ -1,0 +1,13 @@
+{
+  "_comment": "PLACEHOLDER. Hand-edited; never machine-written. Thresholds are set to 1.0 so an unreplaced template fails loudly rather than passing silently. Replace every entry, including this key.",
+
+  "example_metric": {
+    "min": 1.0,
+    "why": "REPLACE: state what binds this floor — which decision agreed it, and which record or case is the limiting one."
+  },
+
+  "another_metric": {
+    "max": 0.0,
+    "why": "REPLACE: thresholds without a stated reason are the ones that get loosened silently later."
+  }
+}

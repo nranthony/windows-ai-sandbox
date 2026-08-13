@@ -3,3 +3,5 @@ AGENTS.local.md
 .claude/settings.local.json
 # Native plan-mode drafts (plansDirectory) — durable plans get promoted to work/NNNN-slug/
 work/plans/
+# Tool snapshot caches — regenerable, and may carry customer-identifying names
+.cache/
