@@ -72,15 +72,23 @@ info() { printf '\033[0;36m[INFO]\033[0m  %s\n' "$*"; }
 ok()   { printf '\033[0;32m[ OK ]\033[0m  %s\n' "$*"; }
 warn() { printf '\033[1;33m[WARN]\033[0m  %s\n' "$*"; }
 fail() { printf '\033[0;31m[FAIL]\033[0m  %s\n' "$*" >&2; exit 1; }
+# Deliberately NOT a silent exit 0. The upstream drift loop went unwatched for
+# days because its equivalent check printed nothing and passed when it was
+# unconfigured — a check that cannot run must not read as a check that passed.
+skip() { printf '\033[1;35m[SKIP]\033[0m  %s\n' "$*"; }
 
 # ---------------------------------------------------------------------------
 # Args
 # ---------------------------------------------------------------------------
 dry=0
+check=0
 want=""
 for a in "$@"; do
   case "$a" in
     --dry-run) dry=1 ;;
+    # --check is --dry-run that FAILS when stale, so drift is a non-zero exit
+    # rather than something you have to read the output to notice.
+    --check)   check=1; dry=1 ;;
     -h|--help) sed -n '5,/^# =====/p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     -*)        fail "unknown flag: $a" ;;
     *)         want="$want $a" ;;
@@ -102,6 +110,14 @@ elif [[ -f "$POINTER_FILE" ]]; then
 fi
 
 if [[ -z "$src_root" ]]; then
+  # An unconfigured checkout is a normal state on a fresh clone or a machine
+  # that only runs the sandbox, so --check reports and stands down rather than
+  # failing a suite. A deliberate sync still fails: you asked it to do work.
+  if [[ "$check" == "1" ]]; then
+    skip "skills-check: no agentic-conventions checkout configured — drift NOT checked.
+       set CONVENTIONS_DIR, or: echo /path/to/agentic-conventions > $POINTER_FILE"
+    exit 0
+  fi
   fail "agentic-conventions location unknown. Set one of:
     CONVENTIONS_DIR=/path/to/agentic-conventions scripts/sync-skills-from-conventions.sh
     echo /path/to/agentic-conventions > $POINTER_FILE   (gitignored)"
@@ -113,11 +129,31 @@ case "$src_root" in
   "~/"*) src_root="$HOME/${src_root#\~/}" ;;
 esac
 
-[[ -d "$src_root" ]] || fail "conventions dir does not exist (from $src_origin): $src_root"
+if [[ ! -d "$src_root" ]]; then
+  if [[ "$check" == "1" ]]; then
+    skip "skills-check: configured checkout is absent (from $src_origin): $src_root — drift NOT checked"
+    exit 0
+  fi
+  fail "conventions dir does not exist (from $src_origin): $src_root"
+fi
 src_root="$(cd "$src_root" && pwd)"
 SRC_ROOT="$src_root/$SRC_SUBPATH"
 SRC_ROOT_PLUGINS="$src_root/$SRC_SUBPATH_PLUGINS"
-[[ -d "$SRC_ROOT" ]] || fail "not an agentic-conventions checkout (no $SRC_SUBPATH): $src_root"
+# A checkout is valid if EITHER surface is present. Upstream may legitimately
+# retire one: `templates/.claude/skills/` was deleted upstream once the plugin
+# became the delivery mechanism, and a guard that asserted only that path failed
+# the whole sync on a correct upstream prune. So test the plugin surface by the
+# MARKER plugin discovery itself keys on (.claude-plugin/plugin.json), not by
+# `-d plugins` — which almost any repo satisfies and proves nothing.
+has_plugin=0
+for d in "$SRC_ROOT_PLUGINS"/*/; do
+  [[ -f "$d/.claude-plugin/plugin.json" ]] || continue
+  has_plugin=1
+  break
+done
+[[ -d "$SRC_ROOT" || "$has_plugin" == "1" ]] \
+  || fail "not an agentic-conventions checkout: $src_root
+       no $SRC_SUBPATH/, and no $SRC_SUBPATH_PLUGINS/*/.claude-plugin/plugin.json"
 
 # Which surface a name lives on, and whether it is a valid member of it.
 # Plugins win a name collision: a directory carrying plugin.json is a plugin
@@ -324,6 +360,16 @@ if [[ "$dry" != "1" ]]; then
 fi
 
 echo
+if [[ "$check" == "1" ]]; then
+  if [[ $((n_new + n_upd)) -gt 0 ]]; then
+    printf '\033[0;31m[FAIL]\033[0m  %s\n' \
+      "skills-check: vendored copy is BEHIND $src_root @ $src_rev — $n_new new, $n_upd updated" >&2
+    printf '       refresh with: just sync-skills   then: scripts/profile.sh <p> reset-skills\n' >&2
+    exit 1
+  fi
+  ok "skills-check: vendored copy is current with $src_root @ $src_rev ($n_same unchanged)"
+  exit 0
+fi
 if [[ "$dry" == "1" ]]; then
   ok "dry-run: $n_new new, $n_upd updated, $n_same unchanged (nothing written)"
   exit 0

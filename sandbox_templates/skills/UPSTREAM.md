@@ -16,7 +16,7 @@ A `plugin` entry carries `.claude-plugin/plugin.json` and loads as
 
 | Name | Kind | Upstream source | Synced from rev |
 |---|---|---|---|
-| `myconv` | plugin | `plugins/myconv/` | `3f60422` |
+| `myconv` | plugin | `plugins/myconv/` | `e6f395d` |
 
 Refresh: `just sync-skills` (or `scripts/sync-skills-from-conventions.sh`).
 Live profiles converge to this tree on their next `up` (ADR-0005). To push

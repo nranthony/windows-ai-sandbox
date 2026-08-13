@@ -10,13 +10,17 @@
     Opt-in pieces (work/, runbooks, CHANGELOG) live in the commented block —
     move a line out of the comment only when the repo actually adopts the piece.
 
-  Optional: tooling (e.g. windows-ai-sandbox) may inject a managed notice block
+  Optional: tooling (e.g. <your-sandbox-tool>) may inject a managed notice block
   here describing shell restrictions. Leave a BEGIN/END marker pair if you use it;
   do not hand-edit managed blocks.
+
+  Optional: cite where these conventions came from, if that helps this repo's
+  contributors — e.g. a "Conventions: <url>" line below. Skip it when an external
+  link is noise here, or when the source repo isn't readable by everyone on this
+  project: a dead link is worse than no link.
 -->
 
-A project following the agent-native repository blueprint. See the conventions:
-https://github.com/nranthony/agentic-conventions
+A project following the agent-native repository blueprint.
 
 ## Start here
 When you begin work, in this order:
@@ -50,6 +54,9 @@ When you begin work, in this order:
 ## Golden rules
 - Never commit secrets; never hand-edit generated files (list them).
 - Ask before adding a dependency or a new top-level package.
+- Gloss before you cite: writing for a human, say what a decision was in plain
+  language and put its ID in parentheses after — "the no-scaffolder decision
+  (ADR-0001)", not "per ADR-0001". Repeat mentions may drop the gloss.
 
 ## High-risk paths
 List paths that require a written rationale, the verification step, and a

@@ -1,5 +1,12 @@
 # CODEOWNERS — opt-in. Only add this file when the repo actually has reviewers.
-# CAUTION: this changes PR approval requirements. The default below is correct for
-# personal repos; for org repos (e.g. experiencetherapod/*, fluidmomenta/*) set the
-# real owner/team, not @nranthony. Solo repos usually don't need this file at all.
-* @nranthony
+#
+# CAUTION: this file changes PR approval requirements the moment it lands. A wrong
+# owner silently gates every PR on someone who isn't watching, and an owner who has
+# left blocks the repo outright. Set the real owner or team BEFORE committing it.
+# Solo repos usually don't need this file at all — delete it rather than guess.
+#
+# Replace the placeholder below. Narrow rules win over broad ones, last match wins:
+#   *                    @your-org/your-team     # or @your-handle on a personal repo
+#   /docs/               @your-org/docs-team
+#   /.github/workflows/  @your-org/platform-team
+* @your-org/your-team
