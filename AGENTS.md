@@ -82,14 +82,23 @@ becomes unresolvable whenever the newest release is inside the quarantine window
 That break is intermittent (it depends on when upstream last published) and
 surfaces on a routine `--refresh-ai`, not just a cold build.
 Edits to `converge_skills` / `reset-skills` in `scripts/profile.sh` require
-`bash scripts/profile-skills.test.sh` (19/19, offline — no docker). Two of its
-assertions are regression locks measured in-container: a `<name>.bak.<stamp>`
+`bash scripts/profile-skills.test.sh` (24/24, offline — no docker). Three of its
+assertions are regression locks: a `<name>.bak.<stamp>`
 inside `claude-home/skills/` is a second LIVE copy (for a skills-dir plugin the
-backup WINS the name race and the fresh copy reports `✘ Not loaded`), and a
+backup WINS the name race and the fresh copy reports `✘ Not loaded`); a
 directory the sandbox never seeded must survive convergence because `claude
-plugin init` scaffolds into `~/.claude/skills/<name>/`. See
-[ADR-0005](docs/adr/0005-skill-templates-are-source-of-truth.md).
-`just test-offline` runs all five suites.
+plugin init` scaffolds into `~/.claude/skills/<name>/`; and convergence MIRRORS
+a skill rather than merging into it — a file deleted inside a skill must vanish
+from the profile, including at depth and behind a dot-directory (all three live
+profiles carried phantom skill copies four levels down for three upstream
+releases). See [ADR-0005](docs/adr/0005-skill-templates-are-source-of-truth.md).
+`just test-offline` runs all five suites, then `just skills-check` — a drift
+tripwire, not a suite: it fails when `sandbox_templates/skills/` is behind the
+agentic-conventions checkout, and SKIPs loudly where none is configured. It is
+the mirror of `just check-vendored` in that repo, which only ever told the
+*upstream* side it was ahead — the direction that let a three-release drift go
+unnoticed. Verify additionally asserts no `*.bak*` sits beside the seeded skills:
+`converge_skills` prunes only `*.bak.*`, so the unstamped form survives it.
 
 **`proxy/` is mounted as a DIRECTORY (`./proxy:/etc/squid/host:ro`), and that is
 load-bearing.** A single-file bind mount pins an inode at container start, so

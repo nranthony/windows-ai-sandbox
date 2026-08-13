@@ -7,15 +7,21 @@
 # test is the one `up` uses (ensure_state → converge_skills).
 #
 # What these assertions are for (ADR-0005): claude-home/skills/ is a DERIVED
-# CACHE of sandbox_templates/skills/. Two of the checks below are regression
-# locks for defects measured in-container on 2026-08-10:
+# CACHE of sandbox_templates/skills/. Three of the checks below are regression
+# locks for defects measured against live profiles:
 #
 #   * `<name>.bak.<stamp>` left inside the scanned directory is a SECOND LIVE
 #     copy. For a skills-dir plugin the backup WINS the name race and the fresh
 #     copy reports "✘ Not loaded". Hence: no backups, and stale ones get pruned.
+#     (measured in-container 2026-08-10)
 #   * a directory this script did NOT seed must survive convergence —
 #     `claude plugin init` scaffolds into ~/.claude/skills/<name>/, so a
 #     "mirror the template" prune would delete an agent's own plugin.
+#     (measured in-container 2026-08-10)
+#   * convergence MIRRORS a skill, it does not merge into it: a file deleted
+#     inside a skill must vanish from the profile, including at depth and behind
+#     a dot-directory. All three live profiles carried phantom skill copies four
+#     levels down for three upstream releases. (2026-08-13, section 6)
 #
 # Usage: bash scripts/profile-skills.test.sh
 # =============================================================================
@@ -96,13 +102,42 @@ check "$(grep -c 'pruned stale skill backup' <<<"$out")" 1 "backup prune WARNs"
 check "$([[ -f "$DST/myconv/.claude-plugin/plugin.json" ]] && echo y || echo n)" y \
   "the live plugin survives the prune"
 
-# 6. a skill dropped from the template is pruned — because we seeded it
+# 6. a file deleted INSIDE a skill disappears from the profile  <-- REGRESSION LOCK
+#    Section 6 covers SKILL-level pruning; this covers pruning WITHIN a skill,
+#    which is a different code path and the one that matters for a plugin
+#    payload. Shape is taken from the real defect (2026-08-13): the myconv
+#    payload carried skill copies at
+#    skills/<s>/templates/.claude/skills/<name>/SKILL.md — four levels down,
+#    behind a HIDDEN directory. A convergence that copied per-file over the
+#    existing tree would leave them in every profile while reporting success,
+#    because "this file should not exist" is not a question a copy-forward asks.
+#    Depth and the dot-directory are both load-bearing: they are what the
+#    `diff -rq` divergence test must see for the rm -rf branch to fire at all.
+GHOST="$TPL/myconv/skills/inner/templates/.claude/skills/ghost"
+mkdir -p "$GHOST"
+printf -- "---\nname: ghost\ndescription: phantom twin\n---\n" > "$GHOST/SKILL.md"
+out="$(run)"
+DST_GHOST="$DST/myconv/skills/inner/templates/.claude/skills/ghost/SKILL.md"
+check "$([[ -f "$DST_GHOST" ]] && echo y || echo n)" y \
+  "a nested file added to a skill reaches the profile"
+rm -rf "$TPL/myconv/skills/inner/templates"
+out="$(run)"
+check "$([[ -f "$DST_GHOST" ]] && echo y || echo n)" n \
+  "a nested file DELETED from a skill is removed from the profile (not merged over)"
+check "$([[ -d "$DST/myconv/skills/inner/templates" ]] && echo y || echo n)" n \
+  "the emptied parent directory goes with it"
+check "$(grep -c "skill 'myconv' differed" <<<"$out")" 1 \
+  "a deletion-only change still registers as divergence"
+check "$([[ -f "$DST/myconv/skills/inner/SKILL.md" ]] && echo y || echo n)" y \
+  "the rest of the payload survives the wholesale replace"
+
+# 7. a skill dropped from the template is pruned — because we seeded it
 rm -rf "$TPL/alpha"
 out="$(run)"
 check "$([[ -d "$DST/alpha" ]] && echo y || echo n)" n "retired template skill is pruned"
 check "$(grep -c "pruned retired skill 'alpha'" <<<"$out")" 1 "retired prune WARNs"
 
-# 7. a directory we never seeded SURVIVES  <-- REGRESSION LOCK
+# 8. a directory we never seeded SURVIVES  <-- REGRESSION LOCK
 #    (`claude plugin init` scaffolds straight into ~/.claude/skills/)
 mkdir -p "$DST/handmade/.claude-plugin"
 printf '{"name":"handmade","version":"9.9.9"}\n' > "$DST/handmade/.claude-plugin/plugin.json"
@@ -111,11 +146,11 @@ check "$([[ -f "$DST/handmade/.claude-plugin/plugin.json" ]] && echo y || echo n
   "an unmanaged plugin dir is never pruned"
 check "$(grep -c "not from the template tree" <<<"$out")" 1 "unmanaged dir is reported, not deleted"
 
-# 8. manifest reflects only what the template owns
+# 9. manifest reflects only what the template owns
 check "$(sort "$DST/.sandbox-seeded" 2>/dev/null | tr -d '\n')" "myconv" \
   "manifest lists exactly the template's skills"
 
-# 9. the manifest is a file, not a skill dir (must not be scanned as one)
+# 10. the manifest is a file, not a skill dir (must not be scanned as one)
 check "$([[ -f "$DST/.sandbox-seeded" ]] && echo y || echo n)" y "manifest is a dotfile beside the skills"
 
 printf '\n  %d passed, %d failed\n\n' "$pass" "$fail"
