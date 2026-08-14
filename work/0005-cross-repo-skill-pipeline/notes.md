@@ -1,7 +1,7 @@
 # 0005 — the cross-repo skill pipeline: what was wrong, and what now watches it
 
-**Status:** Work landed. Open only on the two handoff replies and one in-container
-check (§5). Raised and executed 2026-08-13.
+**Status:** Work landed. Open only on the myclickup reply (§5). Raised and executed
+2026-08-13; agentic-conventions answered the same day (§6) and step 8 is closed.
 
 **Exit rule:** delete this folder, or move to [`docs/_archive/`](../../docs/_archive/),
 once §5 is empty.
@@ -100,19 +100,55 @@ Muting the check is not the fix. Muting is how the original drift happened.
 
 ## 5. Open
 
-1. **In-container step 8** — `claude plugin list` shows myconv 0.3.0 loaded, and
-   `/myconv:` lists five entries with no bare `make-plan`/`wrap-up` twins. The only
-   evidence that the phantoms were ever *loaded* rather than merely on disk.
-   Containers are freshly recreated, so this is a glance.
-2. **agentic-conventions reply** —
-   `work/0013-cli-first-clickup-skills/handoff-revendor-response.md`. Asks them to
-   fix a latent trap: the sync strips `variants/` directories, but `check-vendored`
-   does a full `diff -r`, so the first `variants/` dir they ship breaks that check
-   permanently and unfixably.
-3. **myclickup reply** — `work/0011-allowlist-reconciliation/handoff-from-sandbox.md`.
+1. **myclickup reply** — `work/0011-allowlist-reconciliation/handoff-from-sandbox.md`.
    Corrects two records claiming `Bash(myclickup update:*)` is allow-listed when it
    never was, and asks back: of the three commands added between 19 and 22, are any
-   writes? If so this repo's reads-only list needs review.
+   writes? If so this repo's reads-only list needs review. No answer as of
+   `myclickup@b373412` — that repo's head is still the commit that sent the handoff.
+
+## 6. Closed since — step 8, and the agentic-conventions exchange
+
+**Step 8 is closed, on all three profiles rather than the one asked for.** Each of
+`nranthony` / `fluidmomenta` / `therapod`, live containers (Claude Code 2.1.231):
+`claude plugin list` → one `myconv@skills-dir` **0.3.0**, `✔ loaded`; exactly one
+nested `skills` dir; five skills; top-level `~/.claude/skills` holds only
+`audit-sandbox`, `myclickup`, `myconv`, `web-read` — no bare `make-plan`/`wrap-up`
+twins. `diff -r` against `sandbox_templates/skills/myconv` is silent for all three,
+and no `*.bak*` sits beside them.
+
+**The honest limit, and it is theirs, stated first:** this proves no phantom
+*loads* now. It cannot prove they were ever loaded rather than merely on disk — the
+containers were recreated onto a fresh image in between and that evidence went with
+the old ones. Unrecoverable. It answers "is the fix real", not "what did the old
+state do".
+
+**They closed the exchange** — `agentic-conventions@c7ae832`, work/0013 archived, so
+the thread now reads at `work/archive/0013-cli-first-clickup-skills/`
+(`handoff-revendor-close.md`).
+
+| Item | Outcome |
+|---|---|
+| §4 `variants` trap | **Fixed.** `justfile:121` is `diff -r -x variants …`, reason written above the recipe. Fixture-verified both ways: the stripped `variants/` goes silent, a real one-line drift still exits 1 |
+| §6 `.claude/skills/` | **Kept, deliberately** — it is what makes the canonical bodies load as *project* skills there, so an edit is exercisable in the same session. Recorded in their AGENTS.md; retiring it now needs an ADR |
+| §5 `sync-plugin` | Left copy-only on purpose; `check-plugin-sync` diffs both ways and exits 1, so the tier-4 shape is detected and needs a human delete |
+| §3.10 | Nothing to change — `clickup-report`'s SKILL.md already tells the runner to answer the permission prompt. The owner's writes-keep-prompting decision needs no edit there |
+
+Two things they gave back that are worth keeping here:
+
+- **The `variants` hole is only half fixed, and the unfixed half is the consumer
+  path.** `just sync-plugin` copies wholesale, so the first `variants/` they ship
+  rides into the *plugin payload* and on to marketplace consumers. Our container
+  path is safe because our sync strips it; nothing protects a consumer who is not
+  us. Recorded against their `work/0003`, which is the item that would create one.
+- **`check-vendored` can never run from inside one of our containers.**
+  `.sandbox-repo.local` holds a host path that is not mounted, so in-container
+  `just check` takes the SKIP branch on *every* run. Host-side is the only place
+  that boundary is actually watched — which makes the loud `[SKIP]` load-bearing
+  rather than cosmetic.
+
+One asymmetry left alone: `-x variants` excludes any entry named `variants`, while
+our sync strips only *directories* so named. A file called `variants` would ship and
+the check would ignore it. Noted, not worth a guard.
 
 ## Decisions taken by the owner during this thread
 
