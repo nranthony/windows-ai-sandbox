@@ -90,9 +90,16 @@ claude.ai
 #   1. Remote MCP server (mcp.clickup.com) driven through Claude, plus the OAuth
 #      authorize (app.clickup.com) + token-exchange (api.clickup.com) hosts the
 #      sign-in flow redirects through. Holds its own OAuth token, no key here.
-#   2. REST API v2 via the `myclickup` CLI baked into the image — personal tokens
+#   2. REST API via the `myclickup` CLI baked into the image — personal tokens
 #      injected from the profile's secrets.env as CLICKUP_TOKEN, never on argv
 #      (nranthony/myclickup ADR-0003). Reaches api.clickup.com only.
+#      Mostly v2, plus ONE v3 path: `move` (PUT /api/v3/workspaces/{ws}/tasks/
+#      {task}/home_list/{list}) since myclickup 0.6.0, its ADR-0015 — that
+#      operation is published only on v3. Same host, same Authorization header,
+#      same token, so this block needs NO change for it. Said explicitly because
+#      this comment read "REST API v2" until 2026-08-15 and a reader who trusts
+#      that would treat a v3 request as out-of-policy traffic rather than the
+#      same CLI doing the same thing down a different path.
 #
 # Attachment hosts are workspace-scoped: t<workspace_id>.p.clickup-attachments.com,
 # one per workspace, per-TENANT. A wrong ID here does not fail closed — it
