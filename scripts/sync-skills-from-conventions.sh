@@ -129,12 +129,17 @@ case "$src_root" in
   "~/"*) src_root="$HOME/${src_root#\~/}" ;;
 esac
 
+# A CONFIGURED path that does not resolve fails even under --check. Somebody
+# wrote that path down on purpose, so its absence is a broken pointer, not the
+# ordinary unconfigured state handled above — and the two are indistinguishable
+# in the output if both stand down. On 2026-08-14 they were: the checkout moved
+# under the channel root, this pointer still named the old location, --check
+# printed a tidy [SKIP], and `just test-offline` went GREEN over an upstream
+# nothing was comparing against any more.
 if [[ ! -d "$src_root" ]]; then
-  if [[ "$check" == "1" ]]; then
-    skip "skills-check: configured checkout is absent (from $src_origin): $src_root — drift NOT checked"
-    exit 0
-  fi
-  fail "conventions dir does not exist (from $src_origin): $src_root"
+  fail "configured checkout is absent (from $src_origin): $src_root
+    the pointer names a path that does not exist — repoint it, do not delete it:
+    an empty pointer stands down silently and stops watching the boundary"
 fi
 src_root="$(cd "$src_root" && pwd)"
 SRC_ROOT="$src_root/$SRC_SUBPATH"
