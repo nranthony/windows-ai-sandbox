@@ -44,7 +44,19 @@
 #   $MYCLICKUP_DIR
 #   .myclickup-dir.local        (gitignored, one line — the only machine-specific
 #                                fact in this flow; mirrors .conventions-dir.local)
-#   ../../nranthony/myclickup   relative to this repo
+#
+# There is deliberately NO guessed fallback path. One used to sit here
+# (`../../nranthony/myclickup`) and it is what made the 2026-08-14 repo move
+# invisible: when the checkout moved under the channel root, --check printed
+# "no myclickup checkout at ../../nranthony/myclickup" and exited 0, which is
+# the SAME output as a machine that never configured one. A guess collapses two
+# states that must stay distinguishable, and the collapsed state is the silent
+# one. `sync-skills-from-conventions.sh` never had a guess; this now matches it.
+#
+# Three states, three outcomes (--check):
+#   nothing configured           -> SKIP, exit 0   (ordinary: fresh clone)
+#   configured, target missing   -> FAIL, exit 1   (broken pointer, never ordinary)
+#   configured and present       -> compare
 # =============================================================================
 
 set -euo pipefail
@@ -57,37 +69,58 @@ SKILL_DIR="$REPO_ROOT/sandbox_templates/skills/myclickup"
 
 die()  { printf 'vendor-myclickup: %s\n' "$*" >&2; exit 1; }
 info() { printf '  %s\n' "$*"; }
-# A drift check that cannot run must say so and stand down — NOT fail. This
-# repo is public and nranthony/myclickup is private, so "no checkout here" and
-# "nothing vendored here" are both ordinary states, not defects. Reporting them
-# as failures is a false alarm, and a check that cries wolf gets ignored, which
-# costs more than the check was ever worth.
+# A drift check that was never CONFIGURED must say so and stand down — NOT
+# fail. This repo is public and nranthony/myclickup is private, so "no checkout
+# here" and "nothing vendored here" are both ordinary states, not defects.
+# Reporting them as failures is a false alarm, and a check that cries wolf gets
+# ignored, which costs more than the check was ever worth.
+#
+# A check whose configured target has VANISHED is the opposite case and fails:
+# somebody wrote that path down on purpose, so its absence is a broken pointer,
+# and standing down there is how drift goes unwatched for days.
 skip() { printf '\033[1;35m[SKIP]\033[0m  vendor-myclickup: %s\n' "$*"; }
 
-# Where the checkout WOULD be — no validation, no exit. Split out because
-# resolve_src is called as `$(resolve_src)`, and an exit inside a command
-# substitution leaves only the SUBSHELL: the caller carries on with an empty
-# path and the message captured into a variable instead of printed.
+# Where the checkout WOULD be, or EMPTY when nothing is configured — no
+# validation, no exit. Split out because resolve_src is called as
+# `$(resolve_src)`, and an exit inside a command substitution leaves only the
+# SUBSHELL: the caller carries on with an empty path and the message captured
+# into a variable instead of printed.
 src_candidate() {
   local candidate=""
   if [[ -n "${MYCLICKUP_DIR:-}" ]]; then
     candidate="$MYCLICKUP_DIR"
   elif [[ -f "$REPO_ROOT/.myclickup-dir.local" ]]; then
-    candidate="$(head -n1 "$REPO_ROOT/.myclickup-dir.local" | tr -d '\r')"
-  else
-    candidate="$REPO_ROOT/../../nranthony/myclickup"
+    # First non-blank, non-comment line — the same parser
+    # sync-skills-from-conventions.sh uses on .conventions-dir.local. It was
+    # `head -n1` here, so the two sibling pointer files did not accept the same
+    # file format: the conventions one carries a comment header, and copying
+    # that convention across read the comment AS the path.
+    candidate="$(awk 'NF && $0 !~ /^[[:space:]]*#/ { print; exit }' \
+                   "$REPO_ROOT/.myclickup-dir.local" | tr -d '\r')"
   fi
   # shellcheck disable=SC2088  # deliberate: expand a leading ~ ourselves
   case "$candidate" in "~/"*) candidate="$HOME/${candidate#\~/}" ;; esac
   printf '%s' "$candidate"
 }
 
+# Which of the two sources named the path — quoted back in every failure, so a
+# broken pointer says WHERE to go and fix it rather than only what is missing.
+src_origin() {
+  if [[ -n "${MYCLICKUP_DIR:-}" ]]; then
+    printf '$MYCLICKUP_DIR'
+  else
+    printf '%s' "$REPO_ROOT/.myclickup-dir.local"
+  fi
+}
+
 # --- resolve the source checkout ---------------------------------------------
 resolve_src() {
   local candidate
   candidate="$(src_candidate)"
-  [[ -d "$candidate" ]] || die "source checkout not found: $candidate
-  Set MYCLICKUP_DIR, or write the path into .myclickup-dir.local (gitignored)."
+  [[ -n "$candidate" ]] || die "myclickup location unknown. Set one of:
+    MYCLICKUP_DIR=/path/to/myclickup scripts/vendor-myclickup.sh
+    echo /path/to/myclickup > $REPO_ROOT/.myclickup-dir.local   (gitignored)"
+  [[ -d "$candidate" ]] || die "source checkout does not exist (from $(src_origin)): $candidate"
   [[ -f "$candidate/pyproject.toml" ]] || die "not a myclickup checkout (no pyproject.toml): $candidate"
   (cd "$candidate" && pwd)
 }
@@ -148,14 +181,27 @@ do_vendor() {
 # --- check --------------------------------------------------------------------
 do_check() {
   local src ver whl tmp cand
-  # Pre-flight: both "no source checkout" and "nothing vendored" mean there is
-  # nothing to compare, not that something has drifted. The payload is
-  # gitignored, so a fresh clone legitimately has neither.
+  # Pre-flight: "never configured" and "nothing vendored" mean there is nothing
+  # to compare, not that something has drifted. The payload is gitignored, so a
+  # fresh clone legitimately has neither — those stand down.
+  #
+  # A configured path that does not resolve is NOT that state and fails. It is
+  # the state this repo was in all of 2026-08-14: the checkout moved under the
+  # channel root, the pointer still named the old location, and --check reported
+  # a clean stand-down while the wheel sat three releases behind.
   cand="$(src_candidate)"
-  if [[ ! -d "$cand" || ! -f "$cand/pyproject.toml" ]]; then
-    skip "no myclickup checkout at $cand — payload drift NOT checked.
+  if [[ -z "$cand" ]]; then
+    skip "no myclickup checkout configured — payload drift NOT checked.
        set MYCLICKUP_DIR, or: echo /path/to/myclickup > .myclickup-dir.local"
     return 0
+  fi
+  if [[ ! -d "$cand" ]]; then
+    die "configured checkout is absent (from $(src_origin)): $cand
+       the pointer names a path that does not exist — repoint it, do not delete
+       it: an empty pointer stands down silently and stops watching the boundary"
+  fi
+  if [[ ! -f "$cand/pyproject.toml" ]]; then
+    die "not a myclickup checkout (no pyproject.toml, from $(src_origin)): $cand"
   fi
   shopt -s nullglob; local _w=("$WHEEL_DIR"/myclickup-*.whl); shopt -u nullglob
   if [[ ${#_w[@]} -eq 0 ]]; then

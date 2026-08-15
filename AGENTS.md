@@ -109,9 +109,24 @@ behind for days. `just check-vendored` lives in agentic-conventions and tells
 **that** repo it is ahead; nothing here said **this** repo was behind. The two
 boundaries also failed in opposite directions when unconfigured — `vendor-check`
 died (false alarm), `check-vendored` exited 0 (false pass) — so neither could be
-wired into anything automatic. Both now report a loud `[SKIP]` and exit 0 when
-the sibling checkout is absent, which is an ordinary state: the myclickup payload
-is gitignored and its source repo is private.
+wired into anything automatic.
+
+**Three states, three outcomes.** Both monitors resolve a sibling checkout from
+`$MYCLICKUP_DIR`/`$CONVENTIONS_DIR` or a gitignored `.myclickup-dir.local` /
+`.conventions-dir.local` pointer, and the two halves of "absent" are NOT the same:
+
+| State | Outcome |
+|---|---|
+| nothing configured | loud `[SKIP]`, exit 0 — ordinary: the myclickup payload is gitignored and its source repo is private |
+| **configured, target missing** | **FAIL, exit 1** — a broken pointer, never ordinary |
+| configured and present | compare |
+
+Collapsing those two is not hypothetical: on 2026-08-14 both source repos moved
+under the cross-repo channel root, both pointers still named the old locations,
+and `test-offline` went **green** over a real three-release wheel drift it had
+been reporting red the day before. Neither script guesses a fallback path any
+more, for the same reason — a guess makes "never configured" and "moved away"
+print the same line.
 
 **A skip is not a pass.** Both aggregate recipes say so on their closing line
 rather than claiming full coverage, because the failure that started this was a
