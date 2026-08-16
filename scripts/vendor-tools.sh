@@ -3,10 +3,11 @@
 # vendor-tools.sh — consume the depot channel into sandbox_templates/
 # =============================================================================
 #
-# Part B step 8 of myclickup work/0016 / ADR-0014. Replaces `vendor-myclickup`
-# and the myconv leg of `sync-skills-from-conventions.sh` — but NOT until Part B
-# step 10 passes. Until then all three coexist deliberately (plan §7, dual-running
-# window): the channel is additive, and rollback is "keep using the old scripts".
+# Part B of myclickup work/0016 / ADR-0014. REPLACED `vendor-myclickup.sh` and
+# `sync-skills-from-conventions.sh`, both retired at step 11 on 2026-08-16 after
+# step 10 passed — a cutover on evidence (a zero content diff between the two
+# mechanisms over the same source), not on trust. Rollback is `git revert`, not
+# a fallback path kept alive here.
 #
 # WHAT THIS IS. One door for every artifact that enters the image. The channel
 # publishes `manifest.toml` (versions + sha256 + source commits) alongside a
@@ -27,8 +28,8 @@
 #   configured, target missing  -> FAIL, exit 1   (broken pointer, never ordinary)
 #   configured and present      -> proceed
 #
-# There is deliberately NO guessed fallback path, for the reason recorded in
-# vendor-myclickup.sh: a guess collapses "never configured" and "moved away" into
+# There is deliberately NO guessed fallback path, for the reason the retired
+# vendor-myclickup.sh recorded before it: a guess collapses "never configured" and "moved away" into
 # the same output, and the collapsed state is the silent one. That is not
 # hypothetical here — it is what made the 2026-08-14 depot move invisible to both
 # existing monitors while a real three-release wheel drift went green.
@@ -46,8 +47,8 @@
 # reason — flat `artifact version sha256 source_commit` lines, awk-readable.
 #
 # THE LOCK IS TRACKED, AND IT IS THE ONLY PUBLIC RECORD OF A BUILD'S CONTENTS.
-# The wheel (.gitignore:50) and skills/myclickup/ (:51) are both ignored because
-# this repo is public and myclickup is private. So `sandbox_templates/VENDORED.lock`
+# The wheel and skills/myclickup/ are both gitignored because this repo is public
+# and myclickup is private. So `sandbox_templates/VENDORED.lock`
 # is the only committed evidence of what an image contained — a genuine gain over
 # UPSTREAM.md, which covered half of it. It is a FILE at the templates root, so
 # `converge_skills` (which iterates directories) never carries it into a profile.

@@ -126,30 +126,39 @@ prunes only `*.bak.*`, so the unstamped form survives it.
 
 ## Boundary monitors — every vendored payload gets a detector here
 
-`just check-upstreams` answers "am I current with my upstreams?": `skills-check`
-(myconv, from agentic-conventions), `vendor-check` (the myclickup wheel + skill,
-content-diffed against its member checkout) and `tools-check` (`VENDORED.lock`
-vs the depot channel's `manifest.toml`). **Add a line to it whenever a new
-upstream payload is vendored into this repo.**
+`just check-upstreams` answers "am I current with my upstreams?" through a
+single monitor, `tools-check` (`scripts/vendor-tools.sh --check`), which covers
+every artifact the depot channel carries. **Add a line to it whenever a new
+upstream payload is vendored into this repo by any other route.**
 
-The three answer different questions and that is deliberate, not redundancy:
-`tools-check` proves the lock still matches what the channel *publishes*;
-`vendor-check` proves the wheel's extracted content still matches the *source it
-claims*. A hash cannot do the second — swapping content-diff for hash-only would
-move a security-critical verification from this consumer to trusting the
-producer's gate, a transfer of trust dressed as a simplification.
+It asks two questions per artifact and both are load-bearing: does `VENDORED.lock`
+still match what the channel *publishes* (hash), and does the artifact still match
+the *source commit it claims* (content, by extraction, whenever the member
+checkout is reachable — `HASH-ONLY` stated aloud when it is not). A hash cannot
+answer the second; dropping the content half would move a security-critical
+verification from this consumer to trusting the producer's gate, a transfer of
+trust dressed as a simplification. The content diff runs against the PUBLISHED
+commit, never the member's HEAD, because a member ahead of the channel is an
+ordinary state and not drift.
+
+Until 2026-08-16 this was three recipes over two per-payload vendor scripts
+(`skills-check`, `vendor-check`). They retired with those scripts once the
+channel was proven equivalent by a zero content diff.
 
 The rule it encodes: *the detector belongs on the side that owns the stale copy.*
 It did not, and that is the whole reason the myconv payload sat three releases
 behind for days. `just check-vendored` lives in agentic-conventions and tells
 **that** repo it is ahead; nothing here said **this** repo was behind. The two
-boundaries also failed in opposite directions when unconfigured — `vendor-check`
-died (false alarm), `check-vendored` exited 0 (false pass) — so neither could be
-wired into anything automatic.
+per-payload monitors that preceded `tools-check` also failed in opposite
+directions when unconfigured — the myclickup one died (false alarm),
+`check-vendored` exited 0 (false pass) — so neither could be wired into anything
+automatic.
 
-**Three states, three outcomes.** Both monitors resolve a sibling checkout from
-`$MYCLICKUP_DIR`/`$CONVENTIONS_DIR` or a gitignored `.myclickup-dir.local` /
-`.conventions-dir.local` pointer, and the two halves of "absent" are NOT the same:
+**Three states, three outcomes.** The channel pointer resolves from `$DEPOT_DIR`
+or a gitignored `.depot-dir.local`; the member checkouts used by the CONTENT half
+still resolve from `$MYCLICKUP_DIR`/`$CONVENTIONS_DIR` or `.myclickup-dir.local` /
+`.conventions-dir.local`. For every one of them the two halves of "absent" are
+NOT the same:
 
 | State | Outcome |
 |---|---|
@@ -162,14 +171,17 @@ under the cross-repo channel root, both pointers still named the old locations,
 and `test-offline` went **green** over a real three-release wheel drift it had
 been reporting red the day before. Neither script guesses a fallback path any
 more, for the same reason — a guess makes "never configured" and "moved away"
-print the same line.
+print the same line. One asymmetry is deliberate: an absent MEMBER checkout
+degrades the content half to `HASH-ONLY` rather than failing, because the hash
+half still ran — but it says `HASH-ONLY` out loud and counts it on the closing
+line, so partial coverage never reads as full.
 
-**A skip is not a pass.** Both aggregate recipes say so on their closing line
+**A skip is not a pass.** The aggregate recipes say so on their closing line
 rather than claiming full coverage, because the failure that started this was a
 green summary printed over a check that never ran.
 
-Both monitors are offline — they read a sibling checkout, no network and no
-docker — which is why `test-offline` can call them. A real drift therefore turns
+The monitor is offline — it reads a sibling checkout, no network and no
+docker — which is why `test-offline` can call it. A real drift therefore turns
 `test-offline` red, deliberately: the alternative is the invisible drift this
 exists to prevent. Clear it by re-vendoring, not by muting the check.
 

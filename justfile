@@ -28,8 +28,7 @@ profile_sh := justfile_directory() / "scripts" / "profile.sh"
 setup_sh   := justfile_directory() / "scripts" / "setup.sh"
 code_sh    := justfile_directory() / "scripts" / "code-attach.sh"
 gc_sh      := justfile_directory() / "scripts" / "docker-gc.sh"
-skillsync_sh := justfile_directory() / "scripts" / "sync-skills-from-conventions.sh"
-myclickup_sh := justfile_directory() / "scripts" / "vendor-myclickup.sh"
+vendortools_sh := justfile_directory() / "scripts" / "vendor-tools.sh"
 
 # default: banner + recipe list (a bare `just` lists, never runs a recipe).
 _default:
@@ -187,48 +186,32 @@ reset-skills profile:
 # via `just reset-skills <profile>`. A vendored WHEEL is different: it is baked
 # into the image, so it needs `just build` and then a recreate.
 
-# Source path: $CONVENTIONS_DIR or .conventions-dir.local.
-# refresh vendored skills from agentic-conventions. Accepts --dry-run / --check / <skill>...
-sync-skills *args:
-    {{skillsync_sh}} {{args}}
-
-# fail if the vendored skills have drifted from agentic-conventions (SKIPs if unconfigured).
-# The mirror of `just check-vendored` upstream — that one only tells the conventions repo
-# it is ahead; this tells THIS repo it is behind, which is the direction that went unnoticed.
-skills-check:
-    {{skillsync_sh}} --check
-
 # ---- boundary monitors ------------------------------------------------------
 #
-# "Am I current with both my upstreams?" — one command, because the answer used
-# to require running two different recipes in two different checkouts, and the
-# one that mattered lived in the OTHER repo. myconv sat three releases behind
-# for days with nothing anywhere reporting it.
+# "Am I current with my upstreams?" — one command, because the answer used to
+# require running two different recipes in two different checkouts, and the one
+# that mattered lived in the OTHER repo. myconv sat three releases behind for
+# days with nothing anywhere reporting it.
 #
 # Every vendored payload this repo carries gets a detector HERE, on the side
-# that owns the stale copy. Both are offline (they read a sibling checkout — no
-# network, no docker) and both SKIP loudly rather than failing where the source
-# isn't present, so this is safe to run anywhere and safe to wire into
-# test-offline. Add a line here whenever a new upstream payload is vendored.
-check-upstreams: skills-check vendor-check tools-check
+# that owns the stale copy. Offline (reads a sibling checkout — no network, no
+# docker) and SKIPs loudly rather than failing where the source isn't present,
+# so this is safe to run anywhere and safe to wire into test-offline. Add a line
+# here whenever a new upstream payload is vendored.
+#
+# It is ONE recipe now, not three: `tools-check` answers for every artifact the
+# channel carries, both lock-vs-published and content-vs-source. The old
+# per-payload monitors retired with the per-payload vendor scripts (step 11).
+
+# am I current with my upstreams? (offline; SKIPs loudly where a source is absent)
+check-upstreams: tools-check
     @echo "upstream boundaries checked (review any [SKIP] above — a skip is not a pass)"
-
-# Payload is GITIGNORED (public repo, private tool) — see the script's header.
-# Source path: $MYCLICKUP_DIR or .myclickup-dir.local.
-# vendor the myclickup payload (wheel + skill) into the build context
-vendor-myclickup:
-    {{myclickup_sh}}
-
-# fail if the vendored myclickup payload has drifted from its source tree
-vendor-check:
-    {{myclickup_sh}} --check
 
 # ---- the depot channel (ADR-0014, work/0016 Part B) -------------------------
 #
-# One door for every vendored artifact. Supersedes vendor-myclickup and the
-# myconv leg of sync-skills at step 11 — until then all three coexist, because
-# the migration's safety device is a zero diff between the two mechanisms, not
-# a cutover on trust (plan §7 dual-running window).
+# One door for every vendored artifact. Replaced vendor-myclickup and the myconv
+# leg of sync-skills at step 11, after the two mechanisms were proven equivalent
+# by a zero content diff — a cutover on evidence, not on trust (plan §7).
 #
 # Source path: $DEPOT_DIR or .depot-dir.local. Consumes manifest.toml, verifies
 # every hash before copying anything, records what it took in
@@ -236,20 +219,22 @@ vendor-check:
 
 # vendor every channel artifact into the build context (wheel, skills, plugins)
 vendor-tools *args:
-    {{justfile_directory()}}/scripts/vendor-tools.sh {{args}}
+    {{vendortools_sh}} {{args}}
 
-# fail if VENDORED.lock has fallen behind what the channel publishes, and
-# content-check each artifact against the source commit it claims when that
-# member checkout is reachable (hash-only, stated as such, when it is not)
+# Content-checks each artifact against the source commit it claims whenever that
+# member checkout is reachable, and says HASH-ONLY when it is not.
+
+# fail if VENDORED.lock has fallen behind what the channel publishes
 tools-check:
-    {{justfile_directory()}}/scripts/vendor-tools.sh --check
+    {{vendortools_sh}} --check
 
-# report the manifest's generated permission proposal against the settings
-# TEMPLATE. Informational: it never edits that file, and it cannot see what a
-# running profile has (seeding is create-only) nor what the auto-mode classifier
-# does with a command on none of the lists.
+# Informational: it never edits that file, and it cannot see what a running
+# profile has (seeding is create-only) nor what the auto-mode classifier does
+# with a command on none of the lists.
+
+# report the manifest's permission proposal against the settings TEMPLATE (read-only)
 check-permissions:
-    {{justfile_directory()}}/scripts/vendor-tools.sh --permissions
+    {{vendortools_sh}} --permissions
 
 # ---- host Docker hygiene (docker-gc.sh) -------------------------------------
 #

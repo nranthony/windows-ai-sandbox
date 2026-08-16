@@ -37,21 +37,21 @@ AGENTS.local.md
 **/*.local.json
 .claude/settings.local.json
 # where agentic-conventions is checked out on THIS machine — the only
-# machine-specific fact in the skill-vendoring flow (sync-skills-from-conventions.sh)
+# machine-specific fact in the CONTENT half of vendor-tools.sh --check
 .conventions-dir.local
-# same, for the myclickup checkout (scripts/vendor-myclickup.sh)
+# same, for the myclickup checkout (vendor-tools.sh --check content diff)
 .myclickup-dir.local
-# same, for the depot CHANNEL ROOT — the directory holding manifest.toml, dist/
-# and bin/ (scripts/vendor-tools.sh, work/0016 / ADR-0014). This is the channel,
-# not a member repo: it supersedes the two pointers above once vendor-tools
-# retires the legacy scripts at Part B step 11, and until then all three coexist.
+# the depot CHANNEL ROOT — the directory holding manifest.toml, dist/ and bin/
+# (scripts/vendor-tools.sh, ADR-0014). This is the channel, not a member repo,
+# and it does NOT supersede the two pointers above: the channel supplies the
+# artifacts, those supply the SOURCE the content half diffs them against.
 .depot-dir.local
 
 # vendored myclickup payload — NEVER commit. This repo is public and
 # nranthony/myclickup is private; a py3-none-any wheel is a zip of the .py
 # files, so committing it would publish the tool's source. The Dockerfile
 # installs it conditionally, so a clone without the payload still builds — it
-# just has no `myclickup`. Regenerate with scripts/vendor-myclickup.sh.
+# just has no `myclickup`. Regenerate with `just vendor-tools`.
 sandbox_templates/wheels/*.whl
 sandbox_templates/skills/myclickup/
 # but keep the directory in the Docker build context: a COPY of a missing
