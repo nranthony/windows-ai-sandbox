@@ -462,7 +462,7 @@ RUN mkdir -p /etc/uv \
 # (its ADR-0002). `docker-compose.yml` sets `build.context: .`, so a sibling
 # checkout is unreachable from the build and the artifact has to be inside the
 # context; a network install would need a deploy token inside the build of a
-# security-critical image. Host-side `scripts/vendor-myclickup.sh` puts it here.
+# security-critical image. Host-side `scripts/vendor-tools.sh` puts it here.
 #
 # THE PAYLOAD IS GITIGNORED — this repo is public, myclickup is not, and a
 # py3-none-any wheel is a zip of the .py files. Two consequences are encoded in
@@ -504,7 +504,7 @@ RUN set -eu; \
       whl="$(find /tmp/wheels -maxdepth 1 -name 'myclickup-*.whl')"; \
       uv tool install "$whl" && myclickup --version; \
     else \
-      echo "myclickup: no vendored wheel — skipping (scripts/vendor-myclickup.sh)"; \
+      echo "myclickup: no vendored wheel — skipping (run: just vendor-tools)"; \
     fi; \
     rm -rf /tmp/wheels
 

@@ -56,6 +56,13 @@ These files carry the sandbox's guarantees:
   this is the **only** route by which a dependency can enter a profile. It widens
   the allowlist, so a bug here is an egress hole; and it writes the install audit
   log, so a bug here silently *under-reports* — which reads exactly like a clean run.
+- `scripts/vendor-tools.sh` — per [ADR-0014](docs/adr/) (channel-side, myclickup
+  work/0016) this is the route by which vendored payloads enter the build
+  context: the wheel bakes into the image, the skills converge into every
+  profile. A bug here is unverified content inside the boundary, arriving
+  through the door meant to check it. It verifies every hash **before copying
+  anything**, asserts manifest paths stay inside the channel root, and invokes
+  the channel's own `bin/dirhash.py` rather than reimplementing a tree hash.
 
 Any change to them requires:
 1. The commit message states the security impact.
@@ -92,28 +99,66 @@ a skill rather than merging into it — a file deleted inside a skill must vanis
 from the profile, including at depth and behind a dot-directory (all three live
 profiles carried phantom skill copies four levels down for three upstream
 releases). See [ADR-0005](docs/adr/0005-skill-templates-are-source-of-truth.md).
-`just test-offline` runs all five suites, then `just check-upstreams`. Verify
+Edits to `scripts/vendor-tools.sh` require `bash scripts/vendor-tools.test.sh`
+(57/57, offline — no docker, no network, no real channel). It is the door every
+vendored payload now enters through, so three of its assertions are regression
+locks, each proven to bite by mutation: **nothing is copied when any hash fails**
+(the gate runs over every artifact before the first file moves — a per-artifact
+gate leaves a half-updated image and still exits non-zero, so the failure looks
+handled); **progress output must not reach stdout** (`verify_all` returns the
+manifest table on stdout, so a progress line written there is captured *into the
+data* — measured during development: the verified-hash lines vanished from the
+terminal and reappeared as bogus artifact rows the mirror loop skipped in
+silence); and **an unknown artifact kind FAILS rather than skipping**, because a
+kind the script has not been taught is content it cannot verify.
+Three more lock the content half: **a wheel that disagrees with the
+`source_commit` it claims FAILS** even though every hash matches (only the
+content diff can see that, which is the entire argument for keeping it); **a
+member checkout ahead of the published commit is NOT drift** (the vendored copy
+tracks what the channel published, so the diff is against that commit, never the
+member's HEAD — otherwise the check reddens on an ordinary state); and **a
+prefix over-match counts as covered** in `--permissions` (`statuses` riding
+`status:*`), because a check that cries wolf on its first run is a check that
+gets ignored.
+`just test-offline` runs all six suites, then `just check-upstreams`. Verify
 additionally asserts no `*.bak*` sits beside the seeded skills: `converge_skills`
 prunes only `*.bak.*`, so the unstamped form survives it.
 
 ## Boundary monitors — every vendored payload gets a detector here
 
-`just check-upstreams` answers "am I current with both my upstreams?":
-`skills-check` (myconv, from agentic-conventions) and `vendor-check` (the
-myclickup wheel + skill). **Add a line to it whenever a new upstream payload is
-vendored into this repo.**
+`just check-upstreams` answers "am I current with my upstreams?" through a
+single monitor, `tools-check` (`scripts/vendor-tools.sh --check`), which covers
+every artifact the depot channel carries. **Add a line to it whenever a new
+upstream payload is vendored into this repo by any other route.**
+
+It asks two questions per artifact and both are load-bearing: does `VENDORED.lock`
+still match what the channel *publishes* (hash), and does the artifact still match
+the *source commit it claims* (content, by extraction, whenever the member
+checkout is reachable — `HASH-ONLY` stated aloud when it is not). A hash cannot
+answer the second; dropping the content half would move a security-critical
+verification from this consumer to trusting the producer's gate, a transfer of
+trust dressed as a simplification. The content diff runs against the PUBLISHED
+commit, never the member's HEAD, because a member ahead of the channel is an
+ordinary state and not drift.
+
+Until 2026-08-16 this was three recipes over two per-payload vendor scripts
+(`skills-check`, `vendor-check`). They retired with those scripts once the
+channel was proven equivalent by a zero content diff.
 
 The rule it encodes: *the detector belongs on the side that owns the stale copy.*
 It did not, and that is the whole reason the myconv payload sat three releases
 behind for days. `just check-vendored` lives in agentic-conventions and tells
 **that** repo it is ahead; nothing here said **this** repo was behind. The two
-boundaries also failed in opposite directions when unconfigured — `vendor-check`
-died (false alarm), `check-vendored` exited 0 (false pass) — so neither could be
-wired into anything automatic.
+per-payload monitors that preceded `tools-check` also failed in opposite
+directions when unconfigured — the myclickup one died (false alarm),
+`check-vendored` exited 0 (false pass) — so neither could be wired into anything
+automatic.
 
-**Three states, three outcomes.** Both monitors resolve a sibling checkout from
-`$MYCLICKUP_DIR`/`$CONVENTIONS_DIR` or a gitignored `.myclickup-dir.local` /
-`.conventions-dir.local` pointer, and the two halves of "absent" are NOT the same:
+**Three states, three outcomes.** The channel pointer resolves from `$DEPOT_DIR`
+or a gitignored `.depot-dir.local`; the member checkouts used by the CONTENT half
+still resolve from `$MYCLICKUP_DIR`/`$CONVENTIONS_DIR` or `.myclickup-dir.local` /
+`.conventions-dir.local`. For every one of them the two halves of "absent" are
+NOT the same:
 
 | State | Outcome |
 |---|---|
@@ -126,14 +171,17 @@ under the cross-repo channel root, both pointers still named the old locations,
 and `test-offline` went **green** over a real three-release wheel drift it had
 been reporting red the day before. Neither script guesses a fallback path any
 more, for the same reason — a guess makes "never configured" and "moved away"
-print the same line.
+print the same line. One asymmetry is deliberate: an absent MEMBER checkout
+degrades the content half to `HASH-ONLY` rather than failing, because the hash
+half still ran — but it says `HASH-ONLY` out loud and counts it on the closing
+line, so partial coverage never reads as full.
 
-**A skip is not a pass.** Both aggregate recipes say so on their closing line
+**A skip is not a pass.** The aggregate recipes say so on their closing line
 rather than claiming full coverage, because the failure that started this was a
 green summary printed over a check that never ran.
 
-Both monitors are offline — they read a sibling checkout, no network and no
-docker — which is why `test-offline` can call them. A real drift therefore turns
+The monitor is offline — it reads a sibling checkout, no network and no
+docker — which is why `test-offline` can call it. A real drift therefore turns
 `test-offline` red, deliberately: the alternative is the invisible drift this
 exists to prevent. Clear it by re-vendoring, not by muting the check.
 

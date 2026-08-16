@@ -111,7 +111,7 @@ itself. Personal scope is not a customisation surface.
 
 `sandbox_templates/skills/` mixes sandbox-native skills with copies vendored
 from `agentic-conventions` — `UPSTREAM.md` says which. Edit vendored ones
-upstream; the next `sync-skills` reverts local edits silently.
+upstream; the next `just vendor-tools` reverts local edits silently.
 
 ### Plugins and marketplaces
 

@@ -50,7 +50,7 @@ right: an **RFC** proposes → an **ADR** records → **work/** implements → t
 | — | [`scripts/with-egress.test.sh`](../scripts/with-egress.test.sh) | install-window parser suite (58, fully offline — no docker, no network) |
 | — | [`scripts/profile-skills.test.sh`](../scripts/profile-skills.test.sh) | `converge_skills` suite (24, offline) — locks backup-pruning, the never-prune-unmanaged rule, and mirror-not-merge convergence ([ADR-0005](adr/0005-skill-templates-are-source-of-truth.md)) |
 | 3 | [`sandbox_templates/skills/audit-sandbox/SKILL.md`](../sandbox_templates/skills/audit-sandbox/SKILL.md) | Agent-side judgment over tier-2 JSON (staged into container by `profile.sh audit`) |
-| — | `just check-upstreams` | Boundary monitors, not tests: is each vendored payload current with its upstream? `skills-check` (myconv) + `vendor-check` (myclickup wheel/skill). Offline; each SKIPs loudly where its sibling checkout is absent. Run by `test-offline` |
+| — | `just check-upstreams` | Boundary monitor, not a test: is every vendored payload current with its upstream? `tools-check` covers all channel artifacts — lock-vs-published (hash) and artifact-vs-source_commit (content, when the member checkout is reachable). Offline; SKIPs loudly where a source is absent. Run by `test-offline` |
 
 ## Agent Tool Controls
 
@@ -92,8 +92,7 @@ Guides in [`host_setup/`](../host_setup/):
 - [`scripts/run-ephemeral.sh`](../scripts/run-ephemeral.sh) — disposable one-shot containers
 - [`scripts/init-profile-state.sh`](../scripts/init-profile-state.sh) — idempotent state bootstrap per profile
 - [`scripts/sync-agent-notice.sh`](../scripts/sync-agent-notice.sh) — inject/refresh the managed sandbox-notice block into repo `AGENTS.md` / global `CLAUDE.md` (source: `sandbox_templates/common/agent-notice.md`)
-- [`scripts/sync-skills-from-conventions.sh`](../scripts/sync-skills-from-conventions.sh) — vendor shared skills from the `agentic-conventions` checkout into `sandbox_templates/skills/` (developer action, never runs during a build; source path from `$CONVENTIONS_DIR` / `.conventions-dir.local`)
-- [`scripts/vendor-myclickup.sh`](../scripts/vendor-myclickup.sh) — vendor the private `myclickup` payload (wheel + its agent skill) into the build context, or `--check` it for drift against the source tree. Payload is **gitignored** — public repo, private tool — so the `Dockerfile` installs it conditionally and a clone without it still builds. Developer action; `just vendor-myclickup` / `just vendor-check`
+- [`scripts/vendor-tools.sh`](../scripts/vendor-tools.sh) — the one door every vendored payload enters through (ADR-0014): reads the depot channel's `manifest.toml`, verifies **every** hash before copying **anything**, mirrors wheels/skills/plugin trees into `sandbox_templates/`, and records what it took in `VENDORED.lock`. `--check` adds the content half; `--permissions` reports the manifest's permission proposal against the settings template, report-only. Channel path from `$DEPOT_DIR` / `.depot-dir.local`. The myclickup payload stays **gitignored** — public repo, private tool — so the `Dockerfile` installs it conditionally and a clone without it still builds. Developer action; `just vendor-tools` / `just tools-check` / `just check-permissions`. Replaced `vendor-myclickup.sh` and `sync-skills-from-conventions.sh` (work/0016 Part B step 11)
 
 ## Operational
 
