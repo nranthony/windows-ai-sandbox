@@ -41,6 +41,11 @@ AGENTS.local.md
 .conventions-dir.local
 # same, for the myclickup checkout (scripts/vendor-myclickup.sh)
 .myclickup-dir.local
+# same, for the depot CHANNEL ROOT — the directory holding manifest.toml, dist/
+# and bin/ (scripts/vendor-tools.sh, work/0016 / ADR-0014). This is the channel,
+# not a member repo: it supersedes the two pointers above once vendor-tools
+# retires the legacy scripts at Part B step 11, and until then all three coexist.
+.depot-dir.local
 
 # vendored myclickup payload — NEVER commit. This repo is public and
 # nranthony/myclickup is private; a py3-none-any wheel is a zip of the .py
