@@ -254,5 +254,112 @@ check "$(run_vt "$CHAN" --check)" 0 "a missing lock SKIPs rather than failing"
 # --- 10. argument handling ----------------------------------------------------
 check "$(run_vt "$CHAN" --wat)" 1 "an unknown argument FAILS rather than defaulting to vendor"
 
+# --- 11. content verification (hash PLUS content, never hash alone) ----------
+# A hash proves an artifact did not change in transit; only a content diff
+# proves it matches the source_commit it claims. These lock the difference.
+MEMBER="$ROOT/member"
+mk_member() { # -> prints the commit sha
+  rm -rf "$MEMBER"; mkdir -p "$MEMBER/src/myclickup" "$MEMBER/packaging/sandbox"
+  printf 'REAL = 1\n'   > "$MEMBER/src/myclickup/__init__.py"
+  printf '# skill text\n' > "$MEMBER/packaging/sandbox/SKILL.md"
+  git -C "$MEMBER" init -q 2>/dev/null
+  git -C "$MEMBER" -c user.email=t@t -c user.name=t add -A 2>/dev/null
+  git -C "$MEMBER" -c user.email=t@t -c user.name=t commit -qm fixture 2>/dev/null
+  git -C "$MEMBER" rev-parse HEAD
+}
+# Rebuild the channel so its wheel really contains the member's source.
+sync_channel_to_member() { # <commit>
+  python3 - "$CHAN" "$MEMBER" <<'PY'
+import pathlib, sys, zipfile
+chan, member = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
+whl = chan / "dist/wheels/myclickup-0.6.0-py3-none-any.whl"
+with zipfile.ZipFile(whl, "w") as z:
+    for p in sorted((member / "src/myclickup").rglob("*")):
+        if p.is_file():
+            z.write(p, f"myclickup/{p.relative_to(member/'src/myclickup')}")
+(chan / "dist/skills/myclickup/SKILL.md").write_bytes(
+    (member / "packaging/sandbox/SKILL.md").read_bytes())
+PY
+  regen_manifest "$CHAN"
+  sed -i "s|^source_commit = \"aaaa.*\"|source_commit = \"$1\"|" "$CHAN/manifest.toml"
+}
+
+COMMIT="$(mk_member)"
+sync_channel_to_member "$COMMIT"
+reset_templates
+check "$(run_vt "$CHAN")" 0 "vendor a channel whose wheel really carries the member source"
+
+# No member configured: hash-only, and it must SAY so rather than imply coverage.
+check "$(run_vt "$CHAN" --check)" 0 "--check passes with no member checkout configured"
+check "$(grep -c 'HASH-ONLY' "$ROOT/err")" 2 "an unreachable member is reported HASH-ONLY, not silently skipped"
+check "$(grep -c 'a skip is not a pass' "$ROOT/out")" 1 "the closing line names what was NOT covered"
+
+# Member reachable: content is verified by extraction.
+rm -f "$ROOT/out" "$ROOT/err"
+DEPOT_DIR="$CHAN" MYCLICKUP_DIR="$MEMBER" "$RUN" --check >"$ROOT/out" 2>"$ROOT/err"
+check "$?" 0 "--check passes when the member checkout agrees"
+check "$(grep -c 'extracted, not hashed' "$ROOT/err")" 1 "content is verified by extraction, not by hash"
+
+# The wheel disagrees with the source_commit it claims. Hashes still all match —
+# only the content diff can see this, which is the whole argument for keeping it.
+python3 - "$CHAN" <<'PY'
+import pathlib, sys, zipfile
+whl = pathlib.Path(sys.argv[1]) / "dist/wheels/myclickup-0.6.0-py3-none-any.whl"
+with zipfile.ZipFile(whl, "w") as z:
+    z.writestr("myclickup/__init__.py", "REAL = 999  # not what the source says\n")
+PY
+regen_manifest "$CHAN"; sed -i "s|^source_commit = \"aaaa.*\"|source_commit = \"$COMMIT\"|" "$CHAN/manifest.toml"
+rm -f "$ROOT/out" "$ROOT/err"
+DEPOT_DIR="$CHAN" MYCLICKUP_DIR="$MEMBER" "$RUN" >"$ROOT/out" 2>"$ROOT/err"
+rm -f "$ROOT/out" "$ROOT/err"
+DEPOT_DIR="$CHAN" MYCLICKUP_DIR="$MEMBER" "$RUN" --check >"$ROOT/out" 2>"$ROOT/err"
+check "$?" 1 "a wheel that disagrees with its source_commit FAILS  <-- LOCK"
+check "$(grep -c 'CONTENT DRIFT' "$ROOT/err")" 1 "content drift is named, and says re-vendoring will not clear it"
+
+# A configured-but-missing member is the broken-pointer state here too.
+rm -f "$ROOT/out" "$ROOT/err"
+DEPOT_DIR="$CHAN" MYCLICKUP_DIR="$ROOT/gone" "$RUN" --check >"$ROOT/out" 2>"$ROOT/err"
+check "$?" 1 "a configured-but-missing member checkout FAILS"
+
+# The member moving ahead of the published commit is ORDINARY, not drift: the
+# vendored copy tracks what the channel published, so the diff must be against
+# that commit and not the member's HEAD.
+sync_channel_to_member "$COMMIT"
+reset_templates
+DEPOT_DIR="$CHAN" MYCLICKUP_DIR="$MEMBER" "$RUN" >/dev/null 2>&1
+printf 'later work\n' > "$MEMBER/NOTES.md"
+git -C "$MEMBER" -c user.email=t@t -c user.name=t add -A 2>/dev/null
+git -C "$MEMBER" -c user.email=t@t -c user.name=t commit -qm later 2>/dev/null
+rm -f "$ROOT/out" "$ROOT/err"
+DEPOT_DIR="$CHAN" MYCLICKUP_DIR="$MEMBER" "$RUN" --check >"$ROOT/out" 2>"$ROOT/err"
+check "$?" 0 "a member ahead of the published commit is not drift  <-- LOCK"
+
+# --- 12. check-permissions (informational, report-only) ----------------------
+mkdir -p "$TPL/claude"
+cat > "$TPL/claude/claude-settings.json" <<'JSON'
+{ "permissions": {
+  "allow": ["Bash(myclickup status:*)", "Bash(myclickup lists:*)"],
+  "ask":   ["Bash(myclickup create:*)"],
+  "deny":  ["Bash(myclickup delete:*)"] } }
+JSON
+cat >> "$CHAN/manifest.toml" <<'EOF'
+proposed_allow = ["Bash(myclickup statuses:*)", "Bash(myclickup lists:*)", "Bash(myclickup goals:*)"]
+proposed_ask = ["Bash(myclickup create:*)", "Bash(myclickup update:*)"]
+proposed_deny = ["Bash(myclickup delete:*)"]
+EOF
+# proposed_* were appended under [artifact.myconv]; move them by regenerating is
+# overkill — assert against whichever artifact carries them.
+rm -f "$ROOT/out" "$ROOT/err"
+DEPOT_DIR="$CHAN" "$RUN" --permissions >"$ROOT/out" 2>"$ROOT/err"
+check "$?" 0 "--permissions is informational and always exits 0"
+check "$(grep -c 'covered by prefix: Bash(myclickup statuses' "$ROOT/out")" 1 \
+  "a prefix over-match counts as COVERED, not missing  <-- LOCK"
+check "$(grep -c 'MISSING: Bash(myclickup goals' "$ROOT/out")" 1 "a genuinely absent read is reported MISSING"
+check "$(grep -c 'MISSING: Bash(myclickup update' "$ROOT/out")" 1 "an ungated WRITE is reported MISSING"
+check "$(grep -c 'WRITE-SURFACE GAP' "$ROOT/out")" 1 "an ungated write is called out as a write-surface gap"
+check "$(sha256sum "$TPL/claude/claude-settings.json" | awk '{print $1}')" \
+      "$(printf '{ "permissions": {\n  "allow": ["Bash(myclickup status:*)", "Bash(myclickup lists:*)"],\n  "ask":   ["Bash(myclickup create:*)"],\n  "deny":  ["Bash(myclickup delete:*)"] } }\n' | sha256sum | awk '{print $1}')" \
+  "--permissions NEVER edits claude-settings.json"
+
 printf '\n  %d passed, %d failed\n\n' "$pass" "$fail"
 [[ "$fail" -eq 0 ]]

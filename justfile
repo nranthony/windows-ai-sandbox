@@ -238,9 +238,18 @@ vendor-check:
 vendor-tools *args:
     {{justfile_directory()}}/scripts/vendor-tools.sh {{args}}
 
-# fail if VENDORED.lock has fallen behind what the channel publishes
+# fail if VENDORED.lock has fallen behind what the channel publishes, and
+# content-check each artifact against the source commit it claims when that
+# member checkout is reachable (hash-only, stated as such, when it is not)
 tools-check:
     {{justfile_directory()}}/scripts/vendor-tools.sh --check
+
+# report the manifest's generated permission proposal against the settings
+# TEMPLATE. Informational: it never edits that file, and it cannot see what a
+# running profile has (seeding is create-only) nor what the auto-mode classifier
+# does with a command on none of the lists.
+check-permissions:
+    {{justfile_directory()}}/scripts/vendor-tools.sh --permissions
 
 # ---- host Docker hygiene (docker-gc.sh) -------------------------------------
 #

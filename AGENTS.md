@@ -100,7 +100,7 @@ from the profile, including at depth and behind a dot-directory (all three live
 profiles carried phantom skill copies four levels down for three upstream
 releases). See [ADR-0005](docs/adr/0005-skill-templates-are-source-of-truth.md).
 Edits to `scripts/vendor-tools.sh` require `bash scripts/vendor-tools.test.sh`
-(41/41, offline — no docker, no network, no real channel). It is the door every
+(57/57, offline — no docker, no network, no real channel). It is the door every
 vendored payload now enters through, so three of its assertions are regression
 locks, each proven to bite by mutation: **nothing is copied when any hash fails**
 (the gate runs over every artifact before the first file moves — a per-artifact
@@ -111,6 +111,15 @@ data* — measured during development: the verified-hash lines vanished from the
 terminal and reappeared as bogus artifact rows the mirror loop skipped in
 silence); and **an unknown artifact kind FAILS rather than skipping**, because a
 kind the script has not been taught is content it cannot verify.
+Three more lock the content half: **a wheel that disagrees with the
+`source_commit` it claims FAILS** even though every hash matches (only the
+content diff can see that, which is the entire argument for keeping it); **a
+member checkout ahead of the published commit is NOT drift** (the vendored copy
+tracks what the channel published, so the diff is against that commit, never the
+member's HEAD — otherwise the check reddens on an ordinary state); and **a
+prefix over-match counts as covered** in `--permissions` (`statuses` riding
+`status:*`), because a check that cries wolf on its first run is a check that
+gets ignored.
 `just test-offline` runs all six suites, then `just check-upstreams`. Verify
 additionally asserts no `*.bak*` sits beside the seeded skills: `converge_skills`
 prunes only `*.bak.*`, so the unstamped form survives it.
