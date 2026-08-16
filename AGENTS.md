@@ -56,6 +56,13 @@ These files carry the sandbox's guarantees:
   this is the **only** route by which a dependency can enter a profile. It widens
   the allowlist, so a bug here is an egress hole; and it writes the install audit
   log, so a bug here silently *under-reports* — which reads exactly like a clean run.
+- `scripts/vendor-tools.sh` — per [ADR-0014](docs/adr/) (channel-side, myclickup
+  work/0016) this is the route by which vendored payloads enter the build
+  context: the wheel bakes into the image, the skills converge into every
+  profile. A bug here is unverified content inside the boundary, arriving
+  through the door meant to check it. It verifies every hash **before copying
+  anything**, asserts manifest paths stay inside the channel root, and invokes
+  the channel's own `bin/dirhash.py` rather than reimplementing a tree hash.
 
 Any change to them requires:
 1. The commit message states the security impact.
@@ -92,16 +99,36 @@ a skill rather than merging into it — a file deleted inside a skill must vanis
 from the profile, including at depth and behind a dot-directory (all three live
 profiles carried phantom skill copies four levels down for three upstream
 releases). See [ADR-0005](docs/adr/0005-skill-templates-are-source-of-truth.md).
-`just test-offline` runs all five suites, then `just check-upstreams`. Verify
+Edits to `scripts/vendor-tools.sh` require `bash scripts/vendor-tools.test.sh`
+(41/41, offline — no docker, no network, no real channel). It is the door every
+vendored payload now enters through, so three of its assertions are regression
+locks, each proven to bite by mutation: **nothing is copied when any hash fails**
+(the gate runs over every artifact before the first file moves — a per-artifact
+gate leaves a half-updated image and still exits non-zero, so the failure looks
+handled); **progress output must not reach stdout** (`verify_all` returns the
+manifest table on stdout, so a progress line written there is captured *into the
+data* — measured during development: the verified-hash lines vanished from the
+terminal and reappeared as bogus artifact rows the mirror loop skipped in
+silence); and **an unknown artifact kind FAILS rather than skipping**, because a
+kind the script has not been taught is content it cannot verify.
+`just test-offline` runs all six suites, then `just check-upstreams`. Verify
 additionally asserts no `*.bak*` sits beside the seeded skills: `converge_skills`
 prunes only `*.bak.*`, so the unstamped form survives it.
 
 ## Boundary monitors — every vendored payload gets a detector here
 
-`just check-upstreams` answers "am I current with both my upstreams?":
-`skills-check` (myconv, from agentic-conventions) and `vendor-check` (the
-myclickup wheel + skill). **Add a line to it whenever a new upstream payload is
-vendored into this repo.**
+`just check-upstreams` answers "am I current with my upstreams?": `skills-check`
+(myconv, from agentic-conventions), `vendor-check` (the myclickup wheel + skill,
+content-diffed against its member checkout) and `tools-check` (`VENDORED.lock`
+vs the depot channel's `manifest.toml`). **Add a line to it whenever a new
+upstream payload is vendored into this repo.**
+
+The three answer different questions and that is deliberate, not redundancy:
+`tools-check` proves the lock still matches what the channel *publishes*;
+`vendor-check` proves the wheel's extracted content still matches the *source it
+claims*. A hash cannot do the second — swapping content-diff for hash-only would
+move a security-critical verification from this consumer to trusting the
+producer's gate, a transfer of trust dressed as a simplification.
 
 The rule it encodes: *the detector belongs on the side that owns the stale copy.*
 It did not, and that is the whole reason the myconv payload sat three releases

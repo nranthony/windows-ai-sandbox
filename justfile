@@ -144,6 +144,7 @@ test-offline:
     bash {{justfile_directory()}}/scripts/with-egress.test.sh
     bash {{justfile_directory()}}/scripts/dockerfile-order.test.sh
     bash {{justfile_directory()}}/scripts/profile-skills.test.sh
+    bash {{justfile_directory()}}/scripts/vendor-tools.test.sh
     @just --justfile {{justfile()}} check-upstreams
 
 # build-layer ordering tripwire (Dockerfile only; see the header for why the
@@ -209,7 +210,7 @@ skills-check:
 # network, no docker) and both SKIP loudly rather than failing where the source
 # isn't present, so this is safe to run anywhere and safe to wire into
 # test-offline. Add a line here whenever a new upstream payload is vendored.
-check-upstreams: skills-check vendor-check
+check-upstreams: skills-check vendor-check tools-check
     @echo "upstream boundaries checked (review any [SKIP] above — a skip is not a pass)"
 
 # Payload is GITIGNORED (public repo, private tool) — see the script's header.
@@ -221,6 +222,25 @@ vendor-myclickup:
 # fail if the vendored myclickup payload has drifted from its source tree
 vendor-check:
     {{myclickup_sh}} --check
+
+# ---- the depot channel (ADR-0014, work/0016 Part B) -------------------------
+#
+# One door for every vendored artifact. Supersedes vendor-myclickup and the
+# myconv leg of sync-skills at step 11 — until then all three coexist, because
+# the migration's safety device is a zero diff between the two mechanisms, not
+# a cutover on trust (plan §7 dual-running window).
+#
+# Source path: $DEPOT_DIR or .depot-dir.local. Consumes manifest.toml, verifies
+# every hash before copying anything, records what it took in
+# sandbox_templates/VENDORED.lock.
+
+# vendor every channel artifact into the build context (wheel, skills, plugins)
+vendor-tools *args:
+    {{justfile_directory()}}/scripts/vendor-tools.sh {{args}}
+
+# fail if VENDORED.lock has fallen behind what the channel publishes
+tools-check:
+    {{justfile_directory()}}/scripts/vendor-tools.sh --check
 
 # ---- host Docker hygiene (docker-gc.sh) -------------------------------------
 #
