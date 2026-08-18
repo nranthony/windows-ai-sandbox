@@ -36,6 +36,7 @@ weeks after their content went stale.
 | [0002](0002-host-side-skill-slot/plan.md) | Host-side skill slot (`make-plan` is container-only) | Not started |
 | [0003](0003-repo-scan-audit/plan.md) | Repo scan — audit + housekeeping | Planning, execution mode not chosen |
 | [0004](0004-deletion-is-a-human-step/plan.md) | Deletion is a human step — hook blocks bulk shapes, not the verb | Not started, parked |
+| [0006](0006-manifest-keys-the-consumer-drops/plan.md) | Manifest keys the channel consumer silently drops | Not started, **re-investigate first** |
 
 Exited: **0001 dependency guardrails** — complete (T00–T26), archived 2026-08-03
 to [`docs/_archive/dependency-guardrails-plan.md`](../docs/_archive/dependency-guardrails-plan.md);
