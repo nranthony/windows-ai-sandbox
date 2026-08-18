@@ -37,6 +37,7 @@ weeks after their content went stale.
 | [0003](0003-repo-scan-audit/plan.md) | Repo scan — audit + housekeeping | Planning, execution mode not chosen |
 | [0004](0004-deletion-is-a-human-step/plan.md) | Deletion is a human step — hook blocks bulk shapes, not the verb | Not started, parked |
 | [0006](0006-manifest-keys-the-consumer-drops/plan.md) | Manifest keys the channel consumer silently drops | Not started, **re-investigate first** |
+| [0008](0008-the-python-half-of-the-gates/plan.md) | The Python half of the dependency gates (Gate 3 project overrides, uv age gate, `uv audit`) | Not started, **verify §2.3 before implementing** |
 
 Exited: **0001 dependency guardrails** — complete (T00–T26), archived 2026-08-03
 to [`docs/_archive/dependency-guardrails-plan.md`](../docs/_archive/dependency-guardrails-plan.md);
