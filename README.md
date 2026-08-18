@@ -9,22 +9,106 @@ WSL2 Ubuntu 24.04 + rootless Docker + NVIDIA CUDA, organized as a **profile-base
 
 ## Quick Start
 
+The whole daily loop:
+
 ```bash
-# One-time host setup (see "Initial Setup" below)
-cd host_setup && ./setup-rootless-docker-wsl.sh && sudo ./wsl_conf_update.sh
-
-# Build the shared image
-scripts/profile.sh build
-
-# Bring up a profile (workspace = ~/repo/<profile>/)
-mkdir -p ~/repo/<profile>
-scripts/profile.sh <profile> up
-scripts/profile.sh <profile> auth           # claude login (one-time)
-scripts/profile.sh <profile> auth-github    # optional
-scripts/profile.sh <profile> attach         # zsh into the container
+just up <profile>        # start the stack (seeds state, converges skills)
+just attach <profile>    # zsh into the container
+just verify <profile>    # tier-1 hardening tripwire
+just down <profile>      # stop (persistent state survives)
 ```
 
-Day-to-day: `scripts/profile.sh <profile> {up,down,attach,logs,status,exec,clean}`. See `scripts/profile.sh list` for all profiles.
+`just list` shows every profile. New machine → [Initial Setup](#initial-setup).
+After a host reboot → [Full restart](#full-restart).
+
+`just` is the front door and `scripts/profile.sh` is the canonical implementation —
+identical in effect, and every recipe is a thin pass-through. `just --list` for the
+full set.
+
+---
+
+## Full restart
+
+After a host reboot or `wsl --shutdown`. Rootless Docker is `systemctl --user`
+enabled with lingering, so the daemon comes back by itself.
+
+**Before shutting down** — there is no down-all recipe, so stop each profile:
+
+```bash
+just list                   # which profiles exist, and which are up
+just down <profile>         # once per profile that is up
+```
+
+**1 · Host is back**
+
+```bash
+docker info >/dev/null && echo "rootless daemon OK"
+```
+
+**2 · Is the repo current?** Offline — no docker, no profiles. Run it *before*
+bringing anything up, so a failure costs nothing.
+
+```bash
+just test-offline          # 6 offline suites, then check-upstreams → tools-check
+just check-permissions      # informational: manifest proposal vs settings template
+```
+
+`tools-check` compares `sandbox_templates/VENDORED.lock` against the channel
+manifest **and** content-diffs each artifact against the `source_commit` it claims.
+It cannot see a member repo that *released without publishing* — that detector
+belongs to the channel. So also, at the channel root (the path in `.depot-dir.local`):
+
+```bash
+just verify                 # reports any member whose HEAD is ahead of what it published
+```
+
+Only if drift is reported:
+
+```bash
+just vendor-tools           # re-consume the channel (every hash verified before anything is copied)
+just build                  # ONLY if the wheel moved — it bakes into the image, and `up` will not rebuild for it
+```
+
+Skills and plugin trees need no rebuild: they converge from `sandbox_templates/`
+on the next `up`.
+
+**3 · Up**
+
+```bash
+just up <profile>           # once per profile you want back
+```
+
+**4 · Settings — the one thing `up` will not do**
+
+```bash
+just reset-settings <profile>      # per profile
+```
+
+Settings seeding is **create-only**: `up` leaves an existing `settings.json` alone
+however far the template has moved, and `verify` does not check it. This overwrites
+from the template and backs up the old file. Restart `claude` inside the container
+afterwards — a running session holds the old rules in memory.
+
+**5 · Verify**
+
+```bash
+just verify <profile>      # per profile — tier 1
+just health                # cross-profile: agent/proxy/DB all up together
+just audit <profile>       # tier 2, after anything non-trivial (an image rebuild counts)
+```
+
+**6 · Hygiene** — optional, monthly is about right
+
+```bash
+just clean <profile> --deep    # also drops MCP debug logs + settings.json.bak.*
+just docker-gc --dry-run       # then re-run with --yes if the report looks right
+```
+
+Don't run `clean --deep` between a `reset-settings` and confirming the result — the
+backup is the only undo.
+
+**If `up` fails with "network not found"**: a stale DB container is pinned to the
+old network. `docker rm -f postgres-<profile>`, then `just up <profile>`.
 
 ---
 
@@ -39,6 +123,7 @@ Day-to-day: `scripts/profile.sh <profile> {up,down,attach,logs,status,exec,clean
 | User | root-in-container (UID 0) — remaps to host UID 1000 under rootless Docker userns=host |
 | GPU | WSL2 hosts only: `docker-compose.wsl-gpu.yml` overlay (`/dev/dxg` + `/usr/lib/wsl` bind + `LD_LIBRARY_PATH`, not `--gpus all`), auto-layered by `profile.sh` when `/dev/dxg` exists. Bare-Linux hosts come up GPU-less on the same base compose |
 | Persistent state | `~/.ai-sandbox/profiles/<profile>/` — outlives container recreates |
+| Vendored payloads | The `myclickup` CLI (wheel, baked into the image) and the `myconv` skills arrive through one door — the depot channel, via `just vendor-tools`. Every hash is verified before anything is copied, and what was taken is recorded in `sandbox_templates/VENDORED.lock` (tracked; the payloads themselves are gitignored) |
 
 **Not installed, by design** (see `sandbox-hardening-package.md` §7): `bubblewrap`, `socat`, `openssh-client`. These are the tools that would weaponize container escape or VS Code agent-forwarding leaks. See `scripts/verify-sandbox.sh` for the full tripwire.
 
@@ -82,40 +167,51 @@ GIT_EMAIL="your-email@example.com"
 
 ### Bring up a profile
 ```bash
-mkdir -p ~/repo/<profile>                # workspace parent (holds one or more repos)
-scripts/profile.sh <profile> up          # creates state dirs, brings up agent + egress-proxy
-scripts/profile.sh <profile> auth        # claude login — one-time; token persists in ~/.ai-sandbox/
+mkdir -p ~/repo/<profile>       # workspace parent (holds one or more repos)
+just up <profile>               # creates state dirs, brings up agent + egress-proxy
+just auth <profile>             # claude login — one-time; token persists in ~/.ai-sandbox/
 ```
 
 ### Commands
-| Command | Action |
+
+Profile is the first argument to every per-profile recipe. `build`, `list`,
+`health`, `docker-gc` and the repo-level checks take none.
+
+| Recipe | Action |
 |---|---|
-| `up` | brings up stack + seeds state dirs |
-| `down` | stops container (state preserved) |
-| `attach` | zsh into the agent container |
-| `auth` / `auth-github` / `auth-gitlab` | interactive logins |
+| `up` / `down` | start / stop the stack (persistent state survives `down`) |
+| `attach` | zsh into the agent container — the primary entry point |
+| `auth` / `auth-github` / `auth-gitlab` / `auth-antigravity` | interactive logins |
 | `logs` / `status` | compose logs / ps |
-| `build` | rebuild shared image (all profiles pick up) |
-| `rebuild` | build + recreate this profile |
-| `reset-settings` | overwrite claude settings.json from template (backs up old) |
+| `exec <cmd>` | run one command inside the container |
+| `recreate` | force-recreate containers (picks up compose/seccomp/proxy/DNS changes) |
+| `build` | rebuild the shared image — no profile arg; all profiles pick it up on recreate |
+| `rebuild` | build **and** recreate this profile |
+| **Verification** | |
+| `verify` | tier-1 hardening tripwire (fast, in-container) |
+| `audit` [`--clean`] | tier-2 structured audit, 65 probes, JSON to the host |
+| `health` | cross-profile: flags a profile whose agent/proxy/DB aren't all up together |
+| `deps` [`--osv`] | dependency posture for the profile's workspace (host-side, read-only) |
+| **Repo-level** (no profile arg) | |
+| `test-offline` | six offline suites, then `check-upstreams` |
+| `vendor-tools` / `tools-check` | consume the depot channel / check the lock against it |
+| `check-permissions` | manifest permission proposal vs the settings template (read-only) |
+| **State** | |
+| `reset-settings` | overwrite claude `settings.json` from the template (backs up the old) |
+| `reset-skills` | converge this profile's skills to `sandbox_templates/skills/` |
 | `clean` [`--deep`] | prune rotating state (backups, paste-cache, MCP logs) |
-| `list` | all profiles with up/down status |
-| `exec <cmd>` | run arbitrary command inside the container |
+| `wipe` / `db-reset` | destructive — read the header first |
+| `docker-gc` | host-wide Docker hygiene; report-only for images and volumes |
 
-### Optional: `just` front door
-A repo-root `justfile` provides a discoverable, shorter alias over `scripts/profile.sh` and `scripts/setup.sh`. It is a **convenience layer only** — every recipe is a thin pass-through (it never calls `docker compose` directly, so the scripts' `PROFILE`/`COMPOSE_PROJECT_NAME` exports and the compose `${PROFILE:?}` guard stay in force). The bash scripts remain canonical. Run `just` (or `just --list`) to see all recipes.
+### `just` and the scripts
 
-```bash
-just up <profile>            # = scripts/profile.sh <profile> up
-just attach <profile>        # = scripts/profile.sh <profile> attach   (primary entry — attach-only)
-just verify <profile>        # = scripts/profile.sh <profile> verify   (tier-1 hardening tripwire)
-just rebuild <profile>       # = scripts/profile.sh <profile> rebuild
-just build                   # = scripts/profile.sh build              (no profile arg)
-just setup <profile> --name "Your Name" --email you@x   # = scripts/setup.sh <profile> ...
-just list                    # = scripts/profile.sh list
-```
-
-Profile is the first positional arg to every per-profile recipe (`list` and `build` take none). Requires `just` on the WSL host (`sudo apt install just`, or the static binary from github.com/casey/just). Skip it entirely if you prefer the scripts — they're identical in effect.
+`just` needs to be on the WSL host (`sudo apt install just`, or the static binary
+from github.com/casey/just). Every recipe is a **thin pass-through** — it never
+calls `docker compose` directly, so `scripts/profile.sh`'s `PROFILE` /
+`COMPOSE_PROJECT_NAME` exports and the compose `${PROFILE:?}` guard stay in force.
+`scripts/profile.sh <profile> <command>` is the canonical form and works
+identically if you'd rather skip `just`; onboarding lives in
+`just setup <profile> --name "Your Name" --email you@x`.
 
 > Unlike the sibling `macolima` repo, there are **no `colima-*` recipes** (WSL2 *is* the VM), `verify` fronts `profile.sh verify` rather than `setup.sh --verify`, and `build` takes no profile arg. See `docs/sibling-repo-relationship.md`.
 
@@ -144,7 +240,7 @@ the container the CLI already brought up. There is no `.devcontainer/` and no
 `.env` plumbing and bypassing `profile.sh`'s per-profile subnet allocation), and
 Attach ignores a repo `devcontainer.json` anyway.
 
-1. Bring the profile up: `scripts/profile.sh <profile> up`.
+1. Bring the profile up: `just up <profile>`.
 2. In VS Code: `Ctrl+Shift+P` → `Dev Containers: Attach to Running Container...` → `ai-sandbox-<profile>`.
 
 All hardening (seccomp, cap_drop, sandbox-internal, DNS sinkhole) lives in
@@ -197,7 +293,7 @@ See [`docs/vscode-integration-security.md`](docs/vscode-integration-security.md)
 
 ## Testing GPU/CUDA
 ```bash
-scripts/profile.sh <profile> exec bash -lc '
+just exec <profile> bash -lc '
   cd /workspace/windows-ai-sandbox/container_testing && uv sync && \
   uv run python -c "import torch; print(torch.cuda.is_available())"
 '
@@ -208,10 +304,21 @@ Or inside the attached container: `jupyter notebook container_testing/cuda_test.
 ---
 
 ## Hardening Verification
+
+Two tiers, plus the offline suites that gate changes to the security-sensitive files.
+
 ```bash
-scripts/profile.sh <profile> exec bash /workspace/windows-ai-sandbox/scripts/verify-sandbox.sh
+just verify <profile>     # tier 1 — fast in-container tripwire, ~40 checks
+just audit <profile>      # tier 2 — 65 structured probes, JSON written to the host
+just test-offline         # the six regression suites + upstream boundary monitors
 ```
-Expected summary: direct internet blocked, `api.anthropic.com` reachable via proxy, `example.com` blocked, `CapEff=0`, `NoNewPrivs=1`, `Seccomp=2`, `bwrap/socat/ssh` absent, no leaked `/root/.gitconfig`, no `SSH_AUTH_SOCK`, no `credential.helper` injection.
+
+Tier 1 covers: direct internet blocked, `api.anthropic.com` reachable via the proxy,
+`example.com` blocked, `CapEff=0`, `NoNewPrivs=1`, `Seccomp=2`, `bwrap`/`socat`/`ssh`
+absent, no leaked `/root/.gitconfig`, no `SSH_AUTH_SOCK`, no `credential.helper`
+injection, and the install-quarantine settings. Three `WEAK` results in tier 2 are
+expected and documented (AppArmor under rootless Docker on WSL2, the deliberately
+open `git` egress block, and the root-writable hook script).
 
 ## Image CVE Scan (trivy)
 ```bash
