@@ -45,6 +45,13 @@ to [`docs/_archive/dependency-guardrails-plan.md`](../docs/_archive/dependency-g
 the live record is
 [`docs/dependency-guardrails-handoff.md`](../docs/dependency-guardrails-handoff.md).
 
+Exited: **0005 cross-repo skill pipeline** — work landed 2026-08-13, §5 closed by
+myclickup's reply, archived 2026-08-18 to
+[`docs/_archive/cross-repo-skill-pipeline-notes.md`](../docs/_archive/cross-repo-skill-pipeline-notes.md).
+Its durable rule — *the detector belongs on the side that owns the stale copy, and
+a skip is not a pass* — is maintained in [`AGENTS.md`](../AGENTS.md) under
+"Boundary monitors".
+
 ## plans/
 
 `work/plans/` is gitignored and holds Claude Code's native plan-mode drafts

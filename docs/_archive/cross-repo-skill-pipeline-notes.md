@@ -1,5 +1,23 @@
 # 0005 — the cross-repo skill pipeline: what was wrong, and what now watches it
 
+> **ARCHIVED 2026-08-18.** Moved here from `work/0005-cross-repo-skill-pipeline/`
+> per its own exit rule ("once §5 is empty"). **It is a historical record, not
+> current intent** — the Status line below and §5 were true on 2026-08-13.
+>
+> §5's open item — the myclickup reply asking whether any of the commands added
+> between surface 19 and 22 were writes — is closed. myclickup archived its
+> `work/0011-allowlist-reconciliation` on 2026-08-15 with all three questions
+> answered, and this repo's reads-only list was reviewed against 0.6.0's
+> parser-derived surface (28 commands: 17 reads, 11 writes) rather than against
+> the counts this file quotes.
+>
+> The durable output — *the detector belongs on the side that owns the stale
+> copy, and a skip is not a pass* — lives in [AGENTS.md](../../AGENTS.md) under
+> "Boundary monitors", which is where it is maintained. The per-payload monitors
+> this file describes (`skills-check`, `vendor-check`) were themselves retired on
+> 2026-08-16 when the depot channel became the only vendoring door; `tools-check`
+> now answers for every artifact.
+
 **Status:** Work landed. Open only on the myclickup reply (§5). Raised and executed
 2026-08-13; agentic-conventions answered the same day (§6) and step 8 is closed.
 
