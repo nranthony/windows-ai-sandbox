@@ -54,9 +54,11 @@ When you begin work, in this order:
 ## Golden rules
 - Never commit secrets; never hand-edit generated files (list them).
 - Ask before adding a dependency or a new top-level package.
-- Gloss before you cite: writing for a human, say what a decision was in plain
-  language and put its ID in parentheses after — "the no-scaffolder decision
-  (ADR-0001)", not "per ADR-0001". Repeat mentions may drop the gloss.
+- Gloss before you cite: writing for a human, say what a thing is in plain
+  language and put its code in parentheses after — "the no-scaffolder decision
+  (ADR-0001)", not "per ADR-0001"; "the task-move item (R3)", not "R3".
+  Covers project shorthand, not ordinary technical terms. Repeat mentions may
+  drop the gloss.
 
 ## High-risk paths
 List paths that require a written rationale, the verification step, and a
