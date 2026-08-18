@@ -42,7 +42,7 @@ docker exec -u proxy egress-proxy-<p> tail -f /var/log/squid/access.log
 # In-container hardening sweep (streamed via stdin)
 scripts/profile.sh <p> verify
 
-# Tier 2 structured audit (~80 probes, JSON output)
+# Tier 2 structured audit (65 probes, JSON output)
 scripts/profile.sh <p> audit
 
 # Trivy scan (host-side, requires trivy installed)

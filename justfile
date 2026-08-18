@@ -127,7 +127,7 @@ auth-antigravity profile:
 verify profile:
     {{profile_sh}} {{profile}} verify
 
-# tier-2 structured audit (~80 probes, JSON to host). Accepts --stage-only / --clean.
+# tier-2 structured audit (65 probes, JSON to host). Accepts --stage-only / --clean.
 audit profile *args:
     {{profile_sh}} {{profile}} audit {{args}}
 
