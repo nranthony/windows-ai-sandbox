@@ -46,6 +46,24 @@ REQUIRED_DOMAINS = [
 GATED_TAGS = {"git", "pypi", "pytorch", "npm", "nvidia", "numerai",
               "apt", "playwright-install", "quarto-install"}
 
+# Gated blocks that are DELIBERATELY open in the committed baseline. Each entry
+# is an accepted residual whose reasoning lives in proxy/allowed_domains.txt,
+# above the block it applies to — this set defers to that note, never replaces
+# it. They are still reported (see `accepted_open` in the probe details), just
+# not flagged: a WEAK that fires on every profile on every run is a WEAK that
+# stops being read, and it would bury the case this check exists for — a gated
+# block left open by a with-egress.sh run that died before its trap restored the
+# file. Adding a tag here is a security decision, so write the rationale in the
+# allowlist first and cite it.
+#
+# git: `git push` and `uv pip install git+https://github.com/...` are both
+# github.com:443. Squid gates on dstdomain and cannot separate them, so the
+# block cannot be tuned — it is open or the profiles cannot reach GitHub at all.
+# The install half is held by permissions.deny (installers + vcs categories,
+# asserted live by settings/required_deny_categories) and by the manifest-edit
+# rule in deny-destructive.sh, not by this allowlist.
+ACCEPTED_OPEN_TAGS = {"git"}
+
 # squid.conf rule markers — order-preserving.
 EXPECTED_MARKERS = [
     "acl Safe_ports port",
@@ -156,19 +174,28 @@ def run():
             open_gated.append({"domain": s, "tag": current_tag})
 
     open_tags = sorted({e["tag"] for e in open_gated})
+    accepted = sorted(t for t in open_tags if t in ACCEPTED_OPEN_TAGS)
+    unexpected = [e for e in open_gated if e["tag"] not in ACCEPTED_OPEN_TAGS]
+    unexpected_tags = sorted({e["tag"] for e in unexpected})
     out.append({
         "section": "proxy",
         "name": "gated_blocks_default_off",
-        "verdict": "OK" if not open_gated else "WEAK",
+        "verdict": "OK" if not unexpected else "WEAK",
         "details": {
-            "open_blocks": open_tags,
-            "open_domains": [e["domain"] for e in open_gated][:20],
-            "count": len(open_gated),
+            "open_blocks": unexpected_tags,
+            "open_domains": [e["domain"] for e in unexpected][:20],
+            "count": len(unexpected),
+            "accepted_open": accepted,
+            "accepted_domains": [e["domain"] for e in open_gated
+                                 if e["tag"] in ACCEPTED_OPEN_TAGS][:20],
             "rationale": ("package/install egress (PyPI, pythonhosted, npm, "
                           "github, apt, …) must stay OFF in the autonomous base "
                           "to block supply-chain installs; open = confirm it was "
                           "a deliberate dashboard / with-egress.sh toggle for an "
-                          "install stage, not residual"),
+                          "install stage, not residual. Tags in accepted_open are "
+                          "open by decision, with the reasoning recorded above "
+                          "their block in proxy/allowed_domains.txt — they are "
+                          "reported, not flagged."),
         },
     })
 

@@ -60,6 +60,15 @@ REQUIRED_DENY = {
         "Bash(uv add:*)", "Bash(uv pip install:*)",
         "Bash(uv tool install:*)", "Bash(uvx:*)", "Bash(pipx:*)",
         "Bash(cargo install:*)", "Bash(go install:*)", "Bash(go get:*)",
+        # Fetch-and-run and fetch-only siblings, added 2026-08-18. `npx` was
+        # denied but its four equivalents were not, and every one of them
+        # resolves a package from the registry before executing it — the same
+        # trust-boundary crossing as an install, minus the manifest entry that
+        # would leave a trace. `pip download` fetches without installing, which
+        # the install denies do not cover at all.
+        "Bash(npm exec:*)", "Bash(pnpm exec:*)", "Bash(yarn dlx:*)",
+        "Bash(bunx:*)", "Bash(bun x:*)",
+        "Bash(pip download:*)", "Bash(pip3 download:*)",
     ],
     "shell_escape": [
         "Bash(bash -c:*)", "Bash(sh -c:*)", "Bash(zsh -c:*)",

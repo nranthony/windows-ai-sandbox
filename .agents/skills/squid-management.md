@@ -14,9 +14,19 @@ treat every edit as a security change (AGENTS.md protocol applies).
 - Blocks are tagged `[name]` for grep and for `with-egress.sh --with name`.
 - Three lifecycle tiers, top to bottom:
   - **ALWAYS ON** — never comment out.
-  - **PROJECT-PERSISTENT** — dev/ML stack (PyPI, npm, PyTorch, NVIDIA...),
-    uncommented by default in this repo.
+  - **PROJECT-PERSISTENT** — dev/ML stack (PyPI, npm, PyTorch, NVIDIA...).
+    **Commented by default.** This tier used to be open in this repo; `fc7c0f0`
+    closed pypi, npm, numerai and kaggle, and the audit probe
+    (`gated_blocks_default_off`) now expects every gated tag here to be OFF.
   - **PLANNING-MODE** — commented by default; gated installs.
+  - One documented exception: **`[git]`** is open in the committed baseline.
+    `git push` and `uv pip install git+https://github.com/...` are the same
+    host on the same port, so `dstdomain` cannot separate them — the block is
+    open or the profiles cannot reach GitHub at all. The install half is held
+    by `permissions.deny` and the `deny-destructive.sh` manifest rule instead.
+    Full reasoning sits above the block in `proxy/allowed_domains.txt`; the
+    probe defers to it via `ACCEPTED_OPEN_TAGS`. Widen that set only with a
+    matching note in the allowlist.
 
 ## Temporary widening (preferred over hand-edits)
 
@@ -30,8 +40,9 @@ scripts/with-egress.sh <profile> --with pypi,npm -- \
 
 Uncomments the matching `[tag]` blocks, hot-reloads Squid, runs the command,
 restores the allowlist **verbatim**. flock-serialised with a drift sentinel.
-Default `--with` is `pypi`. Tags in PROJECT-PERSISTENT sections are accepted
-but no-ops (already open).
+Default `--with` is `pypi`. `open_section()` is idempotent, so `--with git` on
+the already-open `[git]` block adds nothing — every other gated tag is closed
+and genuinely opens for the duration of the command.
 
 ## Permanent additions
 

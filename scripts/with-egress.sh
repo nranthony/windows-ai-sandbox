@@ -34,11 +34,16 @@
 # Requires python3 on the HOST (for the OSV check and JSON emission). Failure to
 # write the audit line warns; it never fails an otherwise-successful install.
 #
-# windows-ai-sandbox note: most [pypi]/[npm]/[git]/etc. sections are in the
-# PROJECT-PERSISTENT block (uncommented by default), unlike macolima where
-# they live in PLANNING-MODE and are commented. open_section() is idempotent
-# on already-open sections — calling it with --with pypi when [pypi] is
-# already uncommented is a safe no-op.
+# windows-ai-sandbox note: the gated sections ([pypi]/[npm]/[pytorch]/[apt]/…)
+# sit in the PROJECT-PERSISTENT block and are COMMENTED by default, same stance
+# as macolima's PLANNING-MODE. An earlier version of this note said they were
+# uncommented by default; that stopped being true at fc7c0f0, which commented
+# pypi, npm, numerai and kaggle. [git] is the one gated section still open in
+# the committed baseline, and that is a recorded decision, not a leftover — the
+# reasoning is above its block in proxy/allowed_domains.txt and the audit probe
+# defers to it (ACCEPTED_OPEN_TAGS in scripts/audit/probes/proxy.py).
+# open_section() is idempotent on already-open sections — calling it with
+# --with pypi when [pypi] is already uncommented is a safe no-op.
 #
 # Examples:
 #   scripts/with-egress.sh alpha -- \

@@ -212,6 +212,45 @@ lh3.googleusercontent.com
 # under vendors we don't control). Comment a block to shrink egress for
 # autonomous-only agent runs.
 
+# ACCEPTED EXCEPTION — [git] is the one gated block that stays OPEN in the
+# committed baseline. Decided 2026-08-18; recorded here because the audit probe
+# defers to this note, not the other way round.
+#
+# The reason it is not tunable: Squid gates on `dstdomain`, and both of these are
+# github.com:443 over the same transport —
+#     git push                                   (the workflow this exists for)
+#     uv pip install git+https://github.com/x/y  (arbitrary code, unvetted)
+# There is no allowlist configuration that permits the first and denies the
+# second. The choice is binary: github.com reachable and both possible, or
+# neither. Opening it is therefore an accepted residual, not an oversight, and
+# not something a tighter host list can fix.
+#
+# What holds the install line instead, since this block does not:
+#   1. permissions.deny in sandbox_templates/claude/claude-settings.json denies
+#      every installer prefix (pip/uv/npm/pnpm/yarn/bun/poetry/cargo/go), the
+#      fetch-and-run siblings (npx, npm/pnpm exec, yarn dlx, bunx), AND
+#      git push|clone|fetch|pull, gh, glab, curl, wget — plus the interpreter and
+#      wrapper routes (bash -c, python -c, env, xargs, eval) a prefix matcher
+#      would otherwise be walked around. The audit asserts the installers and vcs
+#      categories are live per profile (settings/required_deny_categories).
+#   2. sandbox_templates/claude/hooks/deny-destructive.sh blocks the route no
+#      Bash matcher can see: editing package.json / pyproject.toml / Pipfile /
+#      requirements*.txt to ADD a dependency name, then resolving it with an
+#      allowed build command. It also blocks weakening the min-release-age gate.
+# So the agent cannot install from GitHub even with this block open. What CAN is
+# a human in an attached shell, and the `Bash(just:*)` / `Bash(make:*)` residual
+# already documented in claude-settings.json's _comment.
+#
+# SSH is not an alternative route and never was: squid.conf allows CONNECT to
+# 443 only, sandbox-internal is `internal: true`, and DNS is sinkholed. Every
+# git remote in these containers is HTTPS through the proxy.
+#
+# Of the three hosts below, only github.com is needed to clone/fetch/pull/push.
+# api.github.com is the `gh` surface (PRs, issues, and `gh auth login`).
+# codeload.github.com serves archive tarballs only — git's wire protocol never
+# touches it — so it is pure install-vector and closing it costs nothing unless
+# a workspace resolves a dependency from a GitHub tarball or an npm
+# `github:user/repo` shorthand. Check that before closing it.
 # --- Source code / git [git] ---
 # Pinned hosts — no parent wildcards like `.github.com`. If a TCP_DENIED hits
 # a sibling subdomain during dev, add the specific host.
