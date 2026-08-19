@@ -58,6 +58,7 @@ import_fn egress_hosts
 import_fn newly_opened_domains
 import_fn scan_workspace_rc
 import_fn list_denied_domains "$PROFILE_SRC"
+import_fn open_section
 
 PASS=0; FAIL=0
 ok()   { PASS=$((PASS+1)); printf "  ok   %s\n" "$1"; }
@@ -343,6 +344,125 @@ expect_opened "idempotent re-open yields nothing to probe" \
 # Direction matters: closing a section is not an opening.
 expect_opened "closing a section yields nothing (wrong direction)" \
   "$DENYFIX/after.txt" "$DENYFIX/before.txt" ""
+
+# ---------------------------------------------------------------------------
+# open_section() — what a widening window actually uncomments
+#
+# The rule under test: only a line that is a DOMAIN and nothing else may be
+# uncommented. It used to strip `# ` from every commented line inside the block,
+# so a section's prose became allowlist entries for the life of the window —
+# and because Squid splits an ACL line on whitespace, one documentation line
+# under [grants-gov] would have become eight dstdomain values. Three of the
+# assertions below are regression locks on that.
+# ---------------------------------------------------------------------------
+echo
+echo "open_section() — only domain lines get uncommented"
+
+OSFIX="$(mktemp -d "${TMPDIR:-/tmp}/osfix.XXXXXX")"
+trap 'rm -rf "$OSFIX"' EXIT
+
+# One fixture exercising every shape that appears in the real file.
+cat > "$OSFIX/src.txt" <<'EOF'
+api.anthropic.com
+
+# --- Python package ecosystem [pypi] ---
+# Prose about the block that mentions pypi.org in passing.
+# .pypi.org
+# files.pythonhosted.org
+# api.example.org      note explaining this candidate
+# github.com + objects.example.com overlap with another tag; opening
+# this tag widens egress for the duration of the run.
+.astral.sh
+
+# --- Node.js [npm] ---
+# registry.npmjs.org
+EOF
+
+live() { grep -vE '^[[:space:]]*#|^[[:space:]]*$' "$1" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'; }
+
+ALLOWLIST="$OSFIX/work.txt"
+cp "$OSFIX/src.txt" "$ALLOWLIST"
+open_section pypi
+opened="$(live "$ALLOWLIST" | sort | tr '\n' ' ' | sed 's/ $//')"
+
+want=".astral.sh .pypi.org api.anthropic.com files.pythonhosted.org"
+if [[ "$opened" == "$want" ]]; then
+  ok "domain lines open; a bare and a dotted host both qualify"
+else
+  bad "domain lines open; a bare and a dotted host both qualify" "$want" "$opened"
+fi
+
+if ! live "$ALLOWLIST" | grep -q "Prose about the block"; then
+  ok "prose inside the block stays commented  <-- REGRESSION LOCK"
+else
+  bad "prose inside the block stays commented" "no prose live" "$(live "$ALLOWLIST" | grep Prose)"
+fi
+
+# The sharp case: a domain followed by an aligned note. Squid would have taken
+# `note`, `explaining`, `this` and `candidate` as four more dstdomain values.
+if ! live "$ALLOWLIST" | grep -q "api.example.org"; then
+  ok "a domain with a trailing inline comment stays closed  <-- REGRESSION LOCK"
+else
+  bad "a domain with a trailing inline comment stays closed" \
+      "api.example.org not live" "$(live "$ALLOWLIST" | grep example.org)"
+fi
+
+# Prose that BEGINS with a hostname is still prose — this line exists verbatim
+# under [quarto-install] in the real allowlist.
+if ! live "$ALLOWLIST" | grep -q "overlap with another tag"; then
+  ok "prose beginning with a hostname is not mistaken for an entry  <-- REGRESSION LOCK"
+else
+  bad "prose beginning with a hostname is not mistaken for an entry" \
+      "line not live" "$(live "$ALLOWLIST" | grep overlap)"
+fi
+
+if ! live "$ALLOWLIST" | grep -q "registry.npmjs.org"; then
+  ok "a different section is untouched"
+else
+  bad "a different section is untouched" "npm still closed" "registry.npmjs.org went live"
+fi
+
+# Idempotence: the whole point of `--with git` on an already-open block.
+cp "$ALLOWLIST" "$OSFIX/once.txt"
+open_section pypi
+if diff -q "$OSFIX/once.txt" "$ALLOWLIST" >/dev/null; then
+  ok "re-opening an already-open section changes nothing"
+else
+  bad "re-opening an already-open section changes nothing" "no diff" "$(diff "$OSFIX/once.txt" "$ALLOWLIST" | head -3)"
+fi
+
+# Block-level disable: header and prose are `# # `, domains are `# `. Opening
+# such a section must yield the domains and leave the doubly-commented prose.
+cat > "$ALLOWLIST" <<'EOF'
+# # --- Google Docs [google-workspace] ---
+# # Read/draft access during a manual session.
+# docs.google.com
+EOF
+open_section google-workspace
+if [[ "$(live "$ALLOWLIST")" == "docs.google.com" ]]; then
+  ok "a block-level-disabled section opens its domains, not its prose"
+else
+  bad "a block-level-disabled section opens its domains, not its prose" \
+      "docs.google.com" "$(live "$ALLOWLIST" | tr '\n' ' ')"
+fi
+
+# Whole-file lock against the REAL allowlist: opening any tag must never put a
+# line containing whitespace into the live set. This is the property Squid cares
+# about and the one the old rule broke for all 25 tagged sections.
+leaked=""
+for tag in $(grep -oE -e '--- .* \[[a-z-]+\] ---' "$ROOT/proxy/allowed_domains.txt" \
+             | grep -oE -e '\[[a-z-]+\]' | tr -d '[]' | sort -u); do
+  cp "$ROOT/proxy/allowed_domains.txt" "$ALLOWLIST"
+  open_section "$tag"
+  if live "$ALLOWLIST" | grep -q '[[:space:]]'; then
+    leaked="$leaked $tag"
+  fi
+done
+if [[ -z "$leaked" ]]; then
+  ok "no tag in the real allowlist can open a line containing whitespace  <-- REGRESSION LOCK"
+else
+  bad "no tag in the real allowlist can open a line containing whitespace" "none" "$leaked"
+fi
 
 # ---------------------------------------------------------------------------
 # scan_workspace_rc() — does the tree we are about to install into weaken the gate?

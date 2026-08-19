@@ -152,8 +152,38 @@ reload_proxy() {
 }
 
 # Section bounds: header line until the next section header or a blank line.
-# Header gets normalized from `# # ---` to `# ---`; domain lines starting
-# with `# ` get one `# ` stripped. Idempotent on already-open sections.
+# Header gets normalized from `# # ---` to `# ---`; commented DOMAIN lines get
+# their comment marker stripped. Idempotent on already-open sections.
+#
+# The domain pattern is deliberately strict and is the SAME shape as
+# list_denied_domains() in scripts/profile.sh — anchored both ends, one optional
+# leading dot, an alphabetic TLD of two or more characters, nothing else on the
+# line. Two parsers reading one file must agree on what a domain line IS, and
+# profile.sh was already strict; this one was not, which is the bug below.
+#
+# It used to strip `# ` from EVERY commented line inside the block, which meant
+# a section's own prose became allowlist entries for the life of the window.
+# Measured 2026-08-18 against the real file: all 25 tagged sections leaked prose
+# this way. `[grants-gov]` was the sharp end — a documentation line reading
+# `# api.grants.gov   production REST (search2 / fetchOpportunity) …` opened as
+# a live line, and Squid splits an ACL line on whitespace, so `production`,
+# `REST` and `(search2` each became a dstdomain entry. The file header has
+# warned since it was written that inline comments break Squid; nothing enforced
+# it, because the only thing that ever uncommented a line did not check.
+#
+# The failure was quiet in the direction that matters. The junk entries match no
+# host, the trap restores the file verbatim afterwards, and the domains you
+# asked for do open — so a window looks like it worked. What it costs is the
+# config load: if Squid rejects the widened file, `squid -k reconfigure` keeps
+# the OLD config and returns success, and the run then fails at
+# require_window_enforced naming a domain rather than the line that broke it.
+#
+# Prose is now left alone. Lines that carry a domain PLUS trailing text — the
+# `# host.example   note` form under [antigravity] and [grants-gov] — are also
+# left alone, which is the intended reading: both blocks document them as manual
+# candidates ([grants-gov]'s three are already live below their own comments),
+# not as part of the section's open set. Writing one as a real entry means
+# writing it on its own line, exactly as the file header has always required.
 open_section() {
   local sec="$1"
   awk -v sec="$sec" '
@@ -172,7 +202,12 @@ open_section() {
       }
     }
     /^[[:space:]]*$/ { if (inside) inside = 0; print; next }
-    inside && /^# / { sub(/^# /, ""); print; next }
+    inside && /^#[[:space:]]+\.?[A-Za-z0-9][A-Za-z0-9.-]*\.[A-Za-z][A-Za-z]+[[:space:]]*$/ {
+      sub(/^#[[:space:]]+/, "")
+      sub(/[[:space:]]+$/, "")
+      print
+      next
+    }
     { print }
   ' "$ALLOWLIST" > "$ALLOWLIST.tmp" && cat "$ALLOWLIST.tmp" > "$ALLOWLIST" && rm -f "$ALLOWLIST.tmp"
 }
