@@ -158,14 +158,20 @@ case "$tool_name" in
         ;;
       # ---------- install commands in instruction files ----------
       # These files are executable surfaces: an install command written here is
-      # run by the next agent and pasted by the next human. WARN, not block —
+      # run by the next agent and pasted by the next human. The fetch-and-run
+      # forms (npx, npm/pnpm exec, yarn dlx, bunx, bun x) and `pip download`
+      # count as install commands here for the same reason they are denied in
+      # permissions.deny: each resolves a package from a registry and runs it.
+      # `pnpm dlx` was covered from the start and its five siblings were not,
+      # so `bunx some-cli` in a README went unlogged while the identical
+      # `pnpm dlx some-cli` was flagged. WARN, not block —
       # documentation about dependency rules legitimately quotes install
       # commands (this repo's own agent-notice.md does), so blocking would fire
       # on correct writing. Reviewed from the warn log before any promotion to
       # block. Bare/lockfile forms (`npm ci`, `uv sync --frozen`) are ignored:
       # the trailing pattern requires a non-flag argument, i.e. a package name.
       AGENTS.md|CLAUDE.md|GEMINI.md|SKILL.md|README.md|CONTRIBUTING.md|agent-notice.md|.cursorrules|*.mdc)
-        if printf '%s' "$payload" | grep -Eq '(npm[[:space:]]+(i|install|add)|pnpm[[:space:]]+(add|install|dlx)|yarn[[:space:]]+add|bun[[:space:]]+add|pip3?[[:space:]]+install|uv[[:space:]]+add|uv[[:space:]]+pip[[:space:]]+install|pipx[[:space:]]+install|poetry[[:space:]]+add|cargo[[:space:]]+(install|add)|go[[:space:]]+(install|get))[[:space:]]+[^-[:space:]]' 2>/dev/null; then
+        if printf '%s' "$payload" | grep -Eq '(npm[[:space:]]+(i|install|add|exec)|\bnpx\b|pnpm[[:space:]]+(add|install|dlx|exec)|yarn[[:space:]]+(add|dlx)|bun[[:space:]]+(add|x)|\bbunx\b|pip3?[[:space:]]+(install|download)|uv[[:space:]]+add|uv[[:space:]]+pip[[:space:]]+install|pipx[[:space:]]+install|poetry[[:space:]]+add|cargo[[:space:]]+(install|add)|go[[:space:]]+(install|get))[[:space:]]+[^-[:space:]]' 2>/dev/null; then
           warn_log "docs-install-cmd" "$envelope"
         fi
         ;;

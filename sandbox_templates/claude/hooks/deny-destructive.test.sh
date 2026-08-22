@@ -227,6 +227,64 @@ else
   FAIL=$((FAIL+1)); printf "  FAIL lockfile form wrongly warned: $(cat "$DENY_DESTRUCTIVE_LOG")\n"
 fi
 
+# --- fetch-and-run family (added 2026-08-20) ---
+# `pnpm dlx` was in the pattern from the start; its five siblings were not, so
+# `bunx some-cli` in a README went unlogged while the identical `pnpm dlx
+# some-cli` was flagged. Each of these resolves a package from a registry and
+# executes it — the same trust decision as an install, minus the manifest entry
+# that would leave a trace, which is exactly why they are denied as Bash
+# commands too. The three LOCKs below are the forms the old pattern missed.
+warns() {
+  : > "$DENY_DESTRUCTIVE_LOG"
+  assert "$1" "$(ed "$FIX/README.md" "$2")" pass
+  if jq -e 'select(.rule=="docs-install-cmd")' < "$DENY_DESTRUCTIVE_LOG" >/dev/null 2>&1; then
+    PASS=$((PASS+1)); printf "  ok   %s\n" "$3"
+  else
+    FAIL=$((FAIL+1)); printf "  FAIL %s not logged\n" "$3"
+  fi
+}
+quiet() {
+  : > "$DENY_DESTRUCTIVE_LOG"
+  assert "$1" "$(ed "$FIX/README.md" "$2")" pass
+  if [ ! -s "$DENY_DESTRUCTIVE_LOG" ]; then
+    PASS=$((PASS+1)); printf "  ok   %s\n" "$3"
+  else
+    FAIL=$((FAIL+1)); printf "  FAIL %s wrongly warned: $(cat "$DENY_DESTRUCTIVE_LOG")\n" "$3"
+  fi
+}
+
+warns "bunx in README is an install cmd" \
+  '"Bootstrap with bunx create-thing to scaffold."' \
+  "bunx warns  <-- LOCK"
+warns "npx in README is an install cmd" \
+  '"Run npx create-react-app myapp first."' \
+  "npx warns  <-- LOCK"
+warns "pip download in README is an install cmd" \
+  '"Fetch the wheel with pip download requests first."' \
+  "pip download warns  <-- LOCK"
+warns "npm exec in README is an install cmd" \
+  '"Then npm exec some-cli --check the tree."' \
+  "npm exec warns"
+warns "pnpm exec in README is an install cmd" \
+  '"Use pnpm exec some-cli to verify."' \
+  "pnpm exec warns"
+warns "yarn dlx in README is an install cmd" \
+  '"Or yarn dlx some-cli if you prefer yarn."' \
+  "yarn dlx warns"
+warns "bun x in README is an install cmd" \
+  '"The spaced form bun x some-cli behaves the same."' \
+  "bun x (spaced form) warns"
+
+# Negatives: the trailing pattern still requires a package NAME, so a bare or
+# flag-only invocation is not an install command. `bun run` / `npm run` execute
+# a script already in the manifest — nothing is resolved from a registry.
+quiet "bun run is not a fetch-and-run" \
+  '"Build it with bun run build."' \
+  "bun run does not warn"
+quiet "npm exec with only a flag does not warn" \
+  '"Check the version with npm exec --help."' \
+  "flag-only npm exec does not warn"
+
 # ============================================================================
 # quarantine-tamper / quarantine-weaken / quarantine-touch
 # ============================================================================

@@ -13,10 +13,14 @@ action or hunt for a workaround — treat it as a human step.
   even where a command isn't denied. To read a web page, use `webfetch` (see
   below) — don't reach for `curl`.
 - **No dependency installs.** `pip install`, `uv add`/`uv pip install`,
-  `npm install`/`npx`, `cargo/go install`, `pipx` are denied. If a package is
-  missing, **stop and ask the human** to install it in the interactive shell
-  (or via `scripts/with-egress.sh`). See "Dependencies" below for what to say
-  when you do.
+  `npm install`/`npx`, `cargo/go install`, `pipx` are denied — and so are the
+  fetch-and-run forms that don't feel like installs: `npm exec`, `pnpm exec`,
+  `pnpm dlx`, `yarn dlx`, `bunx`, `bun x`, and `pip download`. Each of those
+  resolves a package from a registry and runs it, which is the same trust
+  decision as an install without the manifest entry that would leave a trace.
+  If a package is missing, **stop and ask the human** — installing it is a
+  host-side step you have no route to, so there is no command to find and no
+  flag to pass. See "Dependencies" below for what to say when you do.
 - **No remote git.** `git push/pull/fetch/clone`, `git config`, `gh`, `glab`
   are denied. Commit locally; the human pushes. Git identity is fixed to a
   noreply address — don't try to set `user.email`.

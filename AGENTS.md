@@ -71,12 +71,12 @@ Any change to them requires:
 3. Affected docs updated (ARCHITECTURE.md, `sandbox-hardening-package.md`).
 
 Hook edits additionally require
-`bash sandbox_templates/claude/hooks/deny-destructive.test.sh` (95/95).
+`bash sandbox_templates/claude/hooks/deny-destructive.test.sh` (113/113).
 Edits to `scripts/depaudit.py` require `bash scripts/depaudit.test.sh` (38/38
 offline; `--online` adds the OSV corpus). Two of its assertions are regression
 locks for checks that shipped **inverted** — read the header before changing them.
 Edits to `scripts/with-egress.sh` require `bash scripts/with-egress.test.sh`
-(58/58, offline — no docker or network). It covers five parsers — two here and
+(66/66, offline — no docker or network). It covers five parsers — two here and
 `list_denied_domains` in `profile.sh`, which reads the same file — locks a
 bracket bug that made a real install log zero egress, and asserts the
 container-side allowlist path agrees across all five places it appears. Edits to
