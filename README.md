@@ -35,38 +35,33 @@ enabled with lingering, so the daemon comes back by itself.
 **Before shutting down** — there is no down-all recipe, so stop each profile:
 
 ```bash
-just list                   # which profiles exist, and which are up
+just list                   # which profiles exist, which are up
 just down <profile>         # once per profile that is up
 ```
 
 **1 · Host is back**
 
 ```bash
-docker info >/dev/null && echo "rootless daemon OK"
+docker info >/dev/null && echo "rootless daemon OK"   # is the daemon answering?
 ```
 
 **2 · Is the repo current?** Offline — no docker, no profiles. Run it *before*
 bringing anything up, so a failure costs nothing.
 
 ```bash
-just test-offline          # 6 offline suites, then check-upstreams → tools-check
-just check-permissions      # informational: manifest proposal vs settings template
+just test-offline           # seven offline suites, then upstream drift
+just check-permissions      # manifest proposal vs settings template
 ```
 
-`tools-check` compares `sandbox_templates/VENDORED.lock` against the channel
-manifest **and** content-diffs each artifact against the `source_commit` it claims.
-It cannot see a member repo that *released without publishing* — that detector
-belongs to the channel. So also, at the channel root (the path in `.depot-dir.local`):
+`test-offline` ends in `tools-check`, which compares `sandbox_templates/VENDORED.lock`
+against the channel manifest **and** content-diffs each artifact against the
+`source_commit` it claims. Known gap: it cannot see a member repo that *released
+without publishing* — that detector lives at the channel root and is not part of this
+loop. Only if drift is reported:
 
 ```bash
-just verify                 # reports any member whose HEAD is ahead of what it published
-```
-
-Only if drift is reported:
-
-```bash
-just vendor-tools           # re-consume the channel (every hash verified before anything is copied)
-just build                  # ONLY if the wheel moved — it bakes into the image, and `up` will not rebuild for it
+just vendor-tools           # re-consume channel, every hash first
+just build                  # ONLY if the wheel moved — it bakes in
 ```
 
 Skills and plugin trees need no rebuild: they converge from `sandbox_templates/`
@@ -75,34 +70,47 @@ on the next `up`.
 **3 · Up**
 
 ```bash
-just up <profile>           # once per profile you want back
+just up <profile>           # start stack, seed state, converge skills
 ```
 
-**4 · Settings — the one thing `up` will not do**
-
-```bash
-just reset-settings <profile>      # per profile
-```
+**4 · Settings** — optional; only when the template has moved
 
 Settings seeding is **create-only**: `up` leaves an existing `settings.json` alone
-however far the template has moved, and `verify` does not check it. This overwrites
-from the template and backs up the old file. Restart `claude` inside the container
-afterwards — a running session holds the old rules in memory.
+however far the template has moved, and `verify` does not check it. So diff first, and
+reset only if the difference matters to you:
+
+```bash
+diff sandbox_templates/claude/claude-settings.json \
+     ~/.ai-sandbox/profiles/<profile>/claude-home/settings.json   # has it drifted?
+just reset-settings <profile>   # overwrite from template, backing up old
+```
+
+Reset **discards whatever that profile accumulated locally** and replaces it wholesale:
+the per-profile choices Claude Code writes back into the file during a session (model,
+effort level) and any permission you widened in-session with "always allow". Reverting
+that last one is usually the point. The `.bak.<stamp>` written beside it is the only
+undo. Restart `claude` inside the container afterwards — a running session holds the old
+rules in memory.
 
 **5 · Verify**
 
 ```bash
-just verify <profile>      # per profile — tier 1
-just health                # cross-profile: agent/proxy/DB all up together
-just audit <profile>       # tier 2, after anything non-trivial (an image rebuild counts)
+just verify <profile>       # tier-1 hardening tripwire, per profile
+just health                 # agent/proxy/DB up together, every profile
+just audit <profile>        # tier-2, 65 probes — after a rebuild
 ```
 
 **6 · Hygiene** — optional, monthly is about right
 
 ```bash
-just clean <profile> --deep    # also drops MCP debug logs + settings.json.bak.*
-just docker-gc --dry-run       # then re-run with --yes if the report looks right
+just clean <profile> --deep # prune backups, paste-cache, MCP logs
+just docker-gc --dry-run    # report stale containers + build cache
 ```
+
+`docker-gc` is daemon-wide, not per-profile: re-run it with `--yes` and it removes
+stopped containers older than 30d plus excess BuildKit cache. It never touches
+`ai-sandbox-*` containers, and only *reports* images and volumes — the two places
+durable data can be.
 
 Don't run `clean --deep` between a `reset-settings` and confirming the result — the
 backup is the only undo.
@@ -193,7 +201,7 @@ Profile is the first argument to every per-profile recipe. `build`, `list`,
 | `health` | cross-profile: flags a profile whose agent/proxy/DB aren't all up together |
 | `deps` [`--osv`] | dependency posture for the profile's workspace (host-side, read-only) |
 | **Repo-level** (no profile arg) | |
-| `test-offline` | six offline suites, then `check-upstreams` |
+| `test-offline` | seven offline suites, then `check-upstreams` |
 | `vendor-tools` / `tools-check` | consume the depot channel / check the lock against it |
 | `check-permissions` | manifest permission proposal vs the settings template (read-only) |
 | **State** | |
@@ -310,7 +318,7 @@ Two tiers, plus the offline suites that gate changes to the security-sensitive f
 ```bash
 just verify <profile>     # tier 1 — fast in-container tripwire, ~40 checks
 just audit <profile>      # tier 2 — 65 structured probes, JSON written to the host
-just test-offline         # the six regression suites + upstream boundary monitors
+just test-offline         # the seven regression suites + upstream boundary monitors
 ```
 
 Tier 1 covers: direct internet blocked, `api.anthropic.com` reachable via the proxy,
