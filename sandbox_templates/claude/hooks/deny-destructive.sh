@@ -1,36 +1,96 @@
 #!/bin/sh
-# deny-destructive: PreToolUse hook. Inspects the full tool envelope on stdin
-# and either passes through ('{}') or blocks via the Claude Code hook output
-# contract (https://code.claude.com/docs/en/hooks.md):
+# deny-destructive: PreToolUse hook, shared by TWO agents.
 #
-#   {"hookSpecificOutput":{
-#      "hookEventName":"PreToolUse",
-#      "permissionDecision":"deny",
-#      "permissionDecisionReason":"deny-destructive: <rule>: <msg>"}}
+# Inspects the full tool envelope on stdin and either passes through or blocks.
+# One rule table, two dialects — chosen by `--dialect=`, defaulting to claude:
 #
-# Closes the deny-list bypass class where the prefix matcher in
-# permissions.deny cannot see destructive flags (find -delete, dd of=, etc.)
-# or path targets (Edit to /usr/local/lib/claude-hooks/...). See
-# docs/deny-destructive-hook-plan.md.
+#   claude       (https://code.claude.com/docs/en/hooks.md)
+#     in   {"tool_name":"Bash","tool_input":{"command":"…"}}
+#     pass {}
+#     deny {"hookSpecificOutput":{"hookEventName":"PreToolUse",
+#            "permissionDecision":"deny","permissionDecisionReason":"…"}}
 #
-# Fail-open on script error: a broken hook must not brick the agent. The
-# verify-sandbox.sh tripwire and the audit settings probe catch a
-# permanently-broken hook within one cycle.
+#   antigravity  (`agy`; protojson, camelCase — see work/0010)
+#     in   {"toolCall":{"name":"run_command","args":{"CommandLine":"…"}},…}
+#     pass {"decision":"allow"}
+#     deny {"decision":"deny","reason":"…"}
+#
+# The antigravity envelope is TRANSLATED into the claude shape immediately
+# after it is read, so everything below the adapter is one shared rule table.
+# Adding a rule protects both agents; that is the entire point of the split.
+#
+# Closes the deny-list bypass class where the prefix matcher in each agent's
+# static permission list cannot see destructive flags (find -delete, dd of=,
+# etc.) or path targets. See docs/deny-destructive-hook-plan.md.
+#
+# ---------------------------------------------------------------------------
+# FAILURE POSTURE DIFFERS BY DIALECT, DELIBERATELY. Do not unify it.
+#
+#   claude       fail-OPEN. A broken hook must not brick the agent, and it is
+#                safe to fail open here because permissions.deny in
+#                claude-settings.json is the primary layer and this hook is
+#                defence-in-depth on top of it.
+#
+#   antigravity  fail-CLOSED. Measured, not assumed (work/0010 Phase 0): agy
+#                already blocks the tool call when a hook exits non-zero,
+#                times out, or prints unparseable stdout. Emitting `{}` is a
+#                DENY there, not a pass. So the harness is fail-closed whatever
+#                this script does; the trap only replaces a raw protojson
+#                error with a reason a human can read.
+#
+# The verify-sandbox.sh tripwire and the audit probes catch a permanently
+# broken hook within one cycle in both directions.
+# ---------------------------------------------------------------------------
 #
 # windows-ai-sandbox note: container runs as root (UID 0) under rootless
 # Docker userns=host. Protected paths are /root/... here, not /home/agent/...
 # The kernel write-protect that macolima relies on (root-owned 0755 file,
 # agent UID 1000) does NOT apply here — the agent IS root. The Edit and Bash
 # tamper rules below are the *only* enforcement layer for the hook script
-# itself; this is defence-in-depth on top of permissions.deny, not a hard
+# itself; this is defence-in-depth on top of the static deny lists, not a hard
 # kernel boundary. Image rebuild restores the canonical hook on every up.
 
 set -u
-trap 'printf "{}\n"; exit 0' EXIT INT HUP TERM
+
+# ---------- dialect ----------
+# Explicit flag, not sniffing: hooks.json passes --dialect=antigravity, and an
+# envelope that fails to match its declared dialect is a bug we want to see as
+# a denial rather than to paper over by guessing.
+DIALECT=claude
+for _arg in "$@"; do
+  case "$_arg" in
+    --dialect=*) DIALECT=${_arg#--dialect=} ;;
+  esac
+done
+case "$DIALECT" in
+  claude|antigravity) ;;
+  *) DIALECT=claude ;;
+esac
+
+emit_trap() {
+  if [ "$DIALECT" = antigravity ]; then
+    printf '{"decision":"deny","reason":"deny-destructive: internal error (fail-closed)"}\n'
+  else
+    printf '{}\n'
+  fi
+  exit 0
+}
+trap emit_trap EXIT INT HUP TERM
 
 LOG="${DENY_DESTRUCTIVE_LOG:-/root/.cache/deny-destructive.log}"
 
-emit_pass() { printf '{}\n'; trap - EXIT; exit 0; }
+emit_pass() {
+  if [ "$DIALECT" = antigravity ]; then
+    # NOT `{}` — measured: agy reads an absent `decision` as DENY, so the
+    # claude pass-through would block every tool call. `allow` here does not
+    # bypass agy's own permissions.deny either (also measured); it means only
+    # that this hook has no objection.
+    printf '{"decision":"allow"}\n'
+  else
+    printf '{}\n'
+  fi
+  trap - EXIT; exit 0
+}
 
 emit_block() {
   rule=$1; msg=$2
@@ -38,8 +98,12 @@ emit_block() {
   # jq builds the envelope so reason strings with quotes/newlines stay safe.
   # `-c` keeps output compact (single line) — easier for downstream greps and
   # marginally lighter for the harness to parse.
-  printf '%s' "$reason" \
-    | jq -Rsc '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"deny",permissionDecisionReason:.}}'
+  if [ "$DIALECT" = antigravity ]; then
+    printf '%s' "$reason" | jq -Rsc '{decision:"deny",reason:.}'
+  else
+    printf '%s' "$reason" \
+      | jq -Rsc '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"deny",permissionDecisionReason:.}}'
+  fi
   trap - EXIT
   exit 0
 }
@@ -82,10 +146,68 @@ warn_log() {
 
 # ---------- read envelope ----------
 envelope=$(cat)
-[ -z "$envelope" ] && emit_pass
+if [ -z "$envelope" ]; then
+  # Empty stdin is a harness bug, not a tool call. Claude passes (fail-open,
+  # per the posture note above); antigravity refuses, because an empty read
+  # here and a legitimate "no opinion" are indistinguishable and only one of
+  # them is safe to guess.
+  if [ "$DIALECT" = antigravity ]; then
+    emit_block "empty-envelope" "hook received no input; refusing the tool call"
+  fi
+  emit_pass
+fi
+
+# ---------- input adapter: antigravity -> claude shape ----------
+# Everything below this point speaks one dialect. Tool-name and argument-key
+# mapping was read off live payloads (work/0010 Phase 0), not from docs.
+#
+# An UNMAPPED tool passes. That is a reversal of the pre-measurement plan,
+# which said an unknown tool should deny: the matcher in hooks.json is "*", and
+# agy's tool surface is large and moves (browser_*, mcp(...), search_web,
+# subagent management). Denying everything unmapped does not harden the agent,
+# it stops it booting — and the static permissions.deny list in
+# antigravity-settings.json, which no workspace file can reach, is the layer
+# that has to be complete. `tools-check` watches for new tool names that carry
+# a command or a path so this mapping cannot silently fall behind.
+if [ "$DIALECT" = antigravity ]; then
+  # Fail CLOSED on anything we cannot parse. `|| emit_pass` here — the claude
+  # idiom used everywhere below — would be a hole: an envelope shaped so that
+  # jq errors would sail through as an allow. agy blocks the call anyway when a
+  # hook misbehaves, so this only replaces a raw protojson error with a reason.
+  if ! printf '%s' "$envelope" | jq -e . >/dev/null 2>&1; then
+    emit_block "malformed-envelope" "hook received input that is not valid JSON; refusing the tool call"
+  fi
+  envelope=$(printf '%s' "$envelope" | jq -c '
+    (.toolCall.name // "") as $n | (.toolCall.args // {}) as $a |
+    if   $n == "run_command"          then {tool_name:"Bash",  tool_input:{command:    ($a.CommandLine // "")}}
+    elif $n == "write_to_file"        then {tool_name:"Write", tool_input:{file_path:  ($a.TargetFile  // ""), content:    ($a.CodeContent        // "")}}
+    elif $n == "replace_file_content" then {tool_name:"Edit",  tool_input:{file_path:  ($a.TargetFile  // ""), new_string: ($a.ReplacementContent // "")}}
+    elif $n == "view_file"            then {tool_name:"Read",  tool_input:{file_path:  ($a.AbsolutePath // "")}}
+    elif $n == "grep_search"          then {tool_name:"Read",  tool_input:{file_path:  ($a.SearchPath   // "")}}
+    else {} end' 2>/dev/null) \
+    || emit_block "adapter-error" "hook could not translate the antigravity envelope; refusing the tool call"
+fi
 
 tool_name=$(printf '%s' "$envelope" | jq -r '.tool_name // empty' 2>/dev/null) || emit_pass
 [ -z "$tool_name" ] && emit_pass
+
+# ---------- Read ----------
+# Claude reaches this branch only if someone registers the hook on Read; its
+# credential denials live in permissions.deny (Read(**/.env) and friends).
+# antigravity has no equivalent path-scoped static rule, so for `agy` this
+# branch IS the read control — and it is the same list either way.
+if [ "$tool_name" = "Read" ]; then
+  rfp=$(printf '%s' "$envelope" | jq -r '.tool_input.file_path // empty' 2>/dev/null)
+  [ -z "$rfp" ] && emit_pass
+  rrp=$(realpath -m "$rfp" 2>/dev/null) || rrp="$rfp"
+  case "$rrp" in
+    */.env|*/.env.*|*.pem|*.key|*/id_rsa*|*/id_ed25519*|*/.credentials*)
+      emit_block "cred-read" "read of a secret file ($(basename "$rrp")) is denied; ask the user for what you need from it" ;;
+    /root/.gemini/*|/root/.claude/.credentials*|/root/.claude.json|/root/.config/gh/*|/root/.config/glab-cli/*|/root/.aws/*|/root/.ssh/*)
+      emit_block "cred-read" "read of the agent's own credential store ($rrp) is denied; ask the user to run this" ;;
+  esac
+  emit_pass
+fi
 
 # ---------- Edit / Write / MultiEdit ----------
 case "$tool_name" in
@@ -95,12 +217,32 @@ case "$tool_name" in
     # realpath -m: canonicalise without requiring existence.
     rp=$(realpath -m "$fp" 2>/dev/null) || rp="$fp"
     case "$rp" in
-      /usr/local/lib/claude-hooks/*)
+      /usr/local/lib/claude-hooks/*|/usr/local/lib/sandbox-hooks/*)
         emit_block "hook-tamper" "edit to in-image hook script is denied; ask the user to rebuild" ;;
       /root/.claude/settings.json)
         emit_block "hook-tamper" "edit to live settings.json is denied; ask the user to run this" ;;
       /etc/claude/*)
         emit_block "hook-tamper" "edit under /etc/claude/ is denied; ask the user to run this" ;;
+      /root/.gemini/config/hooks.json|/root/.gemini/antigravity-cli/settings.json)
+        # The two files that ARE the antigravity policy: the hook registration
+        # and the static permissions.allow/deny/ask list.
+        emit_block "hook-tamper" "edit to the live antigravity policy ($rp) is denied; ask the user to run 'profile.sh <p> reset-antigravity'" ;;
+      */.agents/hooks.json|*/.agent/hooks.json|*/_agents/hooks.json|*/_agent/hooks.json)
+        # MEASURED BYPASS, not a hypothetical (work/0010 Phase 0, test G).
+        # agy discovers workspace customizations under these four directory
+        # names and merges hooks BY NAME, with the workspace copy outranking
+        # the global one. A file containing
+        #     {"sandbox-guardrails": {"enabled": false}}
+        # in any attached workspace disables the global guardrail outright —
+        # confirmed: `loaded 1 named hooks from 2 hooks.json file(s)` and the
+        # denied command then ran. The workspace is the agent's own writable
+        # bind mount, so this needs no privilege at all.
+        #
+        # Blocking the write is the control here. The static deny list in
+        # antigravity-settings.json is the backstop that survives it, because
+        # no workspace file can reach settings.json — which is exactly why the
+        # hard denials live there and not only here.
+        emit_block "agy-workspace-hook-tamper" "writing a workspace hooks.json is denied: agy merges these OVER the sandbox guardrail by name, so this file can switch it off. If a project genuinely needs its own hook, that is the user's call to make." ;;
       */.git/hooks/*)
         # git runs these on commit/merge/checkout. With Bash(git commit *) on an
         # allow list, writing one here turns the next commit into unprompted
@@ -283,8 +425,19 @@ if match '\bmkfs(\.[a-z0-9]+)?\b'; then
 fi
 
 # 9. hook-tamper (Bash side) — defence in depth on the kernel write-protect.
-if match '(>|>>|\btee\b|\bchmod\b|\bchown\b|\bmv\b|\bcp\b|\brm\b|\bln\b)[^|;&]*(/usr/local/lib/claude-hooks/|/root/\.claude/settings\.json|/etc/claude/)'; then
+if match '(>|>>|\btee\b|\bsed\b|\bchmod\b|\bchown\b|\bmv\b|\bcp\b|\brm\b|\bln\b)[^|;&]*(/usr/local/lib/(claude|sandbox)-hooks/|/root/\.claude/settings\.json|/etc/claude/|/root/\.gemini/config/hooks\.json|/root/\.gemini/antigravity-cli/settings\.json)'; then
   emit_block "hook-tamper" "write/modify of hook or settings file is denied; ask the user to rebuild"
+fi
+
+# 9c. agy-workspace-hook-tamper (Bash side) — the shell route into the measured
+#     workspace override. The Edit/Write case above only sees the write tools;
+#     a redirect, `tee`, `sed -i`, `cp` or `mv` reaches the same file. Kept
+#     unanchored so a relative `.agents/hooks.json` counts, and `mkdir -p` is
+#     included because the directory usually does not exist yet — creating it
+#     is the tell.
+if match '(>|>>|\btee\b|\bsed\b|\bmv\b|\bcp\b|\bln\b|\bmkdir\b|\binstall\b)[^|;&]*(\.agents?|_agents?)/hooks\.json' \
+   || match '\bmkdir\b[^|;&]*[[:space:]](\.agents?|_agents?)([[:space:]]|/|$)'; then
+  emit_block "agy-workspace-hook-tamper" "creating a workspace hooks.json is denied: agy merges these OVER the sandbox guardrail by name, so this file can switch it off; ask the user to run this"
 fi
 
 # 9b. git-hook-tamper (Bash side) — mirror of the Edit/Write case above, for the

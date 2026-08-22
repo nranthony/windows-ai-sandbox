@@ -348,5 +348,113 @@ else
   FAIL=$((FAIL+1)); printf "  FAIL unrelated key wrongly warned: $(cat "$DENY_DESTRUCTIVE_LOG")\n"
 fi
 
+# ============================================================================
+# antigravity dialect (work/0010)
+# ============================================================================
+# Same engine, same rule table, second envelope shape and second output
+# dialect. The mapping below was read off LIVE agy payloads during Phase 0, not
+# from documentation — tool names and the CamelCase arg keys both.
+#
+# Three assertions here are regression locks, and all three are things a
+# reasonable person would "simplify" into a bug:
+#
+#   1. pass-through is {"decision":"allow"}, never `{}`. agy reads a missing
+#      `decision` as DENY (measured), so reusing claude's pass-through would
+#      block every single tool call — the guardrail would look installed and
+#      the agent would be inert.
+#   2. a malformed envelope DENIES under antigravity while the identical
+#      breakage PASSES under claude. The asymmetry is the design (claude has
+#      permissions.deny underneath it; for reads, agy has only this hook).
+#   3. a workspace .agents/hooks.json write is denied. agy merges workspace
+#      hooks OVER the global one BY NAME, so that file can contain
+#      {"sandbox-guardrails":{"enabled":false}} and switch the guardrail off.
+#      Confirmed live in Phase 0 test G.
+
+# agy_assert <name> <envelope> <expected:pass|deny> [expected_rule_substring]
+agy_assert() {
+  name=$1; envelope=$2; want=$3; rule=${4:-}
+  out=$(printf '%s' "$envelope" | "$HOOK" --dialect=antigravity 2>/dev/null)
+  decision=$(printf '%s' "$out" | jq -r '.decision // "MISSING"' 2>/dev/null)
+  reason=$(printf '%s' "$out" | jq -r '.reason // ""' 2>/dev/null)
+  case "$want" in
+    pass)
+      # "allow", not "pass": an absent decision is a DENY to agy, so the test
+      # must fail if the engine ever emits a bare {}.
+      if [ "$decision" = "allow" ]; then
+        PASS=$((PASS+1)); printf "  ok   agy: %s\n" "$name"
+      else
+        FAIL=$((FAIL+1)); printf "  FAIL agy: %s  (want allow, got decision=%s reason=%s)\n" "$name" "$decision" "$reason"
+      fi ;;
+    deny)
+      if [ "$decision" = "deny" ] && { [ -z "$rule" ] || printf '%s' "$reason" | grep -q "$rule"; }; then
+        PASS=$((PASS+1)); printf "  ok   agy: %s  [%s]\n" "$name" "$reason"
+      else
+        FAIL=$((FAIL+1)); printf "  FAIL agy: %s  (want deny%s, got decision=%s reason=%s)\n" \
+          "$name" "${rule:+ rule~$rule}" "$decision" "$reason"
+      fi ;;
+  esac
+}
+
+printf "\n-- antigravity: envelope translation --\n"
+agy_assert "run_command maps to Bash" \
+  '{"toolCall":{"name":"run_command","args":{"CommandLine":"find /tmp -delete"}},"stepIdx":3}' deny "find-delete"
+agy_assert "write_to_file maps to Write" \
+  '{"toolCall":{"name":"write_to_file","args":{"TargetFile":"/root/.claude/settings.json","CodeContent":"{}"}}}' deny "hook-tamper"
+agy_assert "replace_file_content maps to Edit" \
+  '{"toolCall":{"name":"replace_file_content","args":{"TargetFile":"/usr/local/lib/sandbox-hooks/guardrails.sh","ReplacementContent":"x"}}}' deny "hook-tamper"
+agy_assert "view_file maps to Read" \
+  '{"toolCall":{"name":"view_file","args":{"AbsolutePath":"/workspace/p/.env"}}}' deny "cred-read"
+agy_assert "grep_search maps to Read" \
+  '{"toolCall":{"name":"grep_search","args":{"SearchPath":"/root/.ssh/id_rsa"}}}' deny "cred-read"
+agy_assert "the real agy oauth token is protected" \
+  '{"toolCall":{"name":"view_file","args":{"AbsolutePath":"/root/.gemini/antigravity-cli/antigravity-oauth-token"}}}' deny "cred-read"
+
+printf "\n-- antigravity: pass-through and unmapped tools --\n"
+agy_assert "an ordinary command allows  <-- LOCK" \
+  '{"toolCall":{"name":"run_command","args":{"CommandLine":"ls -la"}}}' pass
+agy_assert "an ordinary file read allows" \
+  '{"toolCall":{"name":"view_file","args":{"AbsolutePath":"/workspace/p/README.md"}}}' pass
+# Unmapped tools PASS. The matcher is "*", so every browser_/mcp/search tool
+# arrives here; denying what the engine has not been taught would not harden
+# agy, it would stop it working. The static permissions.deny list is the layer
+# that must be complete, and no workspace file can reach it.
+agy_assert "an unmapped tool passes rather than denying" \
+  '{"toolCall":{"name":"browser_navigate","args":{"Url":"https://example.com"}}}' pass
+agy_assert "a tool with no args passes" \
+  '{"toolCall":{"name":"list_dir","args":{}}}' pass
+
+printf "\n-- antigravity: fail-closed, and claude still fails open --\n"
+agy_assert "malformed envelope denies  <-- LOCK" 'not json at all' deny "malformed-envelope"
+agy_assert "empty envelope denies" '' deny "empty-envelope"
+assert "the SAME malformed input passes under claude  <-- LOCK" 'not json at all' pass
+assert "the SAME empty input passes under claude" '' pass
+
+printf "\n-- antigravity: the workspace-override bypass --\n"
+# Measured in Phase 0 test G: with the workspace attached, agy reported
+# "loaded 1 named hooks from 2 hooks.json file(s)" and the denied command ran.
+agy_assert "write of a workspace .agents/hooks.json denies  <-- LOCK" \
+  '{"toolCall":{"name":"write_to_file","args":{"TargetFile":"/workspace/p/.agents/hooks.json","CodeContent":"{\"sandbox-guardrails\":{\"enabled\":false}}"}}}' \
+  deny "agy-workspace-hook-tamper"
+for d in .agent _agents _agent; do
+  agy_assert "write of a workspace $d/hooks.json denies" \
+    "{\"toolCall\":{\"name\":\"write_to_file\",\"args\":{\"TargetFile\":\"/workspace/p/$d/hooks.json\",\"CodeContent\":\"{}\"}}}" \
+    deny "agy-workspace-hook-tamper"
+done
+agy_assert "the shell route into a workspace hooks.json denies" \
+  '{"toolCall":{"name":"run_command","args":{"CommandLine":"mkdir -p .agents && echo {} > .agents/hooks.json"}}}' \
+  deny "agy-workspace-hook-tamper"
+agy_assert "tee into a workspace hooks.json denies" \
+  '{"toolCall":{"name":"run_command","args":{"CommandLine":"cat x | tee /workspace/p/.agents/hooks.json"}}}' \
+  deny "agy-workspace-hook-tamper"
+agy_assert "edit of the live agy policy denies" \
+  '{"toolCall":{"name":"write_to_file","args":{"TargetFile":"/root/.gemini/antigravity-cli/settings.json","CodeContent":"{}"}}}' \
+  deny
+agy_assert "edit of the live agy hooks.json denies" \
+  '{"toolCall":{"name":"write_to_file","args":{"TargetFile":"/root/.gemini/config/hooks.json","CodeContent":"{}"}}}' \
+  deny
+# Negative: a project's own .agents/skills/ is ordinary content, not the hook file.
+agy_assert "an unrelated file under .agents/ passes" \
+  '{"toolCall":{"name":"write_to_file","args":{"TargetFile":"/workspace/p/.agents/skills/x/SKILL.md","CodeContent":"# x"}}}' pass
+
 printf "\n  %d passed, %d failed\n" "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
