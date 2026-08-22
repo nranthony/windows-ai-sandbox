@@ -30,6 +30,10 @@
 #                   sandbox_templates/claude/claude-settings.json (backs up the old one)
 #   reset-skills    overwrite this profile's claude skills from sandbox_templates/skills/
 #                   (backs up old skill dirs)
+#   reset-antigravity  re-converge this profile's `agy` policy from
+#                   sandbox_templates/antigravity/: hooks.json replaced,
+#                   permissions/toolPermission merged into the agy settings.json
+#                   (every other key agy stores there is preserved)
 #   db <SUB>        set this profile's DEFAULT DB sibling(s) so a plain `up`
 #                   brings them up with no COMPOSE_PROFILES prefix (persisted in
 #                   the profile's compose-profiles file, mirroring subnet-octet).
@@ -477,6 +481,70 @@ converge_skills() {
   done
 }
 
+# converge_antigravity — reconcile this profile's `agy` policy to the templates
+#
+# TWO files, TWO different modes, and the difference is load-bearing:
+#
+#   gemini-home/config/hooks.json          -> replaced wholesale.
+#       Nothing but the sandbox writes it.
+#
+#   gemini-home/antigravity-cli/settings.json -> MERGED, two keys only.
+#       This file is shared with the running agent: `agy` writes colorScheme,
+#       model, enableTelemetry and trustedWorkspaces back into it during
+#       ordinary use. Overwriting it would silently discard the user's own
+#       settings on every `up`. Only `permissions` and `toolPermission` — the
+#       keys the sandbox owns — are written.
+#
+# NOT a directory mirror. converge_skills MIRRORS (ADR-0005), and applying that
+# here would be data loss: gemini-home/config/ already holds config.json,
+# mcp_config.json, .migrated and projects/, all live `agy` state that no
+# template will ever contain. File-scoped, always.
+converge_antigravity() {
+  local p="$PROFILES_ROOT/$PROFILE"
+  local tdir="$SCRIPT_DIR/sandbox_templates/antigravity"
+  [[ -d "$tdir" ]] || return 0
+
+  mkdir -p "$p/gemini-home/config" "$p/gemini-home/antigravity-cli"
+
+  if [[ -f "$tdir/hooks.json" ]]; then
+    if ! cmp -s "$tdir/hooks.json" "$p/gemini-home/config/hooks.json" 2>/dev/null; then
+      cp "$tdir/hooks.json" "$p/gemini-home/config/hooks.json"
+    fi
+  fi
+
+  local src="$tdir/antigravity-settings.json"
+  local dst="$p/gemini-home/antigravity-cli/settings.json"
+  [[ -f "$src" ]] || return 0
+  if ! command -v python3 >/dev/null 2>&1; then
+    warn "python3 absent — cannot merge antigravity permissions into $dst"
+    return 0
+  fi
+  SRC="$src" DST="$dst" python3 - <<'PY' || warn "could not merge antigravity permissions into settings.json"
+import json, os, sys
+src, dst = os.environ["SRC"], os.environ["DST"]
+tpl = json.load(open(src))
+live = {}
+if os.path.exists(dst) and os.path.getsize(dst):
+    try:
+        live = json.load(open(dst))
+    except Exception:
+        # A corrupt settings.json is agy's problem to report, not ours to
+        # silently replace — its other keys may still be recoverable by hand.
+        sys.stderr.write("settings.json is not valid JSON; leaving it alone\n")
+        raise SystemExit(1)
+before = json.dumps(live, sort_keys=True)
+for k in ("permissions", "toolPermission"):
+    if k in tpl:
+        live[k] = tpl[k]
+if json.dumps(live, sort_keys=True) != before:
+    tmp = dst + ".tmp"
+    with open(tmp, "w") as fh:
+        json.dump(live, fh, indent=2)
+        fh.write("\n")
+    os.replace(tmp, dst)
+PY
+}
+
 ensure_state() {
   local p="$PROFILES_ROOT/$PROFILE"
   mkdir -p "$p/claude-home" "$p/cache" "$p/config" "$p/gemini-home" "$p/kaggle"
@@ -510,6 +578,10 @@ ensure_state() {
   # Skills converge to the template tree on every up (ADR-0005) — they are no
   # longer seeded create-only, which is what let profiles drift behind it.
   converge_skills
+  # Same argument for the antigravity policy: a security guardrail that lags
+  # the template is the failure this repo keeps re-learning. File-scoped and
+  # merge-only — see the function header.
+  converge_antigravity
   # Refresh the managed sandbox-notice in the agent's GLOBAL memory
   # (~/.claude/CLAUDE.md, auto-loaded every session) so Claude Code agents see
   # the capabilities/prohibitions even in a workspace repo whose AGENTS.md
@@ -1357,6 +1429,17 @@ PY
     fi
     cp "$src" "$dst"
     ok "settings.json reset for '$PROFILE'. Restart claude inside the container to pick up."
+    ;;
+
+  reset-antigravity)
+    # The antigravity twin of reset-skills: the same convergence `up` performs,
+    # without touching the container. No backup of hooks.json (it is ours
+    # alone); settings.json is merged in place, so the user's own keys are
+    # never at risk and there is nothing to back up.
+    [[ -d "$SCRIPT_DIR/sandbox_templates/antigravity" ]] \
+      || fail "no antigravity templates: $SCRIPT_DIR/sandbox_templates/antigravity"
+    converge_antigravity
+    ok "antigravity policy converged for '$PROFILE' (hooks.json replaced, permissions merged). Restart agy inside the container to pick up."
     ;;
 
   reset-skills)

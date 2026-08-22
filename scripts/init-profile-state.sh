@@ -26,6 +26,8 @@ mkdir -p \
   "$BASE/config/git" \
   "$BASE/config/pnpm" \
   "$BASE/gemini-home" \
+  "$BASE/gemini-home/config" \
+  "$BASE/gemini-home/antigravity-cli" \
   "$BASE/kaggle" \
   "$BASE/audit"
 
@@ -84,6 +86,39 @@ SEED="$SCRIPT_DIR/sandbox_templates/claude/claude-settings.json"
 DEST="$BASE/claude-home/settings.json"
 if [[ ! -f "$DEST" ]] && [[ -f "$SEED" ]]; then
   cp "$SEED" "$DEST"
+fi
+
+# Antigravity (`agy`) policy. Unlike the claude settings above this is NOT
+# create-only — `profile.sh ensure_state` converges it on every `up`, because a
+# security guardrail that lags its template is the failure this repo keeps
+# re-learning (ADR-0005, ADR-0006). Seeding it here too only matters for the
+# path where init runs before ensure_state; the two agree by construction
+# because both call the same convergence.
+#
+# The agy settings.json is MERGED, never overwritten: agy stores colorScheme,
+# model and trustedWorkspaces in that same file. See
+# sandbox_templates/antigravity/README.md.
+AGY_TPL="$SCRIPT_DIR/sandbox_templates/antigravity"
+if [[ -d "$AGY_TPL" ]]; then
+  [[ -f "$AGY_TPL/hooks.json" ]] && cp "$AGY_TPL/hooks.json" "$BASE/gemini-home/config/hooks.json"
+  if [[ -f "$AGY_TPL/antigravity-settings.json" ]] && command -v python3 >/dev/null 2>&1; then
+    SRC="$AGY_TPL/antigravity-settings.json" \
+    DST="$BASE/gemini-home/antigravity-cli/settings.json" \
+    python3 - <<'PYMERGE' || echo "warning: could not merge antigravity permissions" >&2
+import json, os
+src, dst = os.environ["SRC"], os.environ["DST"]
+tpl = json.load(open(src))
+live = {}
+if os.path.exists(dst) and os.path.getsize(dst):
+    live = json.load(open(dst))
+for k in ("permissions", "toolPermission"):
+    if k in tpl:
+        live[k] = tpl[k]
+with open(dst, "w") as fh:
+    json.dump(live, fh, indent=2)
+    fh.write("\n")
+PYMERGE
+  fi
 fi
 
 # Seed a secrets.env.example (API keys for the webfetch broker etc.) and lock

@@ -179,6 +179,12 @@ reset-settings profile:
 reset-skills profile:
     {{profile_sh}} {{profile}} reset-skills
 
+# hooks.json replaced; permissions MERGED into agy's settings.json (ADR-0006) so
+# colorScheme/model/trustedWorkspaces survive — never an overwrite of that file
+# converge this profile's antigravity (agy) policy to sandbox_templates/antigravity/
+reset-antigravity profile:
+    {{profile_sh}} {{profile}} reset-antigravity
+
 # ---- vendored payload refresh (host-side, no profile arg) -------------------
 #
 # Developer actions, NOT lifecycle: they pull material from a sibling checkout

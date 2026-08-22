@@ -1,0 +1,17 @@
+{
+  "sandbox-guardrails": {
+    "enabled": true,
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/local/lib/sandbox-hooks/guardrails.sh --dialect=antigravity",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}
