@@ -120,7 +120,26 @@ member's HEAD — otherwise the check reddens on an ordinary state); and **a
 prefix over-match counts as covered** in `--permissions` (`statuses` riding
 `status:*`), because a check that cries wolf on its first run is a check that
 gets ignored.
-`just test-offline` runs all six suites, then `just check-upstreams`. Verify
+Edits to `sandbox_templates/common/agent-notice.md` require
+`bash scripts/agent-notice.test.sh` (13/13, offline). The notice is the one file
+here whose text is read from filesystems where this repo does not exist —
+`sync-agent-notice.sh` deploys it into every consumer repo's `AGENTS.md` and
+every profile's `claude-home/CLAUDE.md` — so two defects are invisible from
+inside this repo, where every path resolves. It locks both: **no repo-relative
+path** (`scripts/with-egress.sh` shipped in it for months and resolved to
+nothing inside `/workspace/<repo>/AGENTS.md`), and **no host-side mechanism**
+(that same reference was worse than a dead path — the notice exists to say
+"treat a denial as a human step, don't hunt for a workaround", and naming a
+script the agent has no route to turns "ask the human" into "run this"). The
+rule is frame-of-reference, NOT repo containment: `/usr/lib/wsl/lib/nvidia-smi`,
+`/root/.claude` and `~/.local/bin` are all correct and all outside every repo.
+Both defects were found by an outside audit — a consumer repo running
+`/myconv:apply-conventions` — never by anything here, which is why they are
+locked now. The suite also asserts every fetch-and-run form the notice names has
+a real `permissions.deny` entry behind it: a notice promising a denial that does
+not exist is never tested, because the agent reads it and does not attempt.
+
+`just test-offline` runs all seven suites, then `just check-upstreams`. Verify
 additionally asserts no `*.bak*` sits beside the seeded skills: `converge_skills`
 prunes only `*.bak.*`, so the unstamped form survives it.
 

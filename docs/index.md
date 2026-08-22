@@ -47,8 +47,9 @@ right: an **RFC** proposes → an **ADR** records → **work/** implements → t
 | 1 | [`scripts/verify-sandbox.sh`](../scripts/verify-sandbox.sh) | Fast tripwire (40 pass/fail/warn outcomes across 17 check groups on a GPU host; fewer on bare Linux, where the GPU probes report N/A) |
 | 2 | [`scripts/audit/`](../scripts/audit/) | ~80 structured probes, JSON output ([README](../scripts/audit/README.md)) |
 | — | [`scripts/depaudit.test.sh`](../scripts/depaudit.test.sh) | depaudit regression suite (38 offline, `--online` adds the OSV corpus) over [fixtures](../scripts/depaudit-fixtures/) |
-| — | [`scripts/with-egress.test.sh`](../scripts/with-egress.test.sh) | install-window parser suite (58, fully offline — no docker, no network) |
+| — | [`scripts/with-egress.test.sh`](../scripts/with-egress.test.sh) | install-window parser suite (66, fully offline — no docker, no network) |
 | — | [`scripts/profile-skills.test.sh`](../scripts/profile-skills.test.sh) | `converge_skills` suite (24, offline) — locks backup-pruning, the never-prune-unmanaged rule, and mirror-not-merge convergence ([ADR-0005](adr/0005-skill-templates-are-source-of-truth.md)) |
+| — | [`scripts/agent-notice.test.sh`](../scripts/agent-notice.test.sh) | sandbox-notice content suite (13, offline) — locks the two defects only a consumer repo can see: no repo-relative path, no host-side mechanism. The notice ships into filesystems where this repo does not exist |
 | 3 | [`sandbox_templates/skills/audit-sandbox/SKILL.md`](../sandbox_templates/skills/audit-sandbox/SKILL.md) | Agent-side judgment over tier-2 JSON (staged into container by `profile.sh audit`) |
 | — | `just check-upstreams` | Boundary monitor, not a test: is every vendored payload current with its upstream? `tools-check` covers all channel artifacts — lock-vs-published (hash) and artifact-vs-source_commit (content, when the member checkout is reachable). Offline; SKIPs loudly where a source is absent. Run by `test-offline` |
 
