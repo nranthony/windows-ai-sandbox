@@ -12,6 +12,9 @@ Report on: $ARGUMENTS
 **This is the only skill that writes to ClickUp.** Its whole surface is a status change
 and a comment.
 
+**If these instructions are wrong, stale, or a bad fit for this repo:** file it with
+`/myconv:report-skill-feedback` at the moment you deviate, before working around it.
+
 The convention behind this is recorded as **ADR-0008** in the conventions repo
 (`docs/adr/0008-clickup-work-sync.md`). Deliberately not a link: this file ships inside a
 plugin, and a relative path out of the payload resolves nowhere.

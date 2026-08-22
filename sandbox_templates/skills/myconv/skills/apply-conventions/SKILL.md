@@ -6,6 +6,9 @@ argument-hint: "[--audit] [path]"
 
 # Apply the agent-native repo conventions
 
+**If these instructions are wrong, stale, or a bad fit for this repo:** file it with
+`/myconv:report-skill-feedback` at the moment you deviate, before working around it.
+
 ## Mode
 
 Parse `$ARGUMENTS` before anything else — both arguments are optional and order does not
@@ -54,6 +57,10 @@ and treat installing it as the fix, rather than pasting copies.
    whether `docs/adr/` or `work/` already exist, whether the repo is solo or reviewed, whether
    CI exists, and what the repo's own conventions already look like. Do this before reading
    the blueprint, so you assess the blueprint against reality rather than the reverse.
+   Resolve every relative path and named script an existing `AGENTS.md` cites — including
+   inside managed sandbox-notice markers, which are verified read-only: a dead reference
+   there is still a dead instruction. Report it (the fix belongs upstream, to the sandbox
+   tool); never edit inside the markers.
 2. **Read the blueprint** — `reference/agentic_native_repo_scaffold.md`, at minimum its layout
    and "Not everything at once — lean core vs. opt-in" sections.
 3. **Choose the tier, and say why.** Default to the lean core: `AGENTS.md` + thin `CLAUDE.md` +

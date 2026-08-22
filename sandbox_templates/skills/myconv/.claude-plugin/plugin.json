@@ -1,7 +1,7 @@
 {
   "name": "myconv",
   "description": "The agent-native repo blueprint plus the shared planning, wrap-up and ClickUp-sync procedures. Ships the reference and templates as skill payload so an agent can apply the conventions in any repo, with judgment.",
-  "version": "0.4.0",
+  "version": "0.6.0",
   "repository": "https://github.com/nranthony/agentic-conventions",
   "author": {
     "name": "nranthony"

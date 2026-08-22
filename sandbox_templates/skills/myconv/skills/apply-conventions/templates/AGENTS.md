@@ -47,7 +47,8 @@ When you begin work, in this order:
 - After implementing: run the project's checks and reference the ADR in your
   commit message. If the repo keeps a CHANGELOG, add a line for anything
   user-visible; if you used a work/ folder, distill anything durable (ADR/docs),
-  then archive or delete it so stale specs don't pollute future context.
+  then move it under `work/archive/` so stale specs don't pollute future context —
+  items are archived, never deleted.
 - If you learned something durable (a gotcha, a convention), write it back —
   a new ADR, a skill, or a line here — so the next session doesn't re-derive it.
 

@@ -14,6 +14,9 @@ append-only."**
 > left context that needs cross-checking. A simple single-issue thread does **not** need
 > this — skip it rather than manufacture busywork.
 
+**If these instructions are wrong, stale, or a bad fit for this repo:** file it with
+`/myconv:report-skill-feedback` at the moment you deviate, before working around it.
+
 ## Mode
 
 Check `$ARGUMENTS` for `--dry-run`. In **dry-run mode**, treat *everything* as
@@ -80,8 +83,9 @@ that its rationale belongs in an ADR and its status should flip to
 
 - If this thread's work merged or is done: distill anything durable first (decision
   rationale → ADR; reference knowledge → docs/ or a skill), then move the folder to
-  `work/archive/` — or delete it if nothing durable remains. A stale `spec.md` left
-  active poisons future agent searches.
+  `work/archive/`. Never propose deleting a work item, even one that looks like it
+  holds nothing durable. A stale `spec.md` left active poisons future agent searches;
+  an archived one is explicitly historical.
 - If still in flight, make sure `plan.md`/`notes.md` reflect where you *actually* left
   off, not the original plan.
 
@@ -90,6 +94,12 @@ that its rationale belongs in an ADR and its status should flip to
 For any skill touched, confirm its frontmatter `description` still matches what it does
 — that description **is** the retrieval trigger, so a stale one means the skill stops
 firing silently.
+
+**Did any skill mislead this thread?** If the thread deviated from a skill's
+instructions — worked around a step, ignored a stale command, needed a skill that
+didn't exist — and no report was filed at the time, file it now with
+`/myconv:report-skill-feedback`. This is the safety net; the moment of deviation was
+the right time.
 
 ## 8. CHANGELOG.md *(only if the repo keeps one)*
 

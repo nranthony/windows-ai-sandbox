@@ -12,6 +12,9 @@ Activate: $ARGUMENTS
 task's status to `Agent Working` is `/clickup-report`'s job, so a pull can be reviewed
 before anything becomes visible on the board.
 
+**If these instructions are wrong, stale, or a bad fit for this repo:** file it with
+`/myconv:report-skill-feedback` at the moment you deviate, before working around it.
+
 The convention behind this — a tracker and `work/` are two projections of one item, synced
 partially and asymmetrically — is recorded as **ADR-0008** in the conventions repo
 (`docs/adr/0008-clickup-work-sync.md`). Deliberately not a link: this file ships inside a

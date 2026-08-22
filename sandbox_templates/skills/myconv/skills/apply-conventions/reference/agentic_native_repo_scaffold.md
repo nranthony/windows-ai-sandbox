@@ -84,9 +84,11 @@ add the rest only when a concrete need appears. Adopt in this order:
   bundle deeper than a ticket. `work/`
   carries an exit rule: **when the work merges or the question resolves, distill
   anything durable out (decision rationale → an ADR; reference knowledge → docs/ or a
-  skill), then move the folder under `work/archive/`** — or delete it if nothing
-  durable remains. A stale `spec.md` left active quietly poisons future agent searches
-  and context; an archived one is explicitly historical.
+  skill), then move the folder under `work/archive/`**. Items are archived, never
+  deleted — "nothing durable remains" is a guess about future readers, and it is not
+  worth an irreversible action to save a directory entry. A stale `spec.md` left active
+  quietly poisons future agent searches and context; an archived one is explicitly
+  historical.
   Pair it with `"plansDirectory": "./work/plans"` in `.claude/settings.json` (and
   gitignore `work/plans/`) so Claude Code's native plan-mode drafts land beside the
   durable plans instead of evaporating in `~/.claude/plans/`; a draft becomes durable by
@@ -270,6 +272,16 @@ less than these:
 3. **State what works.** Without an explicit allow-side ("read/edit files, local git,
    run tests, `rg`/`jq`…"), agents over-avoid and start treating permitted actions as
    risky too.
+4. **Name the ask, not the host-side mechanism.** A human step is discharged outside
+   the sandbox, so the notice says *that* a human does it and who to ask — never *how*
+   they do it on the host. Host-side scripts, wrapper commands, and paths that live in
+   the sandbox tool's own repo are meaningless in the repo the notice ships in: the
+   path resolves against the wrong tree, and it drifts the moment the host tooling is
+   renamed. The test is frame of reference, not repo-relativity — everything a notice
+   names must resolve in the environment where the reading agent stands. Absolute
+   in-sandbox paths, service hostnames on the sandbox's network, and the repo's own
+   files all pass; a `scripts/…` helper that exists only in the sandbox tool's
+   checkout does not.
 
 Ownership rules:
 
@@ -278,6 +290,12 @@ Ownership rules:
   never edit inside the markers. This is why the block's *content* is deliberately
   not templated in this repo — a copied deny-list drifts from the real sandbox config
   the first time the sandbox is tweaked, and a stale notice is worse than none.
+- **Never editing inside the markers is not never looking inside them.** Read-only
+  verification of the block is both safe and necessary: resolve every path and named
+  script the notice cites, exactly as for the rest of `AGENTS.md`. A dead reference
+  there is still a dead instruction to whoever reads it next. Report it as a defect
+  in the sandbox tool's config — the fix belongs upstream, in the block's generator —
+  and don't edit inside the markers.
 - **The notice is per-repo, per-environment.** Repos not edited in a sandbox get no
   block at all; don't add an empty or speculative one.
 - If the sandbox has no managing tool (a hand-maintained setup), the block can be
@@ -316,8 +334,8 @@ When you begin work, in this order:
   direction, write a short ADR (or a work-item proposal.md first if it needs discussion).
 - After implementing: run the project's checks, reference the ADR/proposal in your
   commit message, and update CHANGELOG. If you used a work/ folder, distill anything
-  durable (ADR/docs), then archive or delete it so stale specs don't pollute future
-  context.
+  durable (ADR/docs), then move it under `work/archive/` so stale specs don't pollute
+  future context. Archive it — items are never deleted.
 - If you learned something durable (a gotcha, a convention), write it back —
   a new ADR, a skill, or a line here — so the next session doesn't re-derive it.
 
@@ -372,8 +390,8 @@ what/why) · plan.md (implementation plan) · notes.md (running notes).
 
 Exit rule: when the work merges or the question resolves, distill anything
 durable out (decision rationale → an ADR; reference knowledge → docs/ or a
-skill), then move the folder to work/archive/ — or delete it if nothing
-durable remains. Archived items are historical records, never current intent.
+skill), then move the folder to work/archive/. Items are archived, never
+deleted. Archived items are historical records, never current intent.
 
 ## Proposal template
 
@@ -431,7 +449,9 @@ Run it as five phases:
 2. **Gap map (read-only).** For each scaffold piece, record `present (where) / partial /
    absent` → `keep as-is / adopt / adapt / skip`, filtered through the lean-core tiers.
    Reconcile names here: if the repo already has `docs/decisions/`, align to it — don't add
-   a parallel `docs/adr/`.
+   a parallel `docs/adr/`. Resolve every relative path and named script `AGENTS.md` cites —
+   including inside managed sandbox-notice markers, which are verified read-only: a dead
+   reference there is reported upstream to the sandbox tool, never edited in place.
 3. **Reconcile the entry point.** If a *substantive* `CLAUDE.md` exists, **promote its
    content to `AGENTS.md` and leave `CLAUDE.md` as the two-line stub** — a move, never a
    flatten. If both exist, merge deliberately. Keep the root lean; push detail into nested

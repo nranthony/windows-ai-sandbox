@@ -12,6 +12,9 @@ Produce a reviewable implementation plan for: $ARGUMENTS
 externally visible. The only files you may create are the plan artifacts and draft ADRs
 named below.
 
+**If these instructions are wrong, stale, or a bad fit for this repo:** file it with
+`/myconv:report-skill-feedback` at the moment you deviate, before working around it.
+
 ## Ground rules
 
 - Repo evidence over assumption. Never claim a file, API, or convention exists without
@@ -38,7 +41,8 @@ everything yourself. Summarize only the facts that shape the plan.
   plus `spec.md` first if the "what/why" needed pinning down. If the work traces to an
   existing item (e.g. an accepted `proposal.md`), put `plan.md` in that folder instead
   of opening a new number. The exit rule applies: when the work merges, durable
-  rationale is distilled out (ADR/docs) and the folder is archived or deleted.
+  rationale is distilled out (ADR/docs) and the folder moves to `work/archive/` —
+  items are archived, never deleted.
 - If the repo has its own planning location, use that. If it has neither, ask where the
   plan should live — don't invent a new top-level directory.
 - If the repo uses beads (`.beads/` present): file the task breakdown as a bd epic with
