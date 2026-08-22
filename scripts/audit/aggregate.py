@@ -39,6 +39,7 @@ PROBES = [
     "network",          # §9a-c §9e — egress, DNS, DB siblings
     "proxy",            # §9d §9g — allowed_domains.txt + squid.conf
     "settings",         # §12 — claude settings, template diff, per-project WebFetch
+    "antigravity",      # §12b — agy: static permissions.deny + PreToolUse hook wiring
     "env",              # §13 — env, VS Code Dev Containers leakage
 ]
 

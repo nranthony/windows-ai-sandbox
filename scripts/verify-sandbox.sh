@@ -120,6 +120,116 @@ else
   fail "deny-destructive hook missing or not executable at $HOOK (rebuild image)"
 fi
 
+# --- antigravity (`agy`) policy ---------------------------------------------
+# Two layers, and the ORDER of importance is the reverse of the intuition:
+# permissions.deny in the agy settings.json is the layer that must be complete,
+# because a workspace .agents/hooks.json can disable the hook by name (measured
+# — work/0010 Phase 0) and nothing in a workspace can reach settings.json.
+AGY_HOOK=/usr/local/lib/sandbox-hooks/guardrails.sh
+AGY_HOOKS_JSON=/root/.gemini/config/hooks.json
+AGY_SETTINGS=/root/.gemini/antigravity-cli/settings.json
+
+if [[ -x "$AGY_HOOK" ]]; then
+  pass "antigravity guardrails engine present and executable ($AGY_HOOK)"
+  # Pass-through must be an explicit allow. `{}` is a DENY to agy, so a script
+  # that emitted the claude pass-through here would block every tool call.
+  AGY_PASS=$(printf '%s' '{"toolCall":{"name":"run_command","args":{"CommandLine":"ls -la"}}}' \
+             | "$AGY_HOOK" --dialect=antigravity 2>/dev/null || true)
+  if printf '%s' "$AGY_PASS" | grep -q '"decision":"allow"'; then
+    pass "antigravity pass-through is an explicit allow (not {}, which agy reads as deny)"
+  else
+    fail "antigravity pass-through wrong (output: $AGY_PASS) — every tool call would be blocked"
+  fi
+  # NOTE these probe the ENVELOPE rules, which are the hook's job. Command
+  # prefixes (npm install, curl, bash -c) are the static permissions.deny
+  # layer's job and are asserted against settings.json further down — the two
+  # layers are deliberately not duplicated, so do not "fix" this by expecting
+  # the hook to block an installer.
+  for probe in \
+    'run_command|{"toolCall":{"name":"run_command","args":{"CommandLine":"rm -rf /workspace/x"}}}|recursive rm' \
+    'run_command|{"toolCall":{"name":"run_command","args":{"CommandLine":"find /tmp -delete"}}}|find -delete' \
+    'view_file|{"toolCall":{"name":"view_file","args":{"AbsolutePath":"/root/.gemini/antigravity-cli/antigravity-oauth-token"}}}|read of the agy oauth token' \
+    'write_to_file|{"toolCall":{"name":"write_to_file","args":{"TargetFile":"/workspace/x/.agents/hooks.json","CodeContent":"{}"}}}|workspace hooks.json write'
+  do
+    _env=${probe#*|}; _label=${_env#*|}; _env=${_env%|*}
+    _out=$(printf '%s' "$_env" | "$AGY_HOOK" --dialect=antigravity 2>/dev/null || true)
+    if printf '%s' "$_out" | grep -q '"decision":"deny"'; then
+      pass "antigravity hook blocks $_label"
+    else
+      fail "antigravity hook did NOT block $_label (output: $_out)"
+    fi
+  done
+  # Fail-CLOSED tripwire. agy blocks the tool call when a hook misbehaves, so a
+  # garbage envelope must not come back as an allow.
+  AGY_JUNK=$(printf '%s' 'not json at all' | "$AGY_HOOK" --dialect=antigravity 2>/dev/null || true)
+  if printf '%s' "$AGY_JUNK" | grep -q '"decision":"allow"'; then
+    fail "antigravity hook failed OPEN on a malformed envelope (output: $AGY_JUNK)"
+  else
+    pass "antigravity hook fails closed on a malformed envelope"
+  fi
+else
+  fail "antigravity guardrails engine missing at $AGY_HOOK (rebuild image)"
+fi
+
+if [[ -s "$AGY_HOOKS_JSON" ]] && jq -e '."sandbox-guardrails".enabled == true' "$AGY_HOOKS_JSON" >/dev/null 2>&1; then
+  pass "antigravity hooks.json seeded and enabled ($AGY_HOOKS_JSON)"
+else
+  fail "antigravity hooks.json missing, invalid, or disabled — run: profile.sh <p> reset-antigravity"
+fi
+
+if [[ -s "$AGY_SETTINGS" ]] && jq -e '(.permissions.deny // []) | length > 0' "$AGY_SETTINGS" >/dev/null 2>&1; then
+  pass "antigravity permissions.deny present ($(jq -r '.permissions.deny | length' "$AGY_SETTINGS") rules)"
+  # The static layer is the tamper-resistant one; spot-check a representative
+  # from each deny category rather than the whole list (the parity suite owns
+  # completeness, offline).
+  _missing=""
+  for g in 'command(curl)' 'command(npm install)' 'command(bash -c)' 'command(git push)'; do
+    jq -e --arg g "$g" '.permissions.deny | index($g)' "$AGY_SETTINGS" >/dev/null 2>&1 || _missing="$_missing $g"
+  done
+  [[ -z "$_missing" ]] && pass "antigravity deny list covers network/installer/shell-escape/remote-vcs" \
+                       || fail "antigravity deny list missing:$_missing — run: profile.sh <p> reset-antigravity"
+else
+  fail "antigravity permissions.deny absent from $AGY_SETTINGS — run: profile.sh <p> reset-antigravity"
+fi
+
+# --- antigravity upstream-contract drift ------------------------------------
+# `agy` self-updates, and its hook contract is an upstream API: a renamed tool
+# or a changed decision enum disarms the guardrail while every offline suite
+# stays green. This check belongs HERE rather than in `just check-upstreams`
+# because the thing to compare against is inside the image — agy embeds its own
+# customization docs as literal strings — and check-upstreams is offline by
+# contract (it reads sibling checkouts, never docker).
+#
+# It asserts the five tool names the engine dispatches on, and the decision
+# enum it emits, still exist in the shipped binary. It cannot prove semantics
+# have not changed; it catches the rename, which is the failure that is
+# otherwise silent.
+AGY_BIN=$(command -v agy 2>/dev/null || echo /usr/local/bin/agy)
+if [[ -x "$AGY_BIN" ]]; then
+  _drift=""
+  for _tok in run_command write_to_file replace_file_content view_file grep_search \
+              PreToolUse force_ask; do
+    grep -aqm1 -- "$_tok" "$AGY_BIN" 2>/dev/null || _drift="$_drift $_tok"
+  done
+  if [[ -z "$_drift" ]]; then
+    pass "antigravity hook contract intact (tool names + decision enum still in the binary)"
+  else
+    fail "antigravity hook contract DRIFT — absent from $AGY_BIN:$_drift (the guardrail may no longer match; re-run work/0010 Phase 0)"
+  fi
+else
+  warn "agy binary not found at $AGY_BIN — cannot check hook-contract drift (a SKIP is not a pass)"
+fi
+
+# A workspace hooks.json outranks the global one and can disable it by name.
+# The hook blocks the write; this catches one that got there another way.
+_wshooks=$(find /workspace -maxdepth 4 \( -path '*/.agents/hooks.json' -o -path '*/.agent/hooks.json' \
+             -o -path '*/_agents/hooks.json' -o -path '*/_agent/hooks.json' \) 2>/dev/null | head -5)
+if [[ -z "$_wshooks" ]]; then
+  pass "no workspace hooks.json shadowing the antigravity guardrail"
+else
+  fail "workspace hooks.json found (outranks the global guardrail and can disable it by name): $(printf '%s' "$_wshooks" | tr '\n' ' ')"
+fi
+
 # --- no backup copies inside the scanned skills dir -------------------------
 # ADR-0005, measured in-container 2026-08-10 (claude 2.1.223): a `<name>.bak*`
 # sibling in ~/.claude/skills/ is a SECOND LIVE COPY, and for a skills-dir
