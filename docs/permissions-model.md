@@ -4,6 +4,47 @@ The deny/allow model in `sandbox_templates/claude/claude-settings.json`, the two
 
 The hook ruleset itself lives in `docs/deny-destructive-hook-plan.md`. This page is the surrounding model.
 
+## Two agents, the same posture, one asymmetry
+
+Since 2026-08-22 ([ADR-0006](adr/0006-antigravity-is-two-layer-like-claude.md))
+Antigravity (`agy`) carries the same two layers as Claude Code, expressed in its
+own grammar. The lists are diffed against each other by
+`scripts/antigravity-parity.test.sh`, so they deny the same set by construction.
+
+| | Claude Code | Antigravity (`agy`) |
+|---|---|---|
+| Static policy | `permissions.allow/ask/deny` in `/root/.claude/settings.json` | `permissions.allow/ask/deny` in `/root/.gemini/antigravity-cli/settings.json` |
+| Grant syntax | `Bash(npm install:*)` | `command(npm install)` — also prefix-matched |
+| Hook | `PreToolUse` in `settings.json` | `PreToolUse` in `/root/.gemini/config/hooks.json` |
+| Hook engine | `deny-destructive.sh` | the **same script**, `--dialect=antigravity` |
+| Secret-file reads | `Read(**/.env)` etc. in the static list | the hook, across `view_file`/`grep_search`/`run_command` |
+| Hook failure | fail-**open** | fail-**closed** |
+
+**Which layer is load-bearing differs between the two agents, and this is the
+part worth internalising.** For Claude the static list is primary and the hook
+is defence-in-depth on top of it. For `agy` that is also true, but for a sharper
+reason: `agy` discovers workspace customizations under `.agents/`, `.agent/`,
+`_agents/` and `_agent/`, merges hooks **by name**, and lets the workspace copy
+outrank the global one — so a file containing
+`{"sandbox-guardrails": {"enabled": false}}` in any attached workspace switches
+the hook off. Measured, not theorised (`work/0010` Phase 0). Nothing in a
+workspace can reach `settings.json`, which is why every hard denial lives there.
+
+The hook blocks writes to a workspace `hooks.json` (both the write-tool and the
+shell route), tier-1 verify scans for one, and `scripts/audit/probes/antigravity.py`
+reports DRIFT if one exists. Those are the compensations; the static list is the
+control.
+
+Two residual gaps, both recorded in ADR-0006 rather than papered over:
+
+- **`agy`'s `ask` is stickier than Claude's.** An `ask` approval is cached as an
+  Always-Allow grant, so the mutating `myclickup` set prompts once under `agy`
+  and every time under Claude. The hook can emit `force_ask`, which ignores the
+  cache; wiring it is follow-up.
+- **Secret reads are hook-only under `agy`.** The file-grant syntax for its
+  static list was not reverse engineered, so reads are enforced at the layer a
+  workspace file can disable. Commands are not affected.
+
 ## Two-phase workflow
 
 - **Planning runs** (you driving, approving each step): uncomment the planning-mode section in `proxy/allowed_domains.txt` (pypi/npm/git), restart Squid, do clones/installs/pushes yourself. `permissions.defaultMode: "auto"` means Bash is prompt-gated for commands not on the allow list.

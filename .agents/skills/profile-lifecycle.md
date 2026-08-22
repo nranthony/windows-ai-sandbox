@@ -51,11 +51,43 @@ scripts/profile.sh <profile> clean              # prune rotating state
 scripts/profile.sh <profile> clean --deep       # + MCP logs + settings backups
 scripts/profile.sh <profile> reset-settings     # re-seed settings.json from sandbox_templates/claude/
 scripts/profile.sh <profile> reset-skills       # re-seed skills from sandbox_templates/skills/
+scripts/profile.sh <profile> reset-antigravity  # re-converge the agy policy (see below)
 scripts/profile.sh <profile> wipe [--dry-run|--yes|--all-volumes]  # blank slate, KEEPS auth
 ```
 
 `down` also age-prunes MCP logs + session transcripts older than
 `SANDBOX_LOG_RETENTION_DAYS` (default 14).
+
+### `reset-antigravity` — build first, and know what it does not touch
+
+`up` already converges the `agy` policy; this is the same operation without
+touching the container ([ADR-0006](../../docs/adr/0006-antigravity-is-two-layer-like-claude.md)).
+Two files, two different modes:
+
+- `gemini-home/config/hooks.json` — **replaced**. Ours alone.
+- `gemini-home/antigravity-cli/settings.json` — **merged**, only `permissions`
+  and `toolPermission`. `agy` writes `colorScheme`, `model` and
+  `trustedWorkspaces` into that same file during ordinary use, so overwriting it
+  would quietly discard the user's settings on every `up`. Nothing is backed up
+  because nothing is at risk.
+
+Neither is a directory mirror. `gemini-home/config/` also holds `config.json`,
+`mcp_config.json`, `.migrated` and `projects/` — live `agy` state that a mirror
+would delete.
+
+**Run `build` before this on a fresh clone.** The hook engine
+(`/usr/local/lib/sandbox-hooks/guardrails.sh`) is baked into the image. A
+`hooks.json` naming a script the image does not have is not an error to `agy` —
+it logs and carries on **unguarded**. `verify` asserts the engine is present,
+which is the check that catches this; the static `permissions.deny` still
+applies either way.
+
+To confirm the policy is live, ask `agy` to run something denied and read the
+error rather than trusting the file:
+
+```bash
+scripts/profile.sh <profile> verify | grep antigravity
+```
 
 ## Agent skills in a profile
 

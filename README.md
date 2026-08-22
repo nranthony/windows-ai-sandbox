@@ -49,7 +49,7 @@ docker info >/dev/null && echo "rootless daemon OK"   # is the daemon answering?
 bringing anything up, so a failure costs nothing.
 
 ```bash
-just test-offline           # seven offline suites, then upstream drift
+just test-offline           # eight offline suites, then upstream drift
 just check-permissions      # manifest proposal vs settings template
 ```
 
@@ -201,12 +201,13 @@ Profile is the first argument to every per-profile recipe. `build`, `list`,
 | `health` | cross-profile: flags a profile whose agent/proxy/DB aren't all up together |
 | `deps` [`--osv`] | dependency posture for the profile's workspace (host-side, read-only) |
 | **Repo-level** (no profile arg) | |
-| `test-offline` | seven offline suites, then `check-upstreams` |
+| `test-offline` | eight offline suites, then `check-upstreams` |
 | `vendor-tools` / `tools-check` | consume the depot channel / check the lock against it |
 | `check-permissions` | manifest permission proposal vs the settings template (read-only) |
 | **State** | |
 | `reset-settings` | overwrite claude `settings.json` from the template (backs up the old) |
 | `reset-skills` | converge this profile's skills to `sandbox_templates/skills/` |
+| `reset-antigravity` | converge the `agy` policy: `hooks.json` replaced, `permissions` **merged** into agy's own settings.json. Run `build` FIRST — the hook engine is baked into the image, and a `hooks.json` naming a missing script leaves `agy` unguarded without saying so |
 | `clean` [`--deep`] | prune rotating state (backups, paste-cache, MCP logs) |
 | `wipe` / `db-reset` | destructive — read the header first |
 | `docker-gc` | host-wide Docker hygiene; report-only for images and volumes |
@@ -318,7 +319,7 @@ Two tiers, plus the offline suites that gate changes to the security-sensitive f
 ```bash
 just verify <profile>     # tier 1 — fast in-container tripwire, ~40 checks
 just audit <profile>      # tier 2 — 65 structured probes, JSON written to the host
-just test-offline         # the seven regression suites + upstream boundary monitors
+just test-offline         # the eight regression suites + upstream boundary monitors
 ```
 
 Tier 1 covers: direct internet blocked, `api.anthropic.com` reachable via the proxy,

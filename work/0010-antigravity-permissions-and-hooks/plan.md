@@ -1,18 +1,33 @@
 # 0010 — Plan: Antigravity Tool Permissions and Pre-Tool Execution Hooks
 
-Ordered steps. Read [`spec.md`](spec.md) first — findings are marked **[V]** verified against
-the shipped `agy` binary or **[?]** open, and the open ones (F5, F6) **gate Phase 1**.
+**All phases complete** on `feat/0010-antigravity-guardrails` (2026-08-22), except
+the follow-ups listed in [`spec.md`](spec.md) §6. Read `spec.md` first: Phase 0
+answered every open question and **reversed three decisions**, so the tasks
+below are recorded as executed, not as originally written.
 
-**Phase 0 is not a formality.** The first draft of this plan carried Phase 0 while the spec
-already asserted its conclusions as findings. Two of those conclusions are load-bearing and
-still unproven; if F5 comes back the wrong way, the hook-only design does not hold and Phase 1
-is wasted work. Answer the questions, write the answers back into `spec.md`, then proceed.
+**What Phase 0 changed, in one paragraph.** `agy` turned out to have a static
+`permissions.allow/ask/deny` layer all along (F8), which the spec had asserted
+did not exist. A workspace `.agents/hooks.json` can disable the global hook by
+name (F5, confirmed live). And `agy` fails *closed* on a broken hook while
+treating `{}` as a deny (F6/F2). Together those invert the design: the hard
+denials belong in the static list, which no workspace can reach, and the hook is
+defence-in-depth. See [ADR-0006](../../docs/adr/0006-antigravity-is-two-layer-like-claude.md).
+
+**The Phase 0 gate earned its place.** Had Phase 1 been built from the spec as
+written, the result would have been a hook-only design whose single control any
+workspace file could switch off, emitting `{}` as a pass — which `agy` reads as
+a deny, so every tool call in the sandbox would have been blocked. Both defects
+would have shipped looking correct.
 
 ---
 
 ## Phase 0 — Measure the contract
 
-### T01 — Confirm the `PreToolUse` contract end to end
+### T01 ✅ — Confirm the `PreToolUse` contract end to end
+
+**Done.** Results in `spec.md` F1–F4, F8. Two surprises: `{}` is a deny, and
+`allow` does not bypass the static permission layer.
+
 
 Working profile, real `agy`. Record every answer in `spec.md` and flip the marker to **[V]**.
 
@@ -32,7 +47,11 @@ Working profile, real `agy`. Record every answer in `spec.md` and flip the marke
    Allow", then re-run — `ask` should not re-prompt, `force_ask` should. This is the evidence
    for D3.
 
-### T02 — Answer F6: what happens when the hook is broken
+### T02 ✅ — Answer F6: what happens when the hook is broken
+
+**Done, and the answer inverted D5.** All four failure modes BLOCK the tool
+call — `agy` is fail-closed at the harness level. The table is in `spec.md` F6.
+
 
 The failure posture (D5) cannot be designed until these are known. Four handlers, four runs:
 
@@ -50,7 +69,12 @@ handler executes at all.
 closed by dying — it must trap its own errors and print an explicit `deny`, and the timeout
 value becomes a security parameter rather than a comfort setting.
 
-### T03 — Answer F5: can a workspace file disable the guardrail
+### T03 ✅ — Answer F5: can a workspace file disable the guardrail
+
+**Done. Yes — confirmed.** `loaded 1 named hooks from 2 hooks.json file(s)` and
+the denied command ran. Note the first attempt looked like a refutation because
+no workspace was attached; `--add-dir` is what made it reproduce. `spec.md` F5.
+
 
 With a global `sandbox-guardrails` hook seeded and denying a known command:
 
@@ -73,7 +97,12 @@ T05 and must be in the tier-1 assertions.** If it cannot be covered, stop and re
 
 ## Phase 1 — Rule table, adapters, templates
 
-### T04 — Split `deny-destructive.sh` into rules + adapters (D1)
+### T04 ✅ — Split `deny-destructive.sh` into rules + adapters (D1)
+
+**Done.** Implemented by translating the `agy` envelope into the Claude shape at
+the top, so the whole rule body is shared and unmodified — Claude's 113 cases
+still pass byte-identically. Unmapped tools PASS (D10, reversed).
+
 
 Restructure, keeping Claude's behaviour bit-identical:
 
@@ -98,7 +127,11 @@ Install path: `/usr/local/lib/sandbox-hooks/`. Keep
 `claude-settings.json` in every existing profile points at it, so this must not require a
 profile reset to keep working.
 
-### T05 — `sandbox_templates/antigravity/hooks.json`
+### T05 ✅ — `sandbox_templates/antigravity/hooks.json`
+
+**Done**, plus `antigravity-settings.json` (the static layer, which the original
+plan had no task for because it assumed the layer did not exist).
+
 
 ```json
 {
@@ -124,7 +157,12 @@ profile reset to keep working.
 answer and comment it in place. Absolute command path: cwd is `/root/.gemini/config`, a rw
 bind mount, and must not be trusted.
 
-### T06 — Tests
+### T06 ✅ — Tests
+
+**Done.** `deny-destructive.test.sh` 113 → **136**. New suite
+`scripts/antigravity-parity.test.sh` (**28**) diffs the two deny lists exactly in
+both directions and locks the convergence semantics. Both in `just test-offline`.
+
 
 Extend `sandbox_templates/claude/hooks/deny-destructive.test.sh` (currently 113/113):
 
@@ -145,7 +183,11 @@ Update the AGENTS.md contract paragraph with the new count.
 
 ## Phase 2 — Image and profile lifecycle
 
-### T07 — Dockerfile
+### T07 ✅ — Dockerfile
+
+**Done.** Symlink, not a copy, so the two names can never diverge on disk.
+`dockerfile-order.test.sh` 8/8.
+
 
 1. Bake the engine to `/usr/local/lib/sandbox-hooks/guardrails.sh`, mode `0755`.
 2. Keep `/usr/local/lib/claude-hooks/deny-destructive.sh` functional (wrapper or symlink) so
@@ -153,7 +195,12 @@ Update the AGENTS.md contract paragraph with the new count.
 3. Placement must respect the load-bearing layer order —
    `bash scripts/dockerfile-order.test.sh` (8/8).
 
-### T08 — Seeding and convergence
+### T08 ✅ — Seeding and convergence
+
+**Done.** `converge_antigravity` in `profile.sh` + `init-profile-state.sh`;
+`reset-antigravity` subcommand and `just` alias. File-scoped, and `settings.json`
+is MERGED — locked by four assertions in the parity suite.
+
 
 `scripts/init-profile-state.sh` and `scripts/profile.sh::ensure_state`:
 
@@ -169,7 +216,12 @@ Update the AGENTS.md contract paragraph with the new count.
 
 ## Phase 3 — Detectors
 
-### T09 — Tier 1 (`scripts/verify-sandbox.sh`)
+### T09 ✅ — Tier 1 (`scripts/verify-sandbox.sh`)
+
+**Done.** Engine presence, explicit-allow pass-through, four behavioural denies,
+a fail-closed tripwire, static-deny spot checks, a `/workspace` scan for shadow
+hooks, and the contract-drift check (T11 landed here — see D8).
+
 
 1. `/root/.gemini/config/hooks.json` present, non-empty, valid JSON, and matching the template.
 2. `/usr/local/lib/sandbox-hooks/guardrails.sh` present, mode `0755`.
@@ -182,7 +234,11 @@ Update the AGENTS.md contract paragraph with the new count.
    - **malformed envelope ⇒ `deny`** (fail-closed tripwire)
 4. Live agy state under `gemini-home/config/` still present — the D6 tripwire.
 
-### T10 — Tier 2 (`scripts/audit/probes/antigravity.py`)
+### T10 ✅ — Tier 2 (`scripts/audit/probes/antigravity.py`)
+
+**Done** and registered in `aggregate.py`. `workspace_hook_shadow` is DRIFT, not
+informational, because F5 made it a real bypass.
+
 
 1. Live `hooks.json` presence and schema.
 2. `enabled` is `true` and the matcher is `"*"`.
@@ -191,7 +247,13 @@ Update the AGENTS.md contract paragraph with the new count.
    a legitimate project hook is possible; an unexplained one is the signal).
 5. Update the probe count in `README.md` and the audit docs.
 
-### T11 — Upstream drift detector (D8)
+### T11 ✅ — Upstream drift detector (D8), relocated
+
+**Done, but in tier-1 verify rather than `just check-upstreams`.** The
+comparison target lives inside the image and check-upstreams is offline by
+contract. Asserts the five dispatched tool names and the decision enum still
+appear in the shipped binary.
+
 
 Add to `just check-upstreams`, offline, following the `tools-check` pattern:
 
@@ -207,13 +269,23 @@ Add to `just check-upstreams`, offline, following the `tools-check` pattern:
 
 ## Phase 4 — Records and documentation
 
-### T12 — ADR (D7)
+### T12 ✅ — ADR (D7)
+
+**Done** — [ADR-0006](../../docs/adr/0006-antigravity-is-two-layer-like-claude.md).
+
 
 `docs/adr/NNNN-antigravity-hook-only-policy.md`. Records: agy is hook-only where Claude is
 two-layer; the two failure postures and why they differ; `force_ask` over `ask`; file-scoped
 converge over mirror. Append-only — supersede, never delete.
 
-### T13 — Docs
+### T13 ✅ — Docs
+
+**Done** — AGENTS.md (security-sensitive list, both suite contracts, eight
+suites), ARCHITECTURE.md (state layout + posture table), `docs/permissions-model.md`
+(a two-agent section), `docs/index.md`, README, `.agents/skills/profile-lifecycle.md`
+(build-before-reset ordering), `work/README.md`. `agent-notice.md` was NOT
+touched: nothing in the agent's frame of reference changed.
+
 
 1. `ARCHITECTURE.md` — state layout and the second agent's policy layer.
 2. `docs/permissions-model.md` — dual-agent enforcement.

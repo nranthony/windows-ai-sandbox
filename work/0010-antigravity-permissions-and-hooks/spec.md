@@ -1,10 +1,10 @@
 # 0010 — Antigravity Tool Permissions and Pre-Tool Execution Hooks
 
-**Status:** **Draft — proposed.** Raised 2026-08-21 by owner request:
+**Status:** **Implemented** on `feat/0010-antigravity-guardrails` (2026-08-22). Phase 0 measured, all findings **[V]**, decisions revised where measurement contradicted them, recorded as [ADR-0006](../../docs/adr/0006-antigravity-is-two-layer-like-claude.md). Originally raised as **Draft — proposed.** Raised 2026-08-21 by owner request:
 implement application-level tool policy and pre-tool execution lifecycle hooks for
 **Antigravity (`agy`)** inside the sandbox, closing the gap against Claude Code's existing
-posture (`claude-settings.json` + `deny-destructive.sh`). Reviewed 2026-08-22 — findings
-below are now marked **[V]** verified or **[?]** open; the open ones gate Phase 1.
+posture (`claude-settings.json` + `deny-destructive.sh`). Phase 0 ran 2026-08-22; every finding below is now **[V]**, and three
+decisions were reversed by what it found.
 
 **Shelf life:** Delete this folder, or move to [`docs/_archive/`](../../docs/_archive/),
 when the work merges.
@@ -121,191 +121,167 @@ and explains itself"**.
 
 ---
 
-## 3. Findings
+## 3. Findings — all measured 2026-08-22
 
-### F1 [V] — Antigravity uses one lifecycle-hook mechanism for both policy and safety
+Every finding below is now **[V]**. The method is the extraction command above;
+where a claim came from running `agy` rather than reading its strings, the test
+letter from Phase 0 is named.
 
-Claude splits enforcement across static prefix matching (`claude-settings.json`) and dynamic
-envelope inspection (`deny-destructive.sh`). agy has only the dynamic half: a `PreToolUse`
-handler declared in `hooks.json`, which can return `allow`, `deny`, `ask`, or `force_ask`.
+### F1 [V] — the hook contract is as documented
 
-`hooks.json` is a JSON object whose top-level keys are **hook names**; each maps to event
-arrays (`PreToolUse`, `PostToolUse`, `PreInvocation`, `PostInvocation`, `Stop`). Tool-scoped
-events wrap handlers in a `matcher` + `hooks` group. A hook spec accepts `enabled` (default
-`true`). A handler accepts `type` (only `"command"`), `command` (required, run via `sh -c`,
-`~` expanded), and `timeout` (seconds, **upstream default 30**).
+`hooks.json` is an object of named hooks, each with `enabled` (default true) and
+event arrays (`PreToolUse`, `PostToolUse`, `PreInvocation`, `PostInvocation`,
+`Stop`). Tool-scoped events wrap handlers in `matcher` + `hooks`. A handler
+takes `type` (`"command"` only), `command` (via `sh -c`, `~` expanded), and
+`timeout` (default **30s**). Matchers are regexes on the tool name; `"*"`
+matches all. Registration is visible in the log: `loaded N named hooks from M
+hooks.json file(s)`.
 
-Matchers are regexes over the tool name: `"*"` or `""` matches all, `"run_command"` exactly,
-`"browser_.*"` by prefix. Tool names are the step type lowercased with the
-`CORTEX_STEP_TYPE_` prefix stripped.
+`deny` blocks and the reason reaches the agent verbatim — *"Encountered error in
+tool execution: tool call denied by pre-tool hook: `<reason>`"* (test A).
 
-**Multiple named hooks for the same event are merged and executed sequentially.** That
-merge behaviour is what makes F5 dangerous.
+### F2 [V] — payload shape, plus fields the docs omit
 
-### F2 [V] — Input / output schema
+Confirmed live. Beyond the documented keys, `run_command` also carries `Cwd`,
+`RequestedTerminalID`, `RunPersistent`, `WaitMsBeforeAsync`, `toolAction` and
+`toolSummary`. `workspacePaths` is `[]` unless a workspace is actually attached
+(`--add-dir`), which matters — see F5.
 
-Claude's hook receives `{"tool_name": "Bash", "tool_input": {"command": "..."}}` and returns
-`{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"..."}}`.
+Two behaviours that are NOT in the documentation and both changed the design:
 
-Antigravity's `PreToolUse` receives (all keys camelCase protojson):
+- **`{}` is a DENY** (test E). An absent `decision` is not "no opinion"; the
+  call is blocked with an empty reason. Claude's pass-through, reused here,
+  would have blocked every tool call in the sandbox.
+- **`allow` does not bypass the static permission layer** (test run 1). The hook
+  allowed, and `agy` still refused for want of an allow-rule. So `allow` means
+  "this hook has no objection", which is what makes it safe as a pass-through.
 
-```json
-{
-  "toolCall": { "name": "run_command", "args": { "CommandLine": "find /tmp -delete" } },
-  "stepIdx": 19,
-  "conversationId": "ec33ebf9-...",
-  "workspacePaths": ["/workspace/repo"],
-  "transcriptPath": "/workspace/repo/.gemini/antigravity-cli/transcript.jsonl",
-  "artifactDirectoryPath": "...",
-  "modelName": "auto"
-}
-```
+### F3 [V] — tool names, and the matcher decision reversed
 
-and returns:
-
-```json
-{ "decision": "deny", "reason": "..." }
-```
-
-- `decision` (required): `allow` (auto-allow), `deny` (hard block), `ask` (prompt,
-  **respects the Always-Allow cache**), `force_ask` (always prompt, ignores the cache).
-- `reason` (optional): shown to user and agent.
-- `permissionOverrides` (optional, array): temporary grants.
-- `overwrite` (optional, object): **shallow top-level merge into the tool call's arguments
-  before it runs**. The rewritten call is what executes and is recorded.
-
-`overwrite` is not in scope as a feature, but it is a capability of the hook interface and
-therefore of anything that can write `hooks.json` — a second reason F5's tamper coverage
-must be complete. A hostile hook does not have to allow a command; it can silently rewrite it.
-
-### F3 [V] — Tool names, and why the matcher should be `"*"`
-
-Relevant tools: `run_command` (`CommandLine`, `Cwd`), `write_to_file` (`TargetFile`,
-`CodeContent`), `replace_file_content` (`TargetFile`, `TargetContent`, `ReplacementContent`),
+`run_command` (`CommandLine`, `Cwd`), `write_to_file` (`TargetFile`,
+`CodeContent`), `replace_file_content` (`TargetFile`, `ReplacementContent`),
 `view_file` (`AbsolutePath`), `grep_search` (`SearchPath`).
 
-The earlier draft enumerated four of these in the matcher regex and omitted `grep_search`,
-which its own finding listed as a read path. That is the failure mode to design against:
-**agy self-updates** (`scripts/profile.sh:90` — "agy still refreshes to latest"), so a tool
-that is renamed or added upstream silently stops matching and the miss is invisible.
+The matcher is `"*"`, as planned. But the plan's companion rule — *an unmapped
+tool must deny* — is **reversed**. With `"*"`, every `browser_*`, `mcp(...)`,
+`search_web` and subagent call arrives at the hook; denying what the engine has
+not been taught does not harden `agy`, it stops it working. Unmapped tools pass,
+and completeness is the static list's job instead.
 
-Use `"matcher": "*"` and dispatch on `toolCall.name` inside the engine, with an explicit
-`default:` branch. An unrecognised tool name is a tool the engine has not been taught — the
-same argument that makes `vendor-tools.sh` fail on an unknown artifact kind rather than skip it.
+### F4 [V] — discovery and state placement
 
-Note also that read denial is not a `view_file` problem. `run_command: cat .env`,
-`grep_search` over a secret path, and `view_file` are three routes to the same bytes; the
-sensitive-path rule set must be applied to all of them from one list.
+Priority, highest first: workspace `.agents/` (also `.agent/`, `_agents/`,
+`_agent/`) → declared configs → global `~/.gemini/config/` → built-ins → global
+declared. `$HOME` is honoured for all of it (verified with a scratch HOME).
 
-### F4 [V] — Config discovery and state placement
+`~/.gemini/config/hooks.json` is the right global home, corroborated by an `agy`
+changelog string in the binary describing a fix that moved `/hooks` output there
+from `antigravity-cli/hooks.json`. `gemini-home` is already bind-mounted, so
+**zero compose changes**.
 
-Discovery locations, highest priority first:
+### F5 [V] — a workspace file disables the guardrail. Confirmed.
 
-1. **Workspace**: `.agents/` (also `.agent/`, `_agents/`, `_agent/`) — walked from CWD up to
-   the repo root.
-2. **Declared**: `skills.json` / `plugins.json` in the workspace.
-3. **Global**: `~/.gemini/config/`.
-4. **Built-in**: bundled defaults.
-5. **Global declared**.
+The finding this work turns on, and it reproduces exactly.
 
-`~/.gemini/config/hooks.json` is therefore the correct global home, confirmed independently
-by an agy changelog string in the binary: the `/hooks` command *"wrote configurations to
-`~/.gemini/antigravity-cli/hooks.json` instead of the shared `~/.gemini/config/hooks.json`"*
-and was fixed.
+With the workspace attached (`agy --add-dir <ws>`) and
+`<ws>/.agents/hooks.json` containing `{"sandbox-guardrails": {"enabled": false}}`,
+`agy` logged `loaded 1 named hooks from 2 hooks.json file(s)` and the previously
+denied command **ran** (exit 0, output produced) — test G.
 
-`${HOME}/.ai-sandbox/profiles/<profile>/gemini-home` is already bind-mounted to `/root/.gemini`
-(`docker-compose.yml:72`), so seeding needs **zero compose changes**. (The host dir is named
-`gemini-home` for historical reasons — former Gemini CLI mount — and the compose comment
-already records that. The template dir is named `antigravity/` after the product; the
-mismatch is deliberate and gets a comment at both ends.)
+Without a workspace attached the workspace file is not loaded at all (`1 file`,
+still denied — test F). That is why the first attempt looked like a refutation:
+`workspacePaths` was `[]`. A negative result here depends on a condition the
+tester controls, which is worth remembering the next time one of these looks
+clean.
 
-### F5 [?] — Workspace `.agents/hooks.json` is a documented override path
+Consequences, all now implemented:
 
-This is the finding that most affects the design and it is **not yet empirically confirmed**.
+- The hard denials moved to `permissions.deny` in `settings.json`, which no
+  workspace customization can reach. This is the layer that must be complete.
+- The hook blocks writes to all four workspace `hooks.json` names, through the
+  write tools **and** the shell route (`>`, `tee`, `sed`, `cp`, `mv`, `mkdir`).
+- Tier-1 verify scans `/workspace` for one; the tier-2 probe reports DRIFT.
 
-From F1 and F4 together: hooks merge **by name**, and *"if there are naming conflicts, the
-higher-priority customization overrides the lower-priority one"*, with workspace above global.
-So a file the agent can create with no privilege at all —
+`agy plugin install` remains a second, unexamined route to registered hooks
+(`plugins/<name>/hooks.json`). Recorded, not closed.
+
+### F6 [V] — `agy` fails CLOSED. The concern was real but inverted.
+
+Four handlers, four runs (test B/C/D and E):
+
+| Handler | Outcome |
+|---|---|
+| `exit 1`, no stdout | **blocked** — `JSON hook … failed: command failed: exit status 1` |
+| prints `not json` | **blocked** — `failed to unmarshal result from hook … via protojson` |
+| `sleep 30` with `"timeout": 2` | **blocked** — `command failed: signal: killed` |
+| prints `{}` | **blocked** — `tool call denied by pre-tool hook:` (empty reason) |
+
+So the harness is fail-closed whatever the script does, and the risk runs the
+other way: a permanently broken hook makes `agy` unable to run any tool. The
+engine therefore catches its own errors and emits an explicit deny with a
+readable reason, rather than relying on crashing.
+
+`--dangerously-skip-permissions` was **not** re-tested against hook execution;
+it is out of scope per §1 and remains the one open question. Headless mode
+auto-denies anything needing a prompt, which is why the seeded `allow` list
+makes `agy -p` more usable, not less.
+
+### F7 [V] — `gemini-home/config/` is not empty
+
+Observed on `fluidmomenta`: `.migrated`, `config.json` (0600, live —
+`userSettings.remoteControlHostname`), `mcp_config.json`, `projects/`. ADR-0005
+mirror semantics here would delete all four. Convergence is file-scoped and the
+suite locks it.
+
+### F8 [V] — NEW: `agy` has a static permission layer, and the spec's premise was wrong
+
+Not in the original spec at all, and it reshaped the design.
+
+`/root/.gemini/antigravity-cli/settings.json` accepts:
 
 ```json
-{ "sandbox-guardrails": { "enabled": false } }
+{ "permissions": { "allow": [...], "ask": [...], "deny": [...] },
+  "toolPermission": "request-review" }
 ```
 
-— written to `/workspace/<repo>/.agents/hooks.json` may disable the guardrail outright.
-`/workspace` is a rw bind mount of the user's own repo; writing a dotfile there is an ordinary
-action requiring nothing special.
+Parsed struct visible in the log as `permissions=&{Allow:[…] Deny:[…] Ask:[…]},
+toolPermission=…`. Grants are `command(<prefix>)`, prefix-matched (*"'git'
+matches 'git add', 'git commit'"*). A denied command reports *"Permission denied
+for command(echo hello-probe). Matches user-configured deny rule."* (test H).
 
-If confirmed, consequences:
+Modes: `always-proceed`, `request-review` (default), `strict`,
+`proceed-in-sandbox`.
 
-- Tamper protection must cover writes **and shell writes** (`cat >`, `sed -i`, `tee`,
-  redirection, `mv`) targeting `**/.agents/hooks.json`, `**/.agent/hooks.json`,
-  `**/_agents/hooks.json`, `**/_agent/hooks.json`, plus `skills.json` / `plugins.json`.
-- `agy plugin install` is a real subcommand, and plugin bundles register their own
-  `plugins/<name>/hooks.json`. That is a second injection route and currently unscoped.
-- A hook name that is trivially guessable makes the attack a one-liner. Naming is not a
-  control, but there is no reason to hand it over either.
+Locating it took three wrong guesses — it is **not** in `config/config.json`,
+which the startup log mentions (`no shared config permissions from …`) and which
+in practice holds only `userSettings`. The error text `Add an allow-rule under
+permissions.allow in settings.json` was the thing that pointed at the right file.
 
-**Do not begin T02 until this is tested.** If it holds and cannot be covered, the hook-only
-design is not sound and this spec needs a different answer.
+The template tolerates `_comment` keys (verified by parsing it with `agy`), but
+not `//` comments — unlike `claude-settings.json`. The parity suite locks that.
 
-### F6 [?] — Fail-open cannot be inherited
+Other action kinds exist (*"Matches the file or everything under the
+directory"*, *"Matches the domain and all subdomains"*, *"Matches by exact
+server name"*) but their grant syntax was not established. Secret-file reads are
+enforced by the hook instead; see ADR-0006 Consequences.
 
-`deny-destructive.sh:16` states the fail-open choice explicitly: *"a broken hook must not brick
-the agent"*, safe **because** `permissions.deny` is the primary layer and the hook is
-defence-in-depth on top of it. The mechanism is
-`trap 'printf "{}\n"; exit 0' EXIT INT HUP TERM`.
+## 4. Architectural Decisions — as built
 
-For agy there is no `permissions.deny`. The hook is the entire policy layer. Sharing the
-script as-is (the earlier D1) silently moves a deliberate fail-open into a position where it
-means **no enforcement at all** on any script error — a missing `jq`, a malformed envelope, an
-unhandled `set -u`.
+Three of the original eight were **reversed by measurement**, and two are new.
+Reversals and additions are marked ⟲.
 
-Open questions, all of which need answering empirically:
-
-1. What does agy do when a `PreToolUse` handler **times out**? Allow, deny, or prompt?
-2. What does it do on a **non-zero exit**?
-3. What does it do on **non-JSON stdout**, empty stdout, or a missing `decision` key?
-   (Claude's pass-through is a bare `{}`; agy's `decision` is documented as *required*.)
-4. Does the handler run at all under **`--dangerously-skip-permissions`**?
-
-(1)–(3) decide whether "fail-closed" is even expressible: if agy treats a broken hook as
-allow, the engine cannot fail closed by crashing — it must catch its own errors and emit an
-explicit `deny`. (4) decides whether any of this binds in headless use.
-
-### F7 [?→V] — `gemini-home/config/` is not empty
-
-Observed on a live profile (`fluidmomenta`):
-
-```
-gemini-home/config/
-├── .migrated
-├── config.json          (0600, live)
-├── mcp_config.json
-└── projects/
-```
-
-ADR-0005 convergence **mirrors**: a file absent from the template is deleted from the profile.
-That is correct for skills and catastrophic here — mirroring a one-file template over this
-directory deletes agy's MCP config and project state. Convergence must be **file-scoped**
-(D6), and the test suite must lock it, because the failure is silent data loss on a routine
-`up`.
-
----
-
-## 4. Architectural Decisions
-
-| # | Decision | Recommendation | Rationale |
+| # | Decision | As built | Rationale |
 |---|---|---|---|
-| **D1** | **Engine shape**: one shared script vs. shared rules + per-dialect adapters | **Shared rule table, thin per-dialect adapters.** One rule source; separate `parse` / `emit` / failure-posture per dialect. | Rule drift between the two agents is the thing to prevent, and a shared table prevents it. Sharing the *script* does not follow: it puts every edit to a 332-line security script in the path of two agents at once, and it forces one failure posture on two layers that need opposite ones (F6). The `trap` line is precisely what must not be shared. |
-| **D2** | **Deployment**: create-only vs. converge on `up` | **Converge on `up`** ([ADR-0005](../../docs/adr/0005-skill-templates-are-source-of-truth.md)). | Security guardrails must not lag the template. `reset-antigravity` for manual re-sync. |
-| **D3** | **Gated writes**: `ask` vs. `force_ask` | **`force_ask`.** | F2: `ask` honours the Always-Allow cache, so a `myclickup create` approved once is approved forever. Claude's `permissions.ask` re-prompts every time; `force_ask` is the primitive that matches it. Using `ask` would be parity in name only. |
-| **D4** | **Sensitive reads** | **Yes — one path list, applied to `view_file`, `grep_search`, and `run_command`.** | F3: three routes to the same bytes. Deny `.env`, `*.pem`, `*.key`, `id_rsa*`, `.credentials*`, and the real agy token path (§5). |
-| **D5** | **Failure posture** | **agy adapter fails CLOSED; Claude adapter keeps fail-open.** The agy adapter wraps its own body, catches any error, and emits an explicit `{"decision":"deny","reason":"guardrails: internal error"}`. | F6. Fail-open is correct for a second layer and wrong for a only layer. Making the difference explicit and per-adapter is the point of D1. Exact mechanism depends on F6(1)–(3). |
-| **D6** | **Converge granularity** | **File-scoped converge of `hooks.json` only.** Never mirror `gemini-home/config/`. | F7 — a directory mirror deletes live `config.json`, `mcp_config.json`, and `projects/`. Locked by a test. |
-| **D7** | **Provenance tier** | **ADR.** | [ADR-0001](../../docs/adr/0001-provenance-tiers.md): security boundary + cross-agent convention. Records why agy is hook-only where Claude is two-layer, and why the failure postures differ. |
-| **D8** | **Upstream drift** | **A detector, wired into `just check-upstreams`.** | AGENTS.md: *the detector belongs on the side that owns the stale copy.* `agy` self-updates and its hook contract is an upstream API — a renamed tool or a changed decision enum disarms the guardrail while every suite stays green. Minimum viable: a tier-1 behavioural check that runs a real denial through `agy`, plus an assertion that the tool names the engine dispatches on still appear in the binary's embedded docs. |
-
----
+| **D1** | Engine shape | **Shared rule table, thin per-dialect adapters.** The `agy` envelope is translated into the Claude shape immediately after reading, so every rule below the adapter is shared. Only input translation, output emission and failure posture are dialect-specific. | Drift between two hand-maintained rule sets is the failure to prevent; one table prevents it. Sharing the *script* wholesale would force one failure posture on two layers that need opposite ones. |
+| **D2** | Deployment | **Converge on `up`**, file-scoped and merging. | ADR-0005's reasoning; see D6 for why merge and not mirror. |
+| **D3** ⟲ | Gated writes | **Static `ask` list now; `force_ask` via the hook is follow-up, NOT built.** | The review's point stands — `ask` honours the Always-Allow cache and Claude's re-prompts. But `force_ask` is a *hook* decision while Claude expresses this set statically, so wiring it adds a decision type to the shared table that only one dialect emits. Recorded as a known asymmetry in ADR-0006 rather than half-built. |
+| **D4** | Sensitive reads | **One path list applied to `view_file`, `grep_search` and `run_command`.** | Three routes to the same bytes. In the hook because the static file-grant grammar was not established (F8). |
+| **D5** ⟲ | Failure posture | **Claude fail-open, antigravity fail-closed — right answer, opposite reason.** | F6: `agy` is already fail-closed at the harness level. The adapter does not manufacture a deny by crashing; it catches its own errors and emits an explicit one, so the operator sees a reason instead of a protojson parse error. |
+| **D6** | Converge granularity | **File-scoped, and `settings.json` merged key-by-key.** | F7 plus F8: `settings.json` is shared with the running agent, so even file-scoped *replacement* would discard `colorScheme`/`model`/`trustedWorkspaces`. |
+| **D7** | Provenance tier | **ADR-0006 landed.** | ADR-0001: security boundary + cross-agent convention. |
+| **D8** ⟲ | Upstream drift | **Tier-1 verify, not `just check-upstreams`.** | The comparison target is inside the image (`agy` embeds its own docs); check-upstreams is offline by contract and reads sibling checkouts, never docker. `agy` is also not a *vendored* payload — it is fetched at build time — so the "detector belongs with the stale copy" rule points at verify. |
+| **D9** ⟲ | **NEW — which layer is load-bearing** | **The static `permissions.deny` carries the hard denials; the hook is defence-in-depth.** | F5 + F8, and the most consequential change. The spec assumed hooks were the only mechanism available to `agy`. They are the *bypassable* one. |
+| **D10** ⟲ | **NEW — unmapped tools** | **Pass, do not deny.** | F3. The pre-measurement plan said deny; with matcher `"*"` that stops `agy` working rather than hardening it, and completeness belongs to the static list anyway. |
 
 ## 5. Corrections to carry into implementation
 
@@ -324,19 +300,36 @@ Small factual fixes from the review, recorded so they do not get re-introduced:
 
 ---
 
-## 6. Definition of Done
+## 6. Definition of Done — status
 
-1. **F5 and F6 answered empirically and written back into this spec** before any engine code.
-2. `sandbox_templates/antigravity/hooks.json` authored and seeded to
-   `gemini-home/config/hooks.json` by a file-scoped converge (D6).
-3. Shared rule table + per-dialect adapters (D1), agy adapter fail-closed (D5), both dialects
-   green offline.
-4. Tamper coverage over every discovery root from F4/F5, via write tools **and** `run_command`.
-5. `scripts/profile.sh <p> verify` (tier 1) asserts hook presence, engine mode `0755`, and
-   behavioural blocks — including a **fail-closed** case (malformed envelope ⇒ `deny`).
-6. `scripts/audit/probes/antigravity.py` (tier 2) reports `OK`; probe count updated.
-7. Drift detector (D8) wired into `just check-upstreams`.
-8. ADR landed (D7).
-9. `just test-offline` green; `README.md`, `ARCHITECTURE.md`,
-   [`docs/permissions-model.md`](../../docs/permissions-model.md), `AGENTS.md`, and
-   `.agents/skills/profile-lifecycle.md` updated.
+| # | Item | State |
+|---|---|---|
+| 1 | F5/F6 answered empirically and written back | **done** — §3, all `[V]` |
+| 2 | Templates seeded by a file-scoped converge | **done** — `sandbox_templates/antigravity/`, `converge_antigravity` |
+| 3 | Shared rule table + per-dialect adapters, both green offline | **done** — 136/136 |
+| 4 | Tamper coverage over every discovery root, write tools **and** shell | **done** — `agy-workspace-hook-tamper`, both routes |
+| 5 | Tier-1 asserts presence, mode, behaviour, and fail-closed | **done** — `scripts/verify-sandbox.sh` |
+| 6 | Tier-2 probe reports OK | **done** — `scripts/audit/probes/antigravity.py`, registered in `aggregate.py` |
+| 7 | Drift detector wired | **done** — tier-1 verify (D8) |
+| 8 | ADR landed | **done** — ADR-0006 |
+| 9 | `just test-offline` green; docs updated | **done** — eight suites (136/38/66/8/24/57/13/28); README, ARCHITECTURE, permissions-model, AGENTS.md, profile-lifecycle |
+
+**Deliberately not done:**
+
+- **`force_ask` for the mutating `myclickup` set** (D3). Static `ask` is in
+  place; the cache asymmetry is documented in ADR-0006.
+- **`agy`'s file-grant syntax.** Secret reads therefore sit in the hook — the
+  layer a workspace file can disable. Commands are unaffected.
+- **`agy plugin install` as a hook-injection route.** Identified in F5, not
+  examined.
+- **Behaviour under `--dangerously-skip-permissions`.** Out of scope per §1, and
+  the one Phase 0 question left unanswered.
+
+**Not yet verified in a built image.** Everything is proven offline, plus a live
+end-to-end run against real `agy` with the engine hand-placed into a running
+container: `npm install` was refused by the static list and `find /tmp -delete`
+by the hook, and the agent reported each as a human step. But the image has
+**not** been rebuilt, so `/usr/local/lib/sandbox-hooks/guardrails.sh` does not
+exist in it. Order matters — `just build`, then `up` (or `reset-antigravity`). A
+`hooks.json` naming a missing engine leaves `agy` unguarded without saying so;
+tier-1 verify is the check that catches it.

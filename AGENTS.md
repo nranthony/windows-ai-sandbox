@@ -46,6 +46,13 @@ These files carry the sandbox's guarantees:
 - `seccomp.json`
 - `proxy/squid.conf` + `proxy/allowed_domains.txt`
 - `sandbox_templates/claude/claude-settings.json` + `sandbox_templates/claude/hooks/`
+  (the hook under `hooks/` is now shared by BOTH agents — see below)
+- `sandbox_templates/antigravity/` — the `agy` half of the same policy
+  ([ADR-0006](docs/adr/0006-antigravity-is-two-layer-like-claude.md)). The
+  **static** `permissions.deny` there is the load-bearing layer, not the hook:
+  a workspace `.agents/hooks.json` outranks the global one and can disable the
+  hook **by name** (measured, `work/0010` Phase 0), while nothing in a workspace
+  can reach `settings.json`.
 - `scripts/profile.sh`, `scripts/init-profile-state.sh`, `scripts/verify-sandbox.sh`
   (the credential.helper scrub both run on every `up` is a load-bearing defense
   against VS Code injecting host-reaching git credential helpers — audit
@@ -71,7 +78,24 @@ Any change to them requires:
 3. Affected docs updated (ARCHITECTURE.md, `sandbox-hardening-package.md`).
 
 Hook edits additionally require
-`bash sandbox_templates/claude/hooks/deny-destructive.test.sh` (113/113).
+`bash sandbox_templates/claude/hooks/deny-destructive.test.sh` (136/136). That
+script is now ONE engine serving TWO agents, selected by `--dialect=`, so a rule
+added for either protects both — and its two failure postures are deliberately
+OPPOSITE: claude fails **open** (its `permissions.deny` is underneath it),
+antigravity fails **closed** (for reads the hook IS the control, and `agy`
+blocks a misbehaving hook regardless). Claude's pass-through `{}` is a **deny**
+to `agy`, so the antigravity pass must stay an explicit `{"decision":"allow"}`.
+Unifying any of that is the likeliest way to turn this into a hole; the suite
+locks all three.
+Edits to `sandbox_templates/antigravity/` or to either static deny list require
+`bash scripts/antigravity-parity.test.sh` (28/28, offline — no docker, no `agy`).
+It diffs the two deny lists EXACTLY, in both directions, with no exception list,
+because two hand-edited lists that must agree will drift — `pnpm dlx` and its
+five fetch-and-run siblings already did exactly that. It also locks that
+convergence MERGES and is file-scoped: `gemini-home/config/` holds live `agy`
+state (`config.json`, `mcp_config.json`, `projects/`) and
+`antigravity-cli/settings.json` is shared with the running agent, so applying
+ADR-0005's mirror semantics there is silent data loss on a routine `up`.
 Edits to `scripts/depaudit.py` require `bash scripts/depaudit.test.sh` (38/38
 offline; `--online` adds the OSV corpus). Two of its assertions are regression
 locks for checks that shipped **inverted** — read the header before changing them.
@@ -139,7 +163,7 @@ locked now. The suite also asserts every fetch-and-run form the notice names has
 a real `permissions.deny` entry behind it: a notice promising a denial that does
 not exist is never tested, because the agent reads it and does not attempt.
 
-`just test-offline` runs all seven suites, then `just check-upstreams`. Verify
+`just test-offline` runs all eight suites, then `just check-upstreams`. Verify
 additionally asserts no `*.bak*` sits beside the seeded skills: `converge_skills`
 prunes only `*.bak.*`, so the unstamped form survives it.
 
@@ -280,6 +304,7 @@ cross-repo conventions gets an ADR; local implementation details never do.
 
 ```bash
 scripts/profile.sh <profile> up|down|attach|verify|audit
+scripts/profile.sh <p> reset-antigravity     # re-converge the agy policy (build FIRST)
 scripts/profile.sh list
 scripts/profile.sh build --refresh-ai        # bump AI CLIs (tail layer only)
 scripts/with-egress.sh <p> --with pypi -- '<cmd>'   # temporary egress widening
