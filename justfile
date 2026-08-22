@@ -145,6 +145,7 @@ test-offline:
     bash {{justfile_directory()}}/scripts/profile-skills.test.sh
     bash {{justfile_directory()}}/scripts/vendor-tools.test.sh
     bash {{justfile_directory()}}/scripts/agent-notice.test.sh
+    bash {{justfile_directory()}}/scripts/antigravity-parity.test.sh
     @just --justfile {{justfile()}} check-upstreams
 
 # build-layer ordering tripwire (Dockerfile only; see the header for why the
