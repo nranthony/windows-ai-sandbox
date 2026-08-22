@@ -238,13 +238,26 @@ COPY sandbox_templates/common/.p10k.zsh /root/.p10k.zsh
 COPY sandbox_templates/common/pdf-styles/legal.css /usr/local/share/pdf-styles/legal.css
 
 # deny-destructive PreToolUse hook — closes the deny-list bypass class where
-# permissions.deny's prefix matcher cannot see destructive flags (find
+# a static deny list's prefix matcher cannot see destructive flags (find
 # -delete, dd of=) or path targets (Edit to /usr/local/lib/claude-hooks/).
 # See docs/deny-destructive-hook-plan.md. Baked into the image so it survives
 # container recreates; rebuild restores the canonical script on every up.
 # Not using COPY --chmod= to stay portable across non-BuildKit builders.
 COPY sandbox_templates/claude/hooks/deny-destructive.sh /usr/local/lib/claude-hooks/deny-destructive.sh
 RUN chmod 0755 /usr/local/lib/claude-hooks/deny-destructive.sh
+
+# The SAME script serves Antigravity (`agy`) under a second name, selected by
+# --dialect= (see the script header and ADR-0006). Two names, one file, on
+# purpose: a rule added for one agent protects both, and rule drift between
+# them is the failure mode the shared engine exists to prevent.
+#
+# The claude-hooks path stays canonical because every already-seeded profile's
+# claude-home/settings.json names it; adding the second path must not require a
+# reset-settings on existing profiles. A symlink (not a copy) so the two can
+# never diverge on disk.
+RUN mkdir -p /usr/local/lib/sandbox-hooks \
+ && ln -sf /usr/local/lib/claude-hooks/deny-destructive.sh \
+           /usr/local/lib/sandbox-hooks/guardrails.sh
 
 # webfetch — web-read broker for the restricted agent. curl/wget are denied and
 # the real WebFetch tool is not allow-listed, so the agent reads the web ONLY
