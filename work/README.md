@@ -41,6 +41,7 @@ weeks after their content went stale.
 | [0008](0008-the-python-half-of-the-gates/plan.md) | The Python half of the dependency gates (Gate 3 project overrides, uv age gate, `uv audit`) | Not started, **verify §2.3 before implementing** |
 | [0009](0009-the-third-cli-runs-on-bun/spec.md) | opencode as the third in-container CLI (OpenRouter provider) — its runtime is Bun, so Gate 2 and the proxy env do not carry over | **Parked** — specified, not scheduled; **Phase 0 measurement first** on unparking |
 | [0010](0010-antigravity-permissions-and-hooks/spec.md) | Antigravity tool permissions and PreToolUse lifecycle hooks (parity with Claude Code) | **In progress** — Phase 0 measured, engine + templates + seeding + detectors landed on `feat/0010-antigravity-guardrails`; [ADR-0006](../docs/adr/0006-antigravity-is-two-layer-like-claude.md) |
+| [0011](0011-one-policy-convergence-across-agents/spec.md) | One policy convergence across every code agent — Claude's settings stop being create-only; one `just converge`; a descriptor per agent | **Draft** — direction chosen, awaiting go-ahead |
 
 Exited: **0001 dependency guardrails** — complete (T00–T26), archived 2026-08-03
 to [`docs/_archive/dependency-guardrails-plan.md`](../docs/_archive/dependency-guardrails-plan.md);
