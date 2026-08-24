@@ -5,6 +5,22 @@ decisions D1–D6 are what these steps implement, and several steps exist only b
 of a specific finding. Its §0 subsection "What Bun is" is the prerequisite for all of
 them.
 
+> **Correction, 2026-08-24.** Propagating spec.md's 2026-08-23 correction block
+> (from [0011](../0011-one-policy-convergence-across-agents/spec.md) F8) into this
+> plan, unamended: **T01/Q6, T06's config-template path, and T11's "matches template"
+> verify assertion all still target the GLOBAL config at precedence level 2**
+> (`~/.config/opencode/opencode.json`, `~/.ai-sandbox/profiles/<p>/config/opencode/`) —
+> the path 0011 F8 rejected in favor of the level-7 managed config. This is annotated
+> here rather than redesigned, per the owner instruction for a parked doc — do not
+> silently rewrite T01/T06/T11 to the managed path; re-derive against F8's correction
+> when this item actually unparks, including the still-open questions F8 raised (Linux
+> managed-config path, project-file merge semantics). Also: **D2's `reset-opencode` escape hatch (T10 below) is superseded and
+> the supersession has now LANDED** — 0011 deleted every `reset-*` subcommand
+> (`reset-settings`/`reset-skills`/`reset-antigravity`) in favor of one `just converge`
+> (`scripts/profile.sh:1813-1814`, confirmed 2026-08-24). D2's create-only rationale for
+> wanting a separate reset path is now historical; T10 should design its seeding step
+> against `converge`, not against a new `reset-opencode` subcommand.
+
 **This item is parked** (spec status). The phases below are what to do on unparking, in
 order — not a queue anyone is currently working.
 
@@ -246,8 +262,11 @@ note):
   on every `up`, no `.bak` files — ADR-0005's rule is that a stamped backup beside a
   live config is a second live copy, and `verify` asserts no `*.bak*` sits beside
   seeded content.
-- `reset-opencode` subcommand mirroring `reset-settings` (`profile.sh:~1348`), for the
-  case where you want the reset without touching the container.
+- ~~`reset-opencode` subcommand mirroring `reset-settings`~~ — **superseded, 0011
+  landed**: there is no more `reset-settings` to mirror. `just converge` now covers all
+  policy files for both agents in one path (`profile.sh:1813-1814`); design opencode's
+  seeding to land inside that same convergence rather than as a new standalone
+  subcommand.
 
 ---
 
@@ -278,9 +297,13 @@ New module per D6. Assertions:
 - live-vs-template diff, `_`-prefixed keys stripped as `settings.py::_strip_doc_keys`
   already does.
 
-Then update the probe count: **65 appears in `README.md` at `:100`, `:200` and `:320`**,
-and `.agents/skills/security-audit.md:9` still says "~80" and is already wrong — fix it
-in the same pass rather than adding a third number to the pile.
+Then update the probe count: **65 appears in `README.md`** (currently `:109`, `:206`,
+`:325` — confirmed 2026-08-24, re-grep at unpark time since lines drift), and
+`.agents/skills/security-audit.md:9` still says "~80" and is already wrong — fix it
+in the same pass rather than adding a third number to the pile. **Note (2026-08-24):**
+work/0010 found the real live count is already ~83 (an 18-check antigravity probe), so
+by the time this item unparks 65 may already be gone from all three README spots —
+land opencode's probe count addition against whatever number 0010 leaves, not against 65.
 
 ### T13 — live run under hardening
 
@@ -321,8 +344,10 @@ the overlap worth waiting on, because it was in security-critical files.
 
 What is in flight *now* is a different and much weaker overlap: `AGENTS.md`,
 `README.md` and `docs/index.md` are modified by the agent-notice work
-(`scripts/agent-notice.test.sh`, new — `just test-offline` is seven suites now, not
-six), alongside a myconv skills re-vendor. Those three are **Phase 4 docs targets
+(`scripts/agent-notice.test.sh`, new — `just test-offline` was seven suites at that
+point, not six; **it is nine as of 2026-08-24**, per `justfile`'s `test-offline` recipe
+and AGENTS.md — re-check again at unpark time, this count has moved twice already),
+alongside a myconv skills re-vendor. Those three are **Phase 4 docs targets
 only**. Phase 4 is the last phase and touches no guarantee, so this does not gate
 starting.
 

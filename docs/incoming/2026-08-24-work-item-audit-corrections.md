@@ -41,6 +41,8 @@ with a paragraph and archive it. If instead it stays open, minimum rewrite:
 
 ## 0003 — repo scan audit (`work/0003-repo-scan-audit/plan.md`)
 
+**APPLIED 2026-08-24** — folded into the doc(s); skip at fold time.
+
 Refresh before executing (and re-verify counts at that time — this list is as of
 2026-08-24):
 
@@ -183,6 +185,8 @@ The mandatory §3 re-investigation RAN 2026-08-24 and is discharged. Create
   relevant to §3.2's host-side non-gating wiring.
 
 ## 0009 — opencode/Bun (`work/0009-the-third-cli-runs-on-bun/spec.md` AND `plan.md`)
+
+**APPLIED 2026-08-24** — folded into the doc(s); skip at fold time.
 
 - **§0 "no existing Bun surface" is FALSE and was false when written** (both
   hits predate the claimed 2026-08-20 verification): 12+ touchpoints — both

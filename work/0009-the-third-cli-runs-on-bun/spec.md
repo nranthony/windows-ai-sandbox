@@ -99,11 +99,24 @@ introducing a **second JavaScript runtime, with its own package manager**, into 
 whose dependency gates, proxy assumptions and syscall filter were every one of them
 written against the first.
 
-**There is no existing Bun surface here.** Verified 2026-08-20: the string `bun` appears
-nowhere in this repo outside this work item — every apparent hit is "Ubuntu". No
-`bunfig.toml`, nothing in the `Dockerfile`, nothing in `seccomp.json` written with it in
-mind. That is *why* F1 and F6 exist. It also means there is nothing to retrofit or
-reconcile, only something to add — which is the one piece of good news in this section.
+**Correction, 2026-08-24 — the "no existing Bun surface" claim above is FALSE, and was
+false when written** (both hits it was based on predate the claimed 2026-08-20
+verification date). There are **12+ Bun touchpoints already in this repo**: both agent
+templates' deny lists (`bun add`, `bun install`, `bun x`, `bunx`); the shared hook's
+fetch-and-run regex (`:304`/`:308`/`:316`) plus four locked test assertions;
+`settings.py:70`'s `REQUIRED_DENY`; `agent-notice.md:18` and its
+`agent-notice.test.sh:121` lock; `with-egress.sh:264`/`:564`'s mapping; `depaudit.py`'s
+first-class Bun ecosystem support; `rfcs/02:218`'s bunfig `minimumReleaseAge` table
+(the exact gate D5 below presents as an open question); `rfcs/01`; and
+`docs/permissions-model.md:51`. No `bunfig.toml` and nothing in `Dockerfile` or
+`seccomp.json` is still true — those really are new. But the framing consequence is
+real: **unparking this item is a RECONCILIATION with an already-enforced deny surface
+around Bun's fetch-and-run pattern, not an addition against a blank slate.** The open
+question at unpark time is whether opencode's own runtime package install (F1, T09)
+falls under those existing rules, needs a carve-out, or needs the agent-notice updated
+to say what it can and can't do here — not whether Bun is mentioned anywhere. This claim
+is removed from the "structural, trust cold" shelf-life bucket above; it was never
+structural, and it was wrong on the date it was written.
 
 ---
 
@@ -130,13 +143,13 @@ Three CLIs, three integration surfaces. The table is the spec:
 | Surface | Claude Code | `agy` | opencode (proposed) |
 |---|---|---|---|
 | Install | `npm i -g @anthropic-ai/claude-code` in the AI refresh layer | `install.sh --dir /usr/local/bin`, same layer | `npm i -g opencode-ai`, **same layer** (T02) |
-| Version bump | `--refresh-ai`, `--claude-version=` | `--refresh-ai` | `--refresh-ai`, `--opencode-version=` (T05) |
+| Version bump | `--refresh-ai`, `--claude-version=` | `--refresh-ai` only — `scripts/profile.sh` has no `--agy-version=` flag (verified 2026-08-24: `--claude-version=X.Y.Z` is the only version-pin flag in both `build` parsers). The assumed claude/agy symmetry the table implies does not exist; don't assume `--opencode-version=` slots in beside a matching agy flag | `--refresh-ai`, `--opencode-version=` (T05) |
 | Auth | `/root/.claude/.credentials.json` (bind mount, persists) | console sign-in, **not** persisted | env key from `secrets.env` (D1) |
 | Config home | `/root/.claude` → profile `claude-home/` | `/root/.gemini` → profile `gemini-home/` | `/root/.config/opencode/` → profile `config/` — **already mounted, no new volume** |
 | Permissions | `permissions.{allow,ask,deny}`, prefix matcher | **`permissions.{allow,ask,deny}` in `command(x)` grammar, prefix matcher — the same deny set, diffed exactly against Claude's** (ADR-0006; this cell said "none of ours" until 2026-08-24) | `permission.{read,edit,bash,…}`, last-match-wins globs (D3) |
 | Autoupdate off | `DISABLE_AUTOUPDATER=1` env + settings | n/a (image-baked) | `OPENCODE_DISABLE_AUTOUPDATE` env + `"autoupdate": false` |
 | Egress | `[claude]` always-on | `[antigravity]` always-on, `[antigravity-install]` gated | `[openrouter]` always-on (exists), `[opencode-install]` gated (T07) |
-| Detector | `settings.py` probe, `verify` checks | `[antigravity]` in probe `REQUIRED_DOMAINS` | new probe section (T12) |
+| Detector | `settings.py` probe, `verify` checks | in probe `REQUIRED_DOMAINS`, but mislabelled — the entries live under a `[gemini]` comment header in `scripts/audit/probes/proxy.py:33-39`, a naming holdover from before the CLI was renamed to `agy`/Antigravity; and that list is missing two domains `proxy/allowed_domains.txt`'s `[antigravity]` block actually carries: `daily-cloudcode-pa.googleapis.com` and `lh3.googleusercontent.com` (verified 2026-08-24) | new probe section (T12) |
 
 The config-home row is the one piece of luck in this work item: opencode's global
 config lives at `~/.config/opencode/opencode.json`, and `/root/.config` is **already**
@@ -341,15 +354,27 @@ fetch traverses Squid). Everything else is either already there or gated.
 | **D3** | Permission posture: port Claude's deny categories, or author from opencode's key set? | **Author from opencode's key set, cross-checked against Claude's categories for coverage.** Per F5 a mechanical port produces wrong-order rules and misses that `allow` is the default. Start `"*": "ask"`, `bash: {"*": "ask", …installers: "deny", …reads: "allow"}`, `webfetch`/`websearch` decided under D4 |
 | **D4** | opencode `webfetch`/`websearch`: `deny`, or `allow` and accept a second unbrokered read path? | **`deny`.** The broker exists so arbitrary page domains stay out of `allowed_domains.txt`; a second path defeats that. Revisit only if the broker turns out to be unreachable from opencode |
 | **D5** | Bun quarantine: write `/root/.bunfig.toml` with `[install] minimumReleaseAge = 604800` in the image? | **Yes if T01 shows opencode's installer honours it**; if not, say so in the Dockerfile at the Gate 2 block rather than leaving the asymmetry undocumented. An unstated gap here is the exact shape of the finding that produced work/0008 |
-| **D6** | Does opencode get its own audit-probe section, or extend `settings.py`? | **New probe module** (`scripts/audit/probes/opencode.py`). `settings.py`'s module docstring and `REQUIRED_DENY` are Claude-shaped; grafting a different permission language onto it makes both harder to read. Probe count in README moves off 65 — update all three references |
+| **D6** | Does opencode get its own audit-probe section, or extend `settings.py`? | **New probe module** (`scripts/audit/probes/opencode.py`). `settings.py`'s module docstring and `REQUIRED_DENY` are Claude-shaped; grafting a different permission language onto it makes both harder to read. Probe count in README moves off 65 — update all three references. **Confirmed 2026-08-24: still 65 at README.md** (currently `:109`/`:206`/`:325` — line numbers drift, re-grep at unpark time). **Also stale against work/0010**, which found the real count is already ~83 with its 18-check antigravity probe — so opencode's probe module needs to land against whatever count 0010 leaves behind, not against 65 |
 
 ---
 
 ## 5. Explicitly out of scope for the first pass
 
-- **A `deny-destructive.sh` equivalent.** opencode's plugin system could host one, but
-  the hook's 95/95 test suite and its envelope regexes are Claude-tool-shaped. Porting
-  it is its own work item. **State this gap in the config's comment block** — opencode
+- **A `deny-destructive.sh` equivalent.** opencode's plugin system could host one.
+  **Re-derived against the current tree (2026-08-24):** the premise that the hook's
+  regexes are "Claude-tool-shaped" is gone — the suite is now 136/136 (was 95/95), and
+  the hook is already ONE engine serving TWO agents (`--dialect=claude` /
+  `--dialect=antigravity`), each with its own envelope shape, selected by a dialect
+  adapter seam that already exists (see AGENTS.md "Hook edits additionally require").
+  Porting to opencode is therefore not "write a Claude-shaped thing for a
+  non-Claude-shaped tool" — it is "add a third dialect to an engine built for more than
+  one". The open question this item still needs to answer is **which way an opencode
+  dialect fails**: `claude`'s fails open (its `permissions.deny` sits underneath the
+  hook) and `antigravity`'s fails closed (the hook IS the read control, `agy` blocks a
+  misbehaving hook regardless) — opencode's own permission enforcement (F5, D3) has to
+  be understood before its dialect's failure posture can be chosen, which is why this
+  stays out of scope for the first pass rather than becoming easier to include.
+  **State this gap in the config's comment block** — opencode
   will run in these containers with one fewer enforcement layer than Claude Code, and
   that must be written down where the next reader finds it, not discovered.
 - MCP servers, custom agents, custom commands, opencode skills.
@@ -368,7 +393,10 @@ fetch traverses Squid). Everything else is either already there or gated.
 3. `bash scripts/dockerfile-order.test.sh` extended and green — opencode's `npm
    install -g` locked **above** Gate 2 for the same `min-release-age` reason the other
    two are (T04).
-4. `just test-offline` green (all seven suites + `check-upstreams`).
+4. `just test-offline` green (all suites + `check-upstreams`) — the suite count moves
+   with every landing (six when this doc was written, seven soon after, **nine** as of
+   2026-08-24 per `justfile`'s `test-offline` recipe and AGENTS.md; re-check the number
+   at unpark time rather than trusting any of these).
 5. A real OpenRouter-backed session runs end to end in a live container under seccomp
    + `cap_drop ALL` + `no-new-privileges` (T01/T13) — per **F6**, Bun is a new runtime
    under a default-deny seccomp allowlist and has never been exercised here. A passing
