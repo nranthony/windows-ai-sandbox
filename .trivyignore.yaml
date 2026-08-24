@@ -12,10 +12,138 @@
 #   3. If gone: delete the entry.
 # =============================================================================
 
-vulnerabilities: []
+vulnerabilities:
+  # --- Ubuntu base (digest-pinned) — fix exists, needs a deliberate pin bump
+  # openssl/libssl3 3.0.13-0ubuntu3.4 -> 3.0.13-0ubuntu3.11. The FROM digest
+  # freezes the base by design; clearing this means bumping the pin (see the
+  # base-image note in the 2026-08-24 scan review), not rebuilding.
+  - id: CVE-2026-45447
+    statement: "openssl in the digest-pinned CUDA base; fixed in ubuntu3.11 — clears at the next deliberate base-digest bump."
+    expired_at: 2026-08-31
+
+  # --- npm-installed CLI bundled deps — arrive with upstream CLI releases,
+  # behind the 7-day build-time quarantine (min-release-age). ReDoS-class /
+  # path-handling issues in brace-expansion, ip-address, tar; not reachable
+  # as a service — these are CLI-internal libs behind seccomp + egress.
+  - id: CVE-2026-14257
+    statement: "brace-expansion bundled by the AI CLIs; clears when upstream ships bumped deps + a --refresh-ai rebuild."
+    expired_at: 2026-08-31
+  - id: CVE-2026-69152
+    statement: "brace-expansion bundled by the AI CLIs; clears when upstream ships bumped deps + a --refresh-ai rebuild."
+    expired_at: 2026-08-31
+  - id: CVE-2026-69192
+    statement: "ip-address bundled by the AI CLIs; clears when upstream ships bumped deps + a --refresh-ai rebuild."
+    expired_at: 2026-08-31
+  - id: CVE-2026-73566
+    statement: "tar bundled by the AI CLIs; clears when upstream ships bumped deps + a --refresh-ai rebuild."
+    expired_at: 2026-08-31
+
+  # --- gh (apt) — golang.org/x/mod in gh's own modules; needs a newer gh
+  # release, picked up by apt at the next rebuild.
+  - id: CVE-2026-56864
+    statement: "x/mod inside the gh binary; upstream release + rebuild clears it."
+    expired_at: 2026-08-31
+  - id: CVE-2026-56865
+    statement: "x/mod inside the gh binary; upstream release + rebuild clears it."
+    expired_at: 2026-08-31
+
+  # --- bd (beads) — static Go binary with stale x/crypto et al.; entirely on
+  # upstream to rebuild. 29 findings, one acceptance: check beads for a newer
+  # release at expiry; if none, extend with a refreshed statement.
+  - id: CVE-2026-25681
+    statement: "bd static binary, stale Go deps; awaiting upstream beads rebuild."
+    expired_at: 2026-08-31
+  - id: CVE-2026-27136
+    statement: "bd static binary, stale Go deps; awaiting upstream beads rebuild."
+    expired_at: 2026-08-31
+  - id: CVE-2026-27145
+    statement: "bd static binary, stale Go deps; awaiting upstream beads rebuild."
+    expired_at: 2026-08-31
+  - id: CVE-2026-33811
+    statement: "bd static binary, stale Go deps; awaiting upstream beads rebuild."
+    expired_at: 2026-08-31
+  - id: CVE-2026-33814
+    statement: "bd static binary, stale Go deps; awaiting upstream beads rebuild."
+    expired_at: 2026-08-31
+  - id: CVE-2026-33818
+    statement: "bd static binary, stale Go deps; awaiting upstream beads rebuild."
+    expired_at: 2026-08-31
+  - id: CVE-2026-39820
+    statement: "bd static binary, stale Go deps; awaiting upstream beads rebuild."
+    expired_at: 2026-08-31
+  - id: CVE-2026-39821
+    statement: "bd static binary, stale Go deps; awaiting upstream beads rebuild."
+    expired_at: 2026-08-31
+  - id: CVE-2026-39822
+    statement: "bd static binary, stale Go deps; awaiting upstream beads rebuild."
+    expired_at: 2026-08-31
+  - id: CVE-2026-39828
+    statement: "bd static binary, stale Go deps; awaiting upstream beads rebuild."
+    expired_at: 2026-08-31
+  - id: CVE-2026-39829
+    statement: "bd static binary, stale Go deps; awaiting upstream beads rebuild."
+    expired_at: 2026-08-31
+  - id: CVE-2026-39830
+    statement: "bd static binary, stale Go deps; awaiting upstream beads rebuild."
+    expired_at: 2026-08-31
+  - id: CVE-2026-39831
+    statement: "bd static binary, stale Go deps; awaiting upstream beads rebuild."
+    expired_at: 2026-08-31
+  - id: CVE-2026-39832
+    statement: "bd static binary, stale Go deps; awaiting upstream beads rebuild."
+    expired_at: 2026-08-31
+  - id: CVE-2026-39835
+    statement: "bd static binary, stale Go deps; awaiting upstream beads rebuild."
+    expired_at: 2026-08-31
+  - id: CVE-2026-39836
+    statement: "bd static binary, stale Go deps; awaiting upstream beads rebuild."
+    expired_at: 2026-08-31
+  - id: CVE-2026-42499
+    statement: "bd static binary, stale Go deps; awaiting upstream beads rebuild."
+    expired_at: 2026-08-31
+  - id: CVE-2026-42504
+    statement: "bd static binary, stale Go deps; awaiting upstream beads rebuild."
+    expired_at: 2026-08-31
+  - id: CVE-2026-42508
+    statement: "bd static binary, stale Go deps; awaiting upstream beads rebuild."
+    expired_at: 2026-08-31
+  - id: CVE-2026-46595
+    statement: "bd static binary, stale Go deps; awaiting upstream beads rebuild."
+    expired_at: 2026-08-31
+  - id: CVE-2026-46597
+    statement: "bd static binary, stale Go deps; awaiting upstream beads rebuild."
+    expired_at: 2026-08-31
+  - id: CVE-2026-46600
+    statement: "bd static binary, stale Go deps; awaiting upstream beads rebuild."
+    expired_at: 2026-08-31
+  - id: CVE-2026-56852
+    statement: "bd static binary, stale Go deps; awaiting upstream beads rebuild."
+    expired_at: 2026-08-31
+  - id: CVE-2026-56853
+    statement: "bd static binary, stale Go deps; awaiting upstream beads rebuild."
+    expired_at: 2026-08-31
+  - id: CVE-2026-56858
+    statement: "bd static binary, stale Go deps; awaiting upstream beads rebuild."
+    expired_at: 2026-08-31
+  - id: CVE-2026-56859
+    statement: "bd static binary, stale Go deps; awaiting upstream beads rebuild."
+    expired_at: 2026-08-31
+  - id: CVE-2026-56860
+    statement: "bd static binary, stale Go deps; awaiting upstream beads rebuild."
+    expired_at: 2026-08-31
+  - id: CVE-2026-56862
+    statement: "bd static binary, stale Go deps; awaiting upstream beads rebuild."
+    expired_at: 2026-08-31
+  - id: GHSA-hrxh-6v49-42gf
+    statement: "bd static binary, stale Go deps; awaiting upstream beads rebuild."
+    expired_at: 2026-08-31
 
 misconfigurations:
   # --- Dockerfile cosmetic -------------------------------------------------
   - id: DS-0026
     statement: "No HEALTHCHECK — interactive dev container, not orchestrated by anything that reads the signal."
     expired_at: 2027-04-21
+  # --- Deliberate design, not a defect ------------------------------------
+  - id: DS-0002
+    statement: "Container-side root is the design: rootless Docker maps container UID 0 to host UID 1000 (ARCHITECTURE.md, security posture). Long expiry — this is architecture, not a pending fix."
+    expired_at: 2027-08-24
