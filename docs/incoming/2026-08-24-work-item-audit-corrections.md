@@ -15,6 +15,8 @@ each work item's doc, then delete this file. Items whose folders have exited to
 
 ## 0002 — host-side skill slot (`work/0002-host-side-skill-slot/plan.md`)
 
+**DROPPED 2026-08-24** — owner closed the item (option b: container-only by design); folder deleted, decision recorded in work/README.md Exited list. Skip at fold time.
+
 Preferred outcome: decide option (b) — container-only by design — close the item
 with a paragraph and archive it. If instead it stays open, minimum rewrite:
 

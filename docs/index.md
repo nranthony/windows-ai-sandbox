@@ -22,7 +22,6 @@ right: an **RFC** proposes → an **ADR** records → **work/** implements → t
   - [05-deps-repo-filter.md](rfcs/05-deps-repo-filter.md) — `--repo <name>` for `profile.sh deps`, to scan one repo instead of the whole workspace — **draft, not implemented** *(2026-08-06)*
 - [work/](../work/) — in-flight items, deleted or archived on merge ([README](../work/README.md))
   - 0001-dependency-guardrails — **complete (T00–T26), archived 2026-08-03**; live record is the [handoff](dependency-guardrails-handoff.md), plan preserved at [_archive/](_archive/dependency-guardrails-plan.md)
-  - [0002-host-side-skill-slot](../work/0002-host-side-skill-slot/plan.md) — `make-plan`/`wrap-up` are container-only *(premise updated 08-10: both now ship inside the `myconv` plugin as `/myconv:*`)*
   - [0003-repo-scan-audit](../work/0003-repo-scan-audit/plan.md) — audit + housekeeping scan
 - [docs/incoming/](incoming/) — raw unprocessed input, **unverified** ([README](incoming/README.md))
 

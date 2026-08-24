@@ -33,7 +33,6 @@ weeks after their content went stale.
 
 | # | Item | Status |
 |---|---|---|
-| [0002](0002-host-side-skill-slot/plan.md) | Host-side skill slot (`make-plan` is container-only) | Not started |
 | [0003](0003-repo-scan-audit/plan.md) | Repo scan — audit + housekeeping | Planning, execution mode not chosen |
 | [0004](0004-deletion-is-a-human-step/plan.md) | Deletion is a human step — hook blocks bulk shapes, not the verb | Not started, parked |
 | [0006](0006-manifest-keys-the-consumer-drops/plan.md) | Manifest keys the channel consumer silently drops | Not started, **re-investigate first** |
@@ -42,6 +41,16 @@ weeks after their content went stale.
 | [0009](0009-the-third-cli-runs-on-bun/spec.md) | opencode as the third in-container CLI (OpenRouter provider) — its runtime is Bun, so Gate 2 and the proxy env do not carry over | **Parked** — specified, not scheduled; **Phase 0 measurement first** on unparking |
 | [0010](0010-antigravity-permissions-and-hooks/spec.md) | Antigravity tool permissions and PreToolUse lifecycle hooks (parity with Claude Code) | **In progress** — Phase 0 measured, engine + templates + seeding + detectors landed on `feat/0010-antigravity-guardrails`; [ADR-0006](../docs/adr/0006-antigravity-is-two-layer-like-claude.md) |
 | [0011](0011-one-policy-convergence-across-agents/spec.md) | One policy convergence across every code agent — Claude's settings stop being create-only; one `just converge`; a descriptor per agent | **Draft** — direction chosen, awaiting go-ahead |
+
+Exited: **0002 host-side skill slot** — closed 2026-08-24 without implementation
+(owner decision): host-side planning stays container-only by design.
+`/myconv:make-plan` and `/myconv:wrap-up` remain reachable only inside profiles;
+the host agent plans by hand, as it did for ADR-0001. The plan was also written
+against `sync-skills-from-conventions.sh`, retired 2026-08-16 for the channel
+(`vendor-tools.sh`), so any future revival is a new item against the channel
+door — a second mirror destination must sit *inside* its hash gate, and a
+`.claude/skills/myconv/` copy would race the seeded plugin name (ADR-0005
+§Context 3). Folder deleted, not archived — nothing durable lived only there.
 
 Exited: **0001 dependency guardrails** — complete (T00–T26), archived 2026-08-03
 to [`docs/_archive/dependency-guardrails-plan.md`](../docs/_archive/dependency-guardrails-plan.md);
