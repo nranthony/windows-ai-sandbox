@@ -182,6 +182,16 @@ def run():
             # Fail-closed. An `allow` here would mean a broken envelope sails
             # through, which for reads is the only control agy has.
             ("engine_fails_closed_on_garbage", "deny", "not json at all"),
+            # The ask tier (work/0004) must arrive as `force_ask`, NEVER `ask`:
+            # agy caches a plain `ask` approval as a permanent Always-Allow
+            # grant, so `ask` here would mean "prompt once, then delete freely
+            # for the life of the profile". A `deny` would be wrong in the
+            # other direction — this tier exists so approved deletions stay
+            # possible. NOTE: the engine is baked into the IMAGE, so this
+            # reports FAIL on a profile still running a pre-work/0004 image
+            # until `scripts/profile.sh build`; that is the correct signal.
+            ("engine_force_asks_deletion", "force_ask",
+             '{"toolCall":{"name":"run_command","args":{"CommandLine":"git rm src/a.py"}}}'),
         ]
         for name, want, envelope in behaviours:
             got, gerr = _engine(envelope)

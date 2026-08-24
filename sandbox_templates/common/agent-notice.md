@@ -33,6 +33,39 @@ action or hunt for a workaround — treat it as a human step.
   that's exactly what it catches.
 - **No secrets.** `.env`, `*.env.*`, `*.key`, `*.pem`, `**/credentials` are
   unreadable.
+- **No history rewriting.** `git reset --hard` and `git rebase` are denied, in
+  every spelling — including the `-C <dir>` and `--git-dir=` forms.
+
+### Deletion is a human step — propose it, don't perform it
+
+**Every file deletion — single files included, and even when an approved plan
+names them — is proposed first: list the exact paths and wait.**
+
+This is not advice. These calls are intercepted before they run and need the
+human's confirmation each time:
+
+- `rm` of anything that isn't disposable, and `unlink`
+- `git rm`
+- discarding uncommitted work: `git checkout -- <path>`, `git checkout .`,
+  `git checkout -f`, `git restore <path>`
+- `git stash drop`, `git stash clear`
+- deleting a branch: `git branch -d` / `-D`
+
+With no human at the prompt — a subagent, or a non-interactive run — the call
+simply does not happen and you get this notice back instead. That is the
+designed outcome, not a fault: **stop and report what you wanted to delete.**
+Don't decompose a blocked bulk delete into one-file-at-a-time calls; that
+decomposition is the specific thing these rules were written for.
+
+Ordinary cleanup is deliberately left alone and never prompts: anything under
+`/tmp`, `/var/tmp` or `/root/.cache`, and anything inside a `.venv`,
+`node_modules`, `__pycache__`, a `.pytest_cache` / `.mypy_cache` /
+`.ruff_cache`, a `build` or `dist` directory, or any `*.pyc`. If you're clearing
+scratch or build output, use those paths and it will just work. Note that one
+non-disposable path anywhere in the argument list makes the whole command ask.
+
+Recursive deletion (`rm -rf` and every flag spelling, `find -delete`,
+`git clean`) is a different tier: **denied outright**, not asked.
 
 ### Dependencies — a new package is a trust decision, not an implementation detail
 
@@ -136,7 +169,9 @@ in the plan rather than attempting it.
 
 ### What works
 
-Read/edit files; `git add/commit/diff/log/show/checkout/stash`; run tests &
+Read/edit files; `git add/commit/diff/log/show`; `git checkout` and `git stash`
+for navigation and saving work (their discarding forms ask first — see above);
+run tests &
 builds (`pytest`, `npm/pnpm run|test`, `node`, `python`, `uv run`, `make`,
 `just`); `rg`, `find`, `jq`; `webfetch` for web reads; GPU checks via
 `/usr/lib/wsl/lib/nvidia-smi`. Plan with installs, network widening, and remote

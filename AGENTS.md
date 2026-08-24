@@ -90,7 +90,7 @@ Any change to them requires:
 3. Affected docs updated (ARCHITECTURE.md, `sandbox-hardening-package.md`).
 
 Hook edits additionally require
-`bash sandbox_templates/claude/hooks/deny-destructive.test.sh` (136/136). That
+`bash sandbox_templates/claude/hooks/deny-destructive.test.sh` (207/207). That
 script is now ONE engine serving TWO agents, selected by `--dialect=`, so a rule
 added for either protects both — and its two failure postures are deliberately
 OPPOSITE: claude fails **open** (its `permissions.deny` is underneath it),
@@ -99,6 +99,20 @@ blocks a misbehaving hook regardless). Claude's pass-through `{}` is a **deny**
 to `agy`, so the antigravity pass must stay an explicit `{"decision":"allow"}`.
 Unifying any of that is the likeliest way to turn this into a hole; the suite
 locks all three.
+The engine has **three tiers**, not two — warn, ask, deny (work/0004) — and the
+ask tier is dialect-branched for the same reason the postures are: claude emits
+`permissionDecision:"ask"` (re-prompts), `agy` emits `decision:"force_ask"`,
+because `agy` caches a plain `ask` approval as a permanent Always-Allow grant,
+so `ask` there would mean "prompt once, then delete freely forever". Measured,
+not assumed: headless and in subagents a claude `ask` is a **deny carrying the
+reason**, and it **outranks a static `permissions.allow` entry** — which is what
+lets the deletion rules narrow `Bash(git checkout:*)` and `Bash(git stash:*)`
+without either static list being edited. An **unknown `--dialect=` is fatal**
+(stderr + exit 2, no stdout): it used to coerce to claude, which would emit
+claude-shaped output to the third agent (opencode, work/0009) and leave the
+guardrail installed and inert. Adding a dialect means an arm in each of
+`emit_pass`/`emit_block`/`emit_ask`/`emit_trap` plus an adapter; the suite's
+unknown-dialect assertions say if one is missing.
 Edits to `sandbox_templates/antigravity/`, to either static policy list, or to
 `converge_agent_policy` / `AGENT_POLICY_DESCRIPTORS` in `scripts/profile.sh`
 require `bash scripts/agent-policy.test.sh` (53/53, offline — no docker, no

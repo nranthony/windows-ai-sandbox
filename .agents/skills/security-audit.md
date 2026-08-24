@@ -6,7 +6,7 @@ security-sensitive file (see AGENTS.md); tier 2 before merging such a change.
 | Tier | Cost | What | When |
 |---|---|---|---|
 | 1 | ~3s | `scripts/profile.sh <p> verify` — tripwire, ~57 pass/fail/warn/N-A outcomes | every `up`, every sensitive change |
-| 2 | ~10s | `scripts/profile.sh <p> audit` — ~80 structured probes → JSON in `~/.ai-sandbox/profiles/<p>/claude-home/audits/` | on demand / post config change |
+| 2 | ~10s | `scripts/profile.sh <p> audit` — ~85 structured probes → JSON in `~/.ai-sandbox/profiles/<p>/claude-home/audits/` | on demand / post config change |
 | 3 | ~5k toks | agent reads the tier-2 JSON + staged SKILL.md, writes report.md (judgment only, no probe execution) | on demand |
 
 ## Tier 1 — tripwire

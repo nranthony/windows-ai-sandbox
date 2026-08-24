@@ -106,7 +106,7 @@ rules in memory and can write them back over the converge.
 ```bash
 just verify <profile>       # tier-1 hardening tripwire, per profile
 just health                 # agent/proxy/DB up together, every profile
-just audit <profile>        # tier-2, 65 probes — after a rebuild
+just audit <profile>        # tier-2, ~85 probes — after a rebuild
 ```
 
 **6 · Hygiene** — optional, monthly is about right
@@ -203,7 +203,7 @@ Profile is the first argument to every per-profile recipe. `build`, `list`,
 | `rebuild` | build **and** recreate this profile |
 | **Verification** | |
 | `verify` | tier-1 hardening tripwire (fast, in-container) |
-| `audit` [`--clean`] | tier-2 structured audit, 65 probes, JSON to the host |
+| `audit` [`--clean`] | tier-2 structured audit, ~85 probes, JSON to the host |
 | `health` | cross-profile: flags a profile whose agent/proxy/DB aren't all up together |
 | `deps` [`--osv`] | dependency posture for the profile's workspace (host-side, read-only) |
 | **Repo-level** (no profile arg) | |
@@ -322,7 +322,7 @@ Two tiers, plus the offline suites that gate changes to the security-sensitive f
 
 ```bash
 just verify <profile>     # tier 1 — fast in-container tripwire, ~40 checks
-just audit <profile>      # tier 2 — 65 structured probes, JSON written to the host
+just audit <profile>      # tier 2 — ~85 structured probes, JSON written to the host
 just test-offline         # the eight regression suites + upstream boundary monitors
 ```
 

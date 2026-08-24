@@ -73,6 +73,8 @@ Refresh before executing (and re-verify counts at that time — this list is as 
 
 ## 0004 — deletion is a human step (`work/0004-deletion-is-a-human-step/plan.md`)
 
+**APPLIED 2026-08-24** — plan fully rewritten and the item implemented (ask tier, 207/207); skip at fold time.
+
 Reasoning intact; every structural anchor stale. Revise (after 0011, whose
 convergence this item needs so new rules actually reach profiles):
 

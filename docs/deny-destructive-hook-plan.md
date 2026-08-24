@@ -84,10 +84,25 @@ Follows Claude Code's current `PreToolUse` contract:
      "permissionDecision":"deny",
      "permissionDecisionReason":"deny-destructive: <rule>: <message>"}}
   ```
-- **Allow / pass-through**: `{}` on stdout, exit 0.
+- **Ask** (third tier, work/0004):
+  ```json
+  {"hookSpecificOutput":{
+     "hookEventName":"PreToolUse",
+     "permissionDecision":"ask",
+     "permissionDecisionReason":"deny-destructive: <rule>: <message>"}}
+  ```
+  Under `--dialect=antigravity` this is `{"decision":"force_ask","reason":"…"}`
+  and **never** `"ask"`: `agy` caches a plain `ask` approval as a permanent
+  Always-Allow grant, so `ask` would mean "prompt once, then proceed forever".
+- **Allow / pass-through**: `{}` on stdout, exit 0 (`{"decision":"allow"}` under
+  antigravity — an absent `decision` is a DENY there).
 - **Fail-open** on any script error: `trap 'printf "{}\n"; exit 0'` — a
   broken hook must not brick the agent. The `verify-sandbox.sh` tripwire
-  catches a permanently-broken hook within one cycle.
+  catches a permanently-broken hook within one cycle. (Antigravity fails
+  *closed* instead; ADR-0006 explains why the asymmetry is deliberate.)
+- **Unknown `--dialect=`**: diagnostic on stderr, **exit 2, nothing on stdout**.
+  Not a fallback to claude — emitting a claude-shaped decision to an agent that
+  does not speak it leaves the guardrail installed and inert.
 
 ## Ruleset
 
@@ -110,8 +125,16 @@ For `tool_name == "Bash"`, normalise the command (lowercase, strip leading
 | 9b | `git-hook-tamper` (Bash) — writes/redirects/`chmod` targeting any `.git/hooks/` | block |
 | 10 | `cred-read` — any reference to `/root/.gemini`, `.config/{gh,glab-cli}`, `.claude/.credentials`, `.claude.json`, `.aws`, `.ssh` (also `~/` and `$HOME/` forms) | block |
 | 10b | `cred-read` by bare credential filename (`oauth_creds.json`, `google_accounts.json`, `.credentials.json`) | block |
+| 10c | `git-reset-hard` — spelling-independent, incl. `git -C <dir> …` | block |
+| 10d | `git-rebase` — spelling-independent, every subcommand | block |
 | 11 | `null-truncate` — bare `> file` clobber at command start | **warn** |
 | 12 | `workspace-overwrite` — `>` into `/workspace/` | **warn** |
+| 17 | `git-rm` — `git rm`, incl. the `-C <dir>` / `-c k=v` forms | **ask** |
+| 18 | `git-discard` — `git checkout -- <path>` / `.` / `-f`, `git restore <path>` (NOT `git checkout <branch>`, NOT `git restore --staged` alone) | **ask** |
+| 19 | `git-stash-drop` — `git stash drop` / `clear` | **ask** |
+| 20 | `git-branch-delete` — `git branch -d` / `-D` / `--delete` | **ask** |
+| 21 | `unlink` | **ask** |
+| 22 | `rm-file` — plain non-recursive `rm`, unless EVERY target is disposable (`/tmp`, `/var/tmp`, `/root/.cache`, `.venv`, `node_modules`, `__pycache__`, `.pytest_cache`/`.mypy_cache`/`.ruff_cache`, `scratchpad`, `build`, `dist`, `*.pyc`) | **ask** |
 | 13 | `manifest-dep-add` (Edit/Write/MultiEdit) — a dependency **name not already in** `package.json` / `pyproject.toml` / `requirements*.txt` / `Pipfile` | block |
 | 14 | `docs-install-cmd` (Edit/Write/MultiEdit) — an install command naming a package, written into `AGENTS.md`, `CLAUDE.md`, `SKILL.md`, `README.md`, `CONTRIBUTING.md`, `agent-notice.md`, `.cursorrules`, `*.mdc` | **warn** |
 | 15 | `quarantine-tamper` (Edit/Write/MultiEdit, **by path**) — any write to the sandbox's own package-manager config: `/root/.config/pnpm/rc`, `/root/.npmrc`, `/usr/etc/npmrc` | block |
@@ -221,10 +244,21 @@ Every new destructive primitive needs **all three**:
 
 ### Warn-log review (warn → block promotion)
 
-Two rules ship as **warn**: `null-truncate` and `workspace-overwrite`.
+Two Bash rules ship as **warn**: `null-truncate` and `workspace-overwrite`.
 Both are high-variance — there are legitimate uses (`: > file` to
 truncate a log the agent owns; `> /workspace/build/output.json` for
-build artifacts). Promote to `block` only after one clean review week:
+build artifacts).
+
+**`null-truncate`'s review has been done, and the answer was NO** (2026-08-24,
+work/0004 D3). Ten weeks, three live profiles, 16 hits, **16 false positives**:
+heredoc file authoring, heredoc *appends* (not clobbers at all), and heredoc
+stdin scripts that write no file. The mechanism is that `^` in an ERE anchors at
+every line of a multi-line command, so a markdown blockquote or a `>>>` doctest
+inside a heredoc **body** matches. Promoting it would block ordinary file
+authoring. It stays warn; the rule comment carries the evidence. The deletion
+verbs it was implicitly standing in for now have their own **ask** tier instead.
+
+For any *other* warn rule, promote to `block` only after one clean review week:
 
 ```bash
 # Inside an active profile

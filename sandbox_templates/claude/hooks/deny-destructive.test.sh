@@ -17,7 +17,15 @@ trap 'rm -f "$DENY_DESTRUCTIVE_LOG"' EXIT
 PASS=0
 FAIL=0
 
-# assert <name> <envelope> <expected:pass|deny> [expected_rule_substring]
+# assert <name> <envelope> <expected:pass|deny|ask> [expected_rule_substring]
+#
+# THE `default` ARM IS LOAD-BEARING. Until 2026-08-24 this case had only `pass`
+# and `deny` arms and no default, so an assertion written with any other
+# expectation matched nothing, incremented nothing, printed nothing and did not
+# fail — it passed VACUOUSLY. `want=ask` was exactly such a value, which is to
+# say the first assertion of the tier this suite exists to lock would have been
+# silently inert. A third dialect (opencode, work/0009) will bring a fourth
+# decision string; the arm is what stops that from un-testing the suite again.
 assert() {
   name=$1; envelope=$2; want=$3; rule=${4:-}
   out=$(printf '%s' "$envelope" | "$HOOK" 2>/dev/null)
@@ -39,6 +47,22 @@ assert() {
         FAIL=$((FAIL+1)); printf "  FAIL %s  (want deny%s, got decision=%s reason=%s)\n" \
           "$name" "${rule:+ rule~$rule}" "$decision" "$reason"
       fi
+      ;;
+    ask)
+      # Claude's middle tier. MEASURED 2026-08-24 (work/0004 D1): headless, an
+      # unresolvable ask is a DENY carrying the reason — the command does not
+      # run and it lands in the result JSON's permission_denials[]. It also
+      # outranks a static permissions.allow entry. So this is a tightening of
+      # every verb that reaches it, not a weakening.
+      if [ "$decision" = "ask" ] && { [ -z "$rule" ] || printf '%s' "$reason" | grep -q "$rule"; }; then
+        PASS=$((PASS+1)); printf "  ok   %s  [%s]\n" "$name" "$reason"
+      else
+        FAIL=$((FAIL+1)); printf "  FAIL %s  (want ask%s, got decision=%s reason=%s)\n" \
+          "$name" "${rule:+ rule~$rule}" "$decision" "$reason"
+      fi
+      ;;
+    *)
+      FAIL=$((FAIL+1)); printf "  FAIL %s  (unknown expectation '%s' — assertion would have passed vacuously)\n" "$name" "$want"
       ;;
   esac
 }
@@ -349,6 +373,188 @@ else
 fi
 
 # ============================================================================
+# ASK TIER (work/0004) — "deletion is a human step"
+# ============================================================================
+# The third decision string. Every verb here was ALLOWED before this tier
+# existed — three of them explicitly, on both agents' static allow lists — so
+# each `ask` below is a tightening, and every `pass` below is a grant this tier
+# deliberately did NOT narrow. The negatives are therefore as load-bearing as
+# the positives: a rule that also fires on `git checkout <branch>` gets turned
+# off by whoever has to use it ten times a day.
+
+printf "\n-- ask tier: git rm (the route the origin episode took) --\n"
+assert "git rm asks  <-- LOCK" \
+  '{"tool_name":"Bash","tool_input":{"command":"git rm src/a.py"}}' ask "git-rm"
+assert "git -C <dir> rm asks (prefix bypass closed)" \
+  '{"tool_name":"Bash","tool_input":{"command":"git -C /workspace/p rm src/a.py"}}' ask "git-rm"
+assert "git -c k=v rm asks" \
+  '{"tool_name":"Bash","tool_input":{"command":"git -c core.quotepath=false rm src/a.py"}}' ask "git-rm"
+# The GITOPT prefix is enumerated rather than [^|;&]*, so a commit MESSAGE
+# containing the word rm cannot reach the rule. If this ever fails the rule has
+# become a prose matcher.
+assert "a commit message containing 'rm' does not ask  <-- LOCK" \
+  '{"tool_name":"Bash","tool_input":{"command":"git commit -m \"remove rm from the docs\""}}' pass
+assert "git rm -r still DENIES, not asks (rm-recursive wins)" \
+  '{"tool_name":"Bash","tool_input":{"command":"git rm -r skills/"}}' deny "rm-recursive"
+
+printf "\n-- ask tier: discarding the working tree --\n"
+assert "git checkout -- <path> asks" \
+  '{"tool_name":"Bash","tool_input":{"command":"git checkout -- src/a.py"}}' ask "git-discard"
+assert "git checkout <ref> -- <path> asks" \
+  '{"tool_name":"Bash","tool_input":{"command":"git checkout abc123 -- src/a.py"}}' ask "git-discard"
+assert "git checkout . asks" \
+  '{"tool_name":"Bash","tool_input":{"command":"git checkout ."}}' ask "git-discard"
+assert "git checkout -f asks" \
+  '{"tool_name":"Bash","tool_input":{"command":"git checkout -f"}}' ask "git-discard"
+# NAVIGATION MUST NOT TRIP IT. `git checkout` is on both allow lists and is used
+# constantly; a rule that prompts on branch switching is a rule that gets
+# removed, taking the pathspec forms with it.
+assert "git checkout <branch> does NOT ask  <-- LOCK" \
+  '{"tool_name":"Bash","tool_input":{"command":"git checkout main"}}' pass
+assert "git checkout -b <branch> does NOT ask  <-- LOCK" \
+  '{"tool_name":"Bash","tool_input":{"command":"git checkout -b feature/x"}}' pass
+assert "git restore <path> asks" \
+  '{"tool_name":"Bash","tool_input":{"command":"git restore src/a.py"}}' ask "git-discard"
+assert "git restore --staged only unstages, does NOT ask  <-- LOCK" \
+  '{"tool_name":"Bash","tool_input":{"command":"git restore --staged src/a.py"}}' pass
+assert "git restore --staged --worktree asks (it still writes the tree)" \
+  '{"tool_name":"Bash","tool_input":{"command":"git restore --staged --worktree src/a.py"}}' ask "git-discard"
+
+printf "\n-- ask tier: stashes and branches --\n"
+assert "git stash drop asks" \
+  '{"tool_name":"Bash","tool_input":{"command":"git stash drop stash@{1}"}}' ask "git-stash-drop"
+assert "git stash clear asks" \
+  '{"tool_name":"Bash","tool_input":{"command":"git stash clear"}}' ask "git-stash-drop"
+assert "git stash (save) does NOT ask" \
+  '{"tool_name":"Bash","tool_input":{"command":"git stash"}}' pass
+assert "git stash pop does NOT ask" \
+  '{"tool_name":"Bash","tool_input":{"command":"git stash pop"}}' pass
+assert "git branch -D asks" \
+  '{"tool_name":"Bash","tool_input":{"command":"git branch -D old-work"}}' ask "git-branch-delete"
+# -d as well as -D: the Bash arm lowercases the command line, so the two are
+# indistinguishable here. Both ask; -d is a deletion too.
+assert "git branch -d asks (lowercasing makes -D/-d one rule)" \
+  '{"tool_name":"Bash","tool_input":{"command":"git branch -d old-work"}}' ask "git-branch-delete"
+assert "git branch --delete asks" \
+  '{"tool_name":"Bash","tool_input":{"command":"git branch --delete old-work"}}' ask "git-branch-delete"
+assert "git branch (list) does NOT ask" \
+  '{"tool_name":"Bash","tool_input":{"command":"git branch"}}' pass
+assert "git branch -a does NOT ask" \
+  '{"tool_name":"Bash","tool_input":{"command":"git branch -a"}}' pass
+assert "git branch --sort=-committerdate does NOT ask" \
+  '{"tool_name":"Bash","tool_input":{"command":"git branch --sort=-committerdate"}}' pass
+
+printf "\n-- ask tier: unlink --\n"
+assert "unlink asks" \
+  '{"tool_name":"Bash","tool_input":{"command":"unlink /workspace/p/a.txt"}}' ask "unlink"
+assert "the word 'unlinked' does not ask" \
+  '{"tool_name":"Bash","tool_input":{"command":"echo unlinked the thing"}}' pass
+
+printf "\n-- ask tier: plain rm, and the carve-outs that keep it usable --\n"
+assert "rm of a source file asks  <-- LOCK" \
+  '{"tool_name":"Bash","tool_input":{"command":"rm /workspace/p/main.py"}}' ask "rm-file"
+assert "rm -f of a source file asks" \
+  '{"tool_name":"Bash","tool_input":{"command":"rm -f /workspace/p/main.py"}}' ask "rm-file"
+assert "rm of a relative source file asks" \
+  '{"tool_name":"Bash","tool_input":{"command":"rm src/a.py"}}' ask "rm-file"
+# ONE non-carved target in a list makes the whole call ask. Without this a
+# single /tmp path would launder every other target in the same argv.
+assert "a mixed target list asks  <-- LOCK" \
+  '{"tool_name":"Bash","tool_input":{"command":"rm -f /tmp/x /workspace/p/main.py"}}' ask "rm-file"
+# Every rm segment is inspected, not just the first.
+assert "a second rm in a compound command is inspected  <-- LOCK" \
+  '{"tool_name":"Bash","tool_input":{"command":"rm /tmp/a ; rm /workspace/p/main.py"}}' ask "rm-file"
+# Unresolvable targets ask rather than pass. Globbing is off while splitting,
+# so `rm *.py` is inspected as the literal token.
+assert "rm with a variable target asks  <-- LOCK" \
+  '{"tool_name":"Bash","tool_input":{"command":"rm $F"}}' ask "rm-file"
+assert "rm with a quoted variable target asks" \
+  '{"tool_name":"Bash","tool_input":{"command":"rm \"$file\""}}' ask "rm-file"
+assert "rm with a glob target asks  <-- LOCK" \
+  '{"tool_name":"Bash","tool_input":{"command":"rm *.py"}}' ask "rm-file"
+assert "rm -- <path> asks (-- is a separator, not a target)" \
+  '{"tool_name":"Bash","tool_input":{"command":"rm -- /workspace/p/main.py"}}' ask "rm-file"
+
+# --- the carve-outs. A prompt on every temp-file cleanup trains evasion, which
+# --- is this hook's own stated reason for the warn tier. Each of these is a
+# --- path AGENTS.md's container-state table calls disposable.
+assert "rm under /tmp passes silently" \
+  '{"tool_name":"Bash","tool_input":{"command":"rm /tmp/scratch.txt"}}' pass
+assert "rm under /var/tmp passes silently" \
+  '{"tool_name":"Bash","tool_input":{"command":"rm /var/tmp/scratch.txt"}}' pass
+assert "rm under /root/.cache passes silently" \
+  '{"tool_name":"Bash","tool_input":{"command":"rm /root/.cache/uv/x.json"}}' pass
+assert "rm in the harness scratchpad passes silently" \
+  '{"tool_name":"Bash","tool_input":{"command":"rm /tmp/claude-0/-workspace-p/abc/scratchpad/out1.txt"}}' pass
+assert "rm inside .venv passes silently" \
+  '{"tool_name":"Bash","tool_input":{"command":"rm /workspace/p/.venv/lib/x.so"}}' pass
+assert "rm inside node_modules passes silently" \
+  '{"tool_name":"Bash","tool_input":{"command":"rm node_modules/.bin/tsc"}}' pass
+assert "rm inside __pycache__ passes silently" \
+  '{"tool_name":"Bash","tool_input":{"command":"rm src/__pycache__/a.cpython-312.pyc"}}' pass
+assert "rm of a .pyc anywhere passes silently" \
+  '{"tool_name":"Bash","tool_input":{"command":"rm src/a.pyc"}}' pass
+assert "rm inside .pytest_cache passes silently" \
+  '{"tool_name":"Bash","tool_input":{"command":"rm .pytest_cache/v/cache/lastfailed"}}' pass
+assert "rm inside build/ passes silently" \
+  '{"tool_name":"Bash","tool_input":{"command":"rm build/out.js"}}' pass
+assert "rm inside dist/ passes silently" \
+  '{"tool_name":"Bash","tool_input":{"command":"rm dist/bundle.js"}}' pass
+# The carve-out is a path-SEGMENT match, not a substring: a directory merely
+# ending in `build` is not a build directory.
+assert "a path merely containing 'build' is NOT carved out  <-- LOCK" \
+  '{"tool_name":"Bash","tool_input":{"command":"rm /workspace/p/mybuild/main.py"}}' ask "rm-file"
+# rm-recursive still DENIES; the ask tier never downgrades a block rule.
+assert "rm -rf still denies, never asks  <-- LOCK" \
+  '{"tool_name":"Bash","tool_input":{"command":"rm -rf /tmp/x"}}' deny "rm-recursive"
+
+printf "\n-- deny tier: the spelling-independent twins of the static entries --\n"
+# Both static lists keep `git reset --hard` / `git rebase` as literal prefixes.
+# These rules exist because a literal prefix cannot see `git -C <dir> ...`, the
+# same defect rm-recursive was written for. The static entries are NOT moved.
+assert "git reset --hard denies" \
+  '{"tool_name":"Bash","tool_input":{"command":"git reset --hard HEAD~1"}}' deny "git-reset-hard"
+assert "git -C <dir> reset --hard denies  <-- LOCK" \
+  '{"tool_name":"Bash","tool_input":{"command":"git -C /workspace/p reset --hard HEAD~1"}}' deny "git-reset-hard"
+assert "git reset --soft does NOT deny" \
+  '{"tool_name":"Bash","tool_input":{"command":"git reset --soft HEAD~1"}}' pass
+assert "git reset (mixed, no flag) does NOT deny" \
+  '{"tool_name":"Bash","tool_input":{"command":"git reset"}}' pass
+assert "git rebase denies" \
+  '{"tool_name":"Bash","tool_input":{"command":"git rebase -i main"}}' deny "git-rebase"
+assert "git --git-dir=<dir> rebase denies  <-- LOCK" \
+  '{"tool_name":"Bash","tool_input":{"command":"git --git-dir=/workspace/p/.git rebase main"}}' deny "git-rebase"
+assert "git rebase --abort denies too" \
+  '{"tool_name":"Bash","tool_input":{"command":"git rebase --abort"}}' deny "git-rebase"
+
+printf "\n-- an unknown dialect FAILS LOUDLY (work/0009 is already scheduled) --\n"
+# This used to coerce to claude. A converged hooks.json saying
+# --dialect=opencode against an engine that predates opencode would then emit
+# CLAUDE-shaped output to opencode: guardrail installed, guardrail inert,
+# nothing reported. exit 2 with an empty stdout is the one answer that is safe
+# in every harness — claude treats 2 as "block and show stderr", agy blocks on
+# any non-zero exit, and an unknown harness gets no guessed decision.
+UNK_ERR=$(mktemp)
+UNK_OUT=$(printf '%s' '{"tool_name":"Bash","tool_input":{"command":"ls"}}' \
+  | "$HOOK" --dialect=opencode 2>"$UNK_ERR"); UNK_RC=$?
+if [ "$UNK_RC" -eq 2 ]; then
+  PASS=$((PASS+1)); printf "  ok   unknown dialect exits 2  <-- LOCK\n"
+else
+  FAIL=$((FAIL+1)); printf "  FAIL unknown dialect exited %s (want 2)\n" "$UNK_RC"
+fi
+if [ -z "$UNK_OUT" ]; then
+  PASS=$((PASS+1)); printf "  ok   unknown dialect emits NO decision on stdout  <-- LOCK\n"
+else
+  FAIL=$((FAIL+1)); printf "  FAIL unknown dialect guessed an output shape: %s\n" "$UNK_OUT"
+fi
+if grep -q 'unknown dialect' "$UNK_ERR"; then
+  PASS=$((PASS+1)); printf "  ok   unknown dialect names itself on stderr\n"
+else
+  FAIL=$((FAIL+1)); printf "  FAIL unknown dialect gave no diagnostic on stderr\n"
+fi
+rm -f "$UNK_ERR"
+
+# ============================================================================
 # antigravity dialect (work/0010)
 # ============================================================================
 # Same engine, same rule table, second envelope shape and second output
@@ -370,7 +576,10 @@ fi
 #      {"sandbox-guardrails":{"enabled":false}} and switch the guardrail off.
 #      Confirmed live in Phase 0 test G.
 
-# agy_assert <name> <envelope> <expected:pass|deny> [expected_rule_substring]
+# agy_assert <name> <envelope> <expected:pass|deny|ask> [expected_rule_substring]
+#
+# `ask` here asserts the wire value `force_ask`, NOT `ask` — see the arm below.
+# The `default` arm is load-bearing for the same reason as in `assert` above.
 agy_assert() {
   name=$1; envelope=$2; want=$3; rule=${4:-}
   out=$(printf '%s' "$envelope" | "$HOOK" --dialect=antigravity 2>/dev/null)
@@ -392,6 +601,23 @@ agy_assert() {
         FAIL=$((FAIL+1)); printf "  FAIL agy: %s  (want deny%s, got decision=%s reason=%s)\n" \
           "$name" "${rule:+ rule~$rule}" "$decision" "$reason"
       fi ;;
+    ask)
+      # "force_ask", NOT "ask" — and the difference is the whole reason this
+      # tier is dialect-branched. agy caches a plain `ask` approval as a
+      # permanent Always-Allow grant, so `ask` would mean "prompt once, then
+      # delete freely forever". `force_ask` is documented in the shipped binary
+      # as "Always prompt the user, ignoring cached permissions" and is in its
+      # decision enum (allow|deny|ask|force_ask|deny_unless_prior_grant).
+      # If this ever reads `ask`, the tier has silently become one-shot.
+      if [ "$decision" = "force_ask" ] && { [ -z "$rule" ] || printf '%s' "$reason" | grep -q "$rule"; }; then
+        PASS=$((PASS+1)); printf "  ok   agy: %s  [%s]\n" "$name" "$reason"
+      else
+        FAIL=$((FAIL+1)); printf "  FAIL agy: %s  (want force_ask%s, got decision=%s reason=%s)\n" \
+          "$name" "${rule:+ rule~$rule}" "$decision" "$reason"
+      fi ;;
+    *)
+      FAIL=$((FAIL+1)); printf "  FAIL agy: %s  (unknown expectation '%s' — assertion would have passed vacuously)\n" "$name" "$want"
+      ;;
   esac
 }
 
@@ -428,6 +654,43 @@ agy_assert "malformed envelope denies  <-- LOCK" 'not json at all' deny "malform
 agy_assert "empty envelope denies" '' deny "empty-envelope"
 assert "the SAME malformed input passes under claude  <-- LOCK" 'not json at all' pass
 assert "the SAME empty input passes under claude" '' pass
+
+printf "\n-- antigravity: the ask tier is force_ask, never ask --\n"
+# THE SINGLE MOST IMPORTANT ASSERTION IN THIS SECTION. agy caches a plain `ask`
+# approval as a permanent Always-Allow grant, so emitting `ask` here would mean
+# "prompt once, then delete freely for the life of the profile" — the tier
+# would look installed and be one click from gone. agy_assert's `ask` arm
+# asserts the wire value `force_ask` for exactly this reason.
+agy_assert "git rm force_asks under agy  <-- LOCK" \
+  '{"toolCall":{"name":"run_command","args":{"CommandLine":"git rm src/a.py"}}}' ask "git-rm"
+agy_assert "plain rm of a source file force_asks" \
+  '{"toolCall":{"name":"run_command","args":{"CommandLine":"rm /workspace/p/main.py"}}}' ask "rm-file"
+agy_assert "git checkout -- <path> force_asks" \
+  '{"toolCall":{"name":"run_command","args":{"CommandLine":"git checkout -- src/a.py"}}}' ask "git-discard"
+agy_assert "git restore <path> force_asks" \
+  '{"toolCall":{"name":"run_command","args":{"CommandLine":"git restore src/a.py"}}}' ask "git-discard"
+agy_assert "git stash drop force_asks" \
+  '{"toolCall":{"name":"run_command","args":{"CommandLine":"git stash drop"}}}' ask "git-stash-drop"
+agy_assert "git branch -D force_asks" \
+  '{"toolCall":{"name":"run_command","args":{"CommandLine":"git branch -D old-work"}}}' ask "git-branch-delete"
+agy_assert "unlink force_asks" \
+  '{"toolCall":{"name":"run_command","args":{"CommandLine":"unlink /workspace/p/a.txt"}}}' ask "unlink"
+# The same negatives as the claude side. `command(git checkout)` and
+# `command(git stash)` are on agy's static ALLOW list, so a rule that fired on
+# navigation would be narrowing a grant people use constantly.
+agy_assert "git checkout <branch> allows under agy  <-- LOCK" \
+  '{"toolCall":{"name":"run_command","args":{"CommandLine":"git checkout main"}}}' pass
+agy_assert "git restore --staged allows under agy" \
+  '{"toolCall":{"name":"run_command","args":{"CommandLine":"git restore --staged src/a.py"}}}' pass
+agy_assert "rm under /tmp allows under agy (carve-out)" \
+  '{"toolCall":{"name":"run_command","args":{"CommandLine":"rm /tmp/scratch.txt"}}}' pass
+# The tiers stay ordered under agy too: a denied verb is never downgraded.
+agy_assert "rm -rf still DENIES under agy, never force_asks  <-- LOCK" \
+  '{"toolCall":{"name":"run_command","args":{"CommandLine":"rm -rf /workspace/foo"}}}' deny "rm-recursive"
+agy_assert "git -C <dir> reset --hard denies under agy" \
+  '{"toolCall":{"name":"run_command","args":{"CommandLine":"git -C /workspace/p reset --hard"}}}' deny "git-reset-hard"
+agy_assert "git rebase denies under agy" \
+  '{"toolCall":{"name":"run_command","args":{"CommandLine":"git rebase -i main"}}}' deny "git-rebase"
 
 printf "\n-- antigravity: the workspace-override bypass --\n"
 # Measured in Phase 0 test G: with the workspace attached, agy reported

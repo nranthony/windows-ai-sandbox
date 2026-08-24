@@ -38,9 +38,12 @@ control.
 Two residual gaps, both recorded in ADR-0006 rather than papered over:
 
 - **`agy`'s `ask` is stickier than Claude's.** An `ask` approval is cached as an
-  Always-Allow grant, so the mutating `myclickup` set prompts once under `agy`
-  and every time under Claude. The hook can emit `force_ask`, which ignores the
-  cache; wiring it is follow-up.
+  Always-Allow grant, so a static `ask` entry prompts once under `agy` and every
+  time under Claude. Since work/0004 the hook **does** emit `force_ask` (agy's
+  own enum value: "Always prompt the user, ignoring cached permissions") — but
+  only for the deletion verbs it has rules for. The eight mutating `myclickup`
+  writes in both static `ask` lists are still cache-backed; re-asserting that
+  set through `force_ask` is the named follow-up.
 - **Secret reads are hook-only under `agy`.** The file-grant syntax for its
   static list was not reverse engineered, so reads are enforced at the layer a
   workspace file can disable. Commands are not affected.
@@ -165,7 +168,17 @@ alone rather than dropping a key no repo file can hold.
 
 Claude Code's permission matcher keys on the command prefix; denies can be routed around by wrapper idioms hard to enumerate exhaustively (`find -exec`, `make`, `npm run`, `<interpreter> /tmp/script.<ext>`). When the deny list misses, the real boundary still holds: egress proxy (domain + port allowlist), seccomp (no user namespaces), rootless Docker userns (container root = host UID 1000) + `cap_drop: ALL`.
 
-The deny-destructive `PreToolUse` hook extends coverage to destructive primitives reachable through allowed prefixes (`find -delete`/`-exec`/`-execdir`/`-ok`, `git clean -fdx`, `shred`, `truncate`, `dd of=`, `mkfs`) and to writes targeting the hook/settings files themselves. The prefix matcher in `permissions.deny` remains the primary filter; the hook is the content-aware secondary layer for what the prefix matcher structurally can't see. See `docs/deny-destructive-hook-plan.md` for ruleset and maintenance.
+The deny-destructive `PreToolUse` hook extends coverage to destructive primitives reachable through allowed prefixes (`find -delete`/`-exec`/`-execdir`/`-ok`, `git clean -fdx`, `shred`, `truncate`, `dd of=`, `mkfs`, and — spelling-independently, so the `-C <dir>` form cannot walk past the literal static prefix — `git reset --hard` and `git rebase`) and to writes targeting the hook/settings files themselves. The prefix matcher in `permissions.deny` remains the primary filter; the hook is the content-aware secondary layer for what the prefix matcher structurally can't see. See `docs/deny-destructive-hook-plan.md` for ruleset and maintenance.
+
+The hook has **three tiers**, and the middle one is where deletion lives:
+
+| Tier | Emitted | Used for |
+|---|---|---|
+| warn | nothing (a line in `/root/.cache/deny-destructive.log`) | shapes with too many legitimate forms to gate — `null-truncate`, `workspace-overwrite`, `docs-install-cmd`, `quarantine-touch` |
+| **ask** | claude `permissionDecision:"ask"` / `agy` `decision:"force_ask"` | **deletion** — `git rm`, worktree-discarding `git checkout`/`git restore`, `git stash drop|clear`, `git branch -d|-D`, `unlink`, and plain `rm` outside the disposable-path carve-outs |
+| deny | `permissionDecision:"deny"` / `decision:"deny"` | the truly-never cases: recursive deletion, raw block writes, credential reads, tamper with the policy files |
+
+Two things about the ask tier are easy to get wrong. It is **not a weakening**: every verb in it was previously *allowed*, three of them (`git checkout`, `git stash`, `git branch`) explicitly on both static allow lists — and a hook `ask` **outranks** a static `allow`, which is how those grants get narrowed without either list being edited. And with **nobody at the prompt** — a subagent, or a `-p` run — an unresolvable `ask` is a **deny that carries the reason**, measured in a live profile rather than inferred (the Claude Code docs do not state it). Under `agy` the value must stay `force_ask`: a plain `ask` approval there is cached as a permanent Always-Allow grant.
 
 ## The discipline
 

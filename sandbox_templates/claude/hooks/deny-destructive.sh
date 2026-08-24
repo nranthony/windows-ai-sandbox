@@ -9,11 +9,18 @@
 #     pass {}
 #     deny {"hookSpecificOutput":{"hookEventName":"PreToolUse",
 #            "permissionDecision":"deny","permissionDecisionReason":"…"}}
+#     ask  … same envelope, "permissionDecision":"ask"
 #
 #   antigravity  (`agy`; protojson, camelCase — see work/0010)
 #     in   {"toolCall":{"name":"run_command","args":{"CommandLine":"…"}},…}
 #     pass {"decision":"allow"}
 #     deny {"decision":"deny","reason":"…"}
+#     ask  {"decision":"force_ask","reason":"…"}   NOT "ask" — see emit_ask
+#
+# THREE TIERS, not two: warn (logged, invisible until someone greps),
+# ask (the human decides, per call), deny (absolute). The ask tier arrived with
+# work/0004 for the deletion verbs; read emit_ask's header before touching it,
+# because the two dialects emit different STRENGTHS there on purpose.
 #
 # The antigravity envelope is TRANSLATED into the claude shape immediately
 # after it is read, so everything below the adapter is one shared rule table.
@@ -62,9 +69,34 @@ for _arg in "$@"; do
     --dialect=*) DIALECT=${_arg#--dialect=} ;;
   esac
 done
+
+# An UNKNOWN dialect is FATAL, and loudly so. This used to coerce to claude,
+# which is the one behaviour that is wrong in every harness: a third agent is
+# already scheduled (opencode, work/0009), and a converged hooks.json passing
+# `--dialect=opencode` to an image whose engine predates opencode would emit
+# CLAUDE-shaped output to opencode, which would not understand it — guardrail
+# installed, guardrail inert, nothing reported. That is the same silent-failure
+# shape ADR-0006 records for a hooks.json naming a missing script, and the
+# ordering that produces it (converge before build) is an ordinary mistake.
+#
+# exit 2 with no stdout: Claude Code treats exit 2 as "block, and show the
+# reason from stderr", and agy blocks on any non-zero exit. So both known
+# harnesses surface it on the first tool call, and an unknown one gets no
+# guessed decision. This does NOT weaken claude's fail-OPEN posture below —
+# that is about RUNTIME breakage (bad envelopes, a jq error), which is
+# unchanged. A wrong `--dialect=` is a deployment error in a sandbox-owned file
+# the agent cannot write, and a deployment error must be visible.
+#
+# Adding a dialect means: this list, plus an arm in EACH of emit_pass,
+# emit_block, emit_ask and emit_trap, plus an input adapter. emit_ask carries
+# the same fatal default so a half-taught dialect cannot silently fall through.
+die_unknown_dialect() {
+  printf 'deny-destructive: unknown dialect "%s" — refusing to guess an output shape for it\n' "$DIALECT" >&2
+  exit 2
+}
 case "$DIALECT" in
   claude|antigravity) ;;
-  *) DIALECT=claude ;;
+  *) die_unknown_dialect ;;
 esac
 
 emit_trap() {
@@ -104,6 +136,53 @@ emit_block() {
     printf '%s' "$reason" \
       | jq -Rsc '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"deny",permissionDecisionReason:.}}'
   fi
+  trap - EXIT
+  exit 0
+}
+
+# emit_ask — the THIRD tier, added by work/0004. Between warn (invisible until
+# someone greps the log) and deny (absolute): the call does not proceed on the
+# agent's authority, it proceeds on the human's or not at all.
+#
+# THE TWO DIALECTS EMIT DIFFERENT STRENGTHS AND THAT IS THE POINT.
+#
+#   claude       `ask`. Re-prompts every time. MEASURED 2026-08-24 (work/0004
+#                D1) inside a live profile: headless (`claude -p`), an
+#                unresolvable ask is a DENY that carries the reason — the
+#                command does not run, it lands in the result JSON's
+#                permission_denials[], and the reason string reaches the model
+#                as the tool result. Same in a Task SUBAGENT (the shape of the
+#                episode that motivated this), which neither auto-resolves it
+#                nor escalates it. And it OUTRANKS a static permissions.allow
+#                entry — which is what makes the git rules below able to narrow
+#                `Bash(git checkout:*)` and `Bash(git stash:*)` without editing
+#                either static list.
+#
+#   antigravity  `force_ask`, NEVER `ask`. agy caches a plain `ask` approval as
+#                a permanent Always-Allow grant, so `ask` there would mean
+#                "prompt once, then delete freely forever" — strictly weaker
+#                than this rule set is trying to be. `force_ask` is in agy's
+#                own decision enum
+#                (allow|deny|ask|force_ask|deny_unless_prior_grant) and its
+#                embedded docs say: "Always prompt the user, ignoring cached
+#                permissions." Read out of the shipped binary, not assumed.
+#
+# Keeps the `deny-destructive: <rule>: <msg>` reason prefix that emit_block
+# uses, so warn-log greps and the audit probe keep working across all tiers.
+emit_ask() {
+  rule=$1; msg=$2
+  reason="deny-destructive: ${rule}: ${msg}"
+  case "$DIALECT" in
+    antigravity)
+      printf '%s' "$reason" | jq -Rsc '{decision:"force_ask",reason:.}' ;;
+    claude)
+      printf '%s' "$reason" \
+        | jq -Rsc '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"ask",permissionDecisionReason:.}}' ;;
+    *)
+      # Reachable the day someone teaches the dialect list a new agent and
+      # forgets this function. Guessing a shape here is how a tier goes inert.
+      die_unknown_dialect ;;
+  esac
   trap - EXIT
   exit 0
 }
@@ -373,7 +452,17 @@ done
 
 match() { printf '%s' "$norm" | grep -Eq "$1"; }
 
-# Order matters: first hit wins.
+# Global options git accepts BETWEEN `git` and its subcommand. ENUMERATED, not
+# `[^|;&]*`, and that is what keeps the git rules below precise: anything that
+# is not one of these options ends the prefix, so the subcommand token has to
+# follow immediately and `git commit -m "remove rm"` cannot reach the git-rm
+# rule. $norm is lowercased, so `-C` arrives as `-c` and the single `-c <arg>`
+# alternative covers `-C <dir>` and `-c key=value` alike — `git -C <dir> reset
+# --hard` is precisely the literal-prefix bypass these rules close.
+GITOPT='(-c[[:space:]]+[^[:space:]]+[[:space:]]+|--git-dir=[^[:space:]]+[[:space:]]+|--work-tree=[^[:space:]]+[[:space:]]+|--namespace=[^[:space:]]+[[:space:]]+|--exec-path=[^[:space:]]+[[:space:]]+|--no-pager[[:space:]]+|--no-replace-objects[[:space:]]+|--literal-pathspecs[[:space:]]+|--paginate[[:space:]]+)*'
+
+# Order matters: first hit wins. Block rules run before ask rules, deliberately:
+# a verb that is denied must not be downgraded to a prompt by a later match.
 
 # 1. find-delete — the bypass that motivated the hook.
 if match '\bfind\b[^|;&]*[[:space:]]-delete\b'; then
@@ -467,11 +556,47 @@ if match '(oauth_creds\.json|google_accounts\.json|\.credentials\.json)'; then
   emit_block "cred-read" "access to a credential file is denied; ask the user to run this"
 fi
 
+# 10c. git-reset-hard — spelling-independent twin of the literal-prefix entries
+#     `Bash(git reset --hard:*)` / `command(git reset --hard)`. BOTH static
+#     entries stay exactly where they are and are NOT moved here: for agy the
+#     static list is the tamper-resistant layer (a workspace .agents/hooks.json
+#     can disable this hook by name; nothing in a workspace can reach
+#     settings.json). This rule closes the same gap `rm-recursive` was written
+#     for — a literal prefix cannot see `git -C /workspace/p reset --hard`.
+if match "\bgit[[:space:]]+${GITOPT}reset\b[^|;&]*[[:space:]]--hard\b"; then
+  emit_block "git-reset-hard" "git reset --hard discards committed and uncommitted work irrecoverably; ask the user to run this"
+fi
+
+# 10d. git-rebase — same reasoning, same pair of static entries. Every rebase
+#     form rewrites history, including --continue/--abort on a rebase this
+#     agent should not have started.
+if match "\bgit[[:space:]]+${GITOPT}rebase\b"; then
+  emit_block "git-rebase" "git rebase rewrites history; ask the user to run this"
+fi
+
 # 11. null-truncate (WARN) — `: > file` and bare `> file` clobber.
 #    Excludes /dev/null, /dev/stderr, fd-redirects (>&), heredocs, and the
 #    common `cmd > /tmp/x` redirection that overwrites a file the agent owns.
 #    We only flag truly bare-leading clobbers at command start or after ; or &&.
-#    Promote to block after one clean week of warn-log review.
+#
+#    THE PROMOTION REVIEW THIS COMMENT ASKED FOR HAS NOW HAPPENED, AND THE
+#    ANSWER IS NO. 2026-08-24 (work/0004 D3), all three live profiles, ten
+#    weeks: 16 hits, and every one of them a false positive. Three shapes, none
+#    destructive — heredoc file authoring (`cat > docs/x.md <<'EOF'`), heredoc
+#    APPENDS (`cat >> tests/test_x.py << 'EOF'`, which is not a clobber at
+#    all), and heredoc stdin scripts (`python3 - <<'PY'`, which writes no file).
+#    Promoting this to block would block ordinary file authoring at a 16/16
+#    false-positive rate, which is the textbook way to train evasion.
+#
+#    The mechanism is worse than "high variance", and it is worth knowing before
+#    anyone re-opens this: `^` in an ERE anchors at EVERY LINE of a multi-line
+#    command, so a markdown blockquote or a `>>>` doctest INSIDE A HEREDOC BODY
+#    matches this rule. Most of the 16 are the rule firing on document content,
+#    not on a shell redirect. Narrowing it to the command's first line is
+#    recorded as future scope in work/0004 — it is a rule NARROWING and wants
+#    its own evidence, and a warn rule that over-fires costs log noise, not
+#    safety. Do not promote this to block; the deletion verbs it was standing in
+#    for now have their own ask tier below.
 if match '(^|[;&]|\|\|)[[:space:]]*:?[[:space:]]*>[[:space:]]*[^&[:space:]/]' \
    && ! match '>[[:space:]]*/dev/(null|stderr|stdout)\b'; then
   warn_log "null-truncate" "$envelope"
@@ -480,6 +605,132 @@ fi
 # 12. workspace-overwrite (WARN) — bare clobber into /workspace.
 if match '>[[:space:]]*/workspace/[^[:space:]]'; then
   warn_log "workspace-overwrite" "$envelope"
+fi
+
+# ===========================================================================
+# ASK TIER (rules 17-22, work/0004) — "deletion is a human step"
+# ===========================================================================
+# WHY THIS TIER EXISTS. The block rules above enforce "no BULK deletion", and
+# every bulk shape decomposes into N single-target calls. Measured, not
+# theorised: an agent whose `git rm -r` was blocked by `rm-recursive` removed
+# the same eight files one at a time with `git rm <file>`, which nothing saw,
+# and git pruned the emptied directories itself. The authorization chain held —
+# the deletions were plan-approved and the deviation was reported — but the
+# rule shape did not say what it meant.
+#
+# WHY ASK RATHER THAN A WIDER DENY. A hard deny on these verbs makes
+# legitimately approved work impossible and invites exactly the workaround
+# hunting that episode showed. That is this hook's own stated philosophy (see
+# the docs-install-cmd arm: blocking correct work "would fire on correct work
+# and train evasion"). Reserve deny for the truly-never cases.
+#
+# WHY THIS IS NOT A WEAKENING. Every verb below was previously ALLOWED — three
+# of them (`git checkout`, `git stash`, `git branch`) sit on both agents' static
+# ALLOW lists. Nothing that was denied became askable. And a hook `ask`
+# outranks a static `allow` (measured, work/0004 D1 probe D), which is what
+# lets these rules narrow those grants without editing either static list.
+#
+# WHAT `ask` MEANS WITH NOBODY AT THE PROMPT — the question that blocked this
+# item for months. MEASURED 2026-08-24 in a live profile, not inferred from
+# docs (which do not state it): headless `claude -p` and Task subagents alike
+# do NOT run the command and do NOT auto-resolve to allow; the call is denied
+# and this reason string is handed to the model. See emit_ask's header.
+
+# 17. git-rm (ASK) — the exact route the origin episode took. Not on either
+#     allow list, so before this rule it was reaching the auto-mode classifier.
+if match "\bgit[[:space:]]+${GITOPT}rm\b"; then
+  emit_ask "git-rm" "deleting tracked files is a human step, every one of them, single files included and even when an approved plan names them. Stop, list the exact paths you intend to remove, and wait for confirmation. Do not decompose this into per-file calls to get past it — that decomposition is the reason this rule exists."
+fi
+
+# 18. git-discard (ASK) — discarding uncommitted work is destruction with no
+#     undo, and it wears an ordinary navigation verb. PRECISION IS THE WHOLE
+#     RULE: `git checkout <branch>` and `git checkout -b <branch>` are
+#     navigation and must NOT trip it, so only the worktree-writing forms match
+#     — an explicit `--` pathspec separator, a bare `.` pathspec, or `-f`.
+if match "\bgit[[:space:]]+${GITOPT}checkout\b[^|;&]*([[:space:]]--([[:space:]]|\$)|[[:space:]]-f([[:space:]]|\$)|[[:space:]]--force([[:space:]]|\$)|[[:space:]]\.([[:space:]]|\$))"; then
+  emit_ask "git-discard" "this discards uncommitted changes in the working tree, which no commit can bring back. Say which paths you are about to discard and what is in them, and wait. (Plain \`git checkout <branch>\` is unaffected by this rule — only the pathspec and --force forms reach it.)"
+fi
+# `git restore` defaults to the worktree. `--staged` ALONE only unstages, which
+# destroys nothing, so it passes; `--staged --worktree` still writes the tree.
+if match "\bgit[[:space:]]+${GITOPT}restore\b"; then
+  if match '\brestore\b[^|;&]*[[:space:]]--staged\b' \
+     && ! match '\brestore\b[^|;&]*[[:space:]](-w\b|--worktree\b)'; then
+    : # unstage only — nothing in the working tree changes
+  else
+    emit_ask "git-discard" "git restore overwrites working-tree files from the index or a commit; the current contents are gone with no undo. Name the paths and wait. (\`git restore --staged\` alone only unstages and is not affected by this rule.)"
+  fi
+fi
+
+# 19. git-stash-drop (ASK) — `drop` and `clear` destroy stashed work outright.
+#     `git stash` / `push` / `list` / `show` / `apply` / `pop` are untouched.
+if match "\bgit[[:space:]]+${GITOPT}stash[[:space:]]+(drop|clear)\b"; then
+  emit_ask "git-stash-drop" "dropping or clearing stashes destroys work that exists nowhere else — a stash is not reachable from any branch. Say which stash and why, and wait."
+fi
+
+# 20. git-branch-delete (ASK) — deliberately broader than `-D`. $norm is
+#     lowercased (paths are case-sensitive on Linux, so casing could never
+#     reach a protected path), which makes -D and -d indistinguishable here.
+#     Rather than carry a second case-sensitive matcher for one flag, both ask:
+#     -d is a deletion too, and asking about it is a tightening.
+if match "\bgit[[:space:]]+${GITOPT}branch\b[^|;&]*[[:space:]](-[a-z]*d[a-z]*|--delete)\b"; then
+  emit_ask "git-branch-delete" "deleting a branch can orphan commits that exist nowhere else. Name the branch, say whether it is merged, and wait."
+fi
+
+# 21. unlink (ASK) — the single-file deletion primitive that is not `rm`.
+if match '\bunlink\b'; then
+  emit_ask "unlink" "unlink deletes a file. Deletion is a human step here: name the path and wait."
+fi
+
+# 22. rm-file (ASK, with carve-outs) — plain non-recursive `rm`. Recursive
+#     forms are already DENIED above by rm-recursive; this is the single-target
+#     remainder, which is exactly the shape the origin episode used.
+#
+#     THE CARVE-OUTS ARE THE DESIGN, NOT AN AFTERTHOUGHT. A prompt on every
+#     temp-file and build-artifact cleanup is friction on correct work, and
+#     this hook's own comments say what that produces: trained evasion. So a
+#     call whose targets are ALL disposable passes silently. "Disposable" is
+#     not invented here — it is AGENTS.md's own container-state table: /tmp and
+#     /root/.cache are disposable by design, .venv and node_modules rebuild
+#     from a manifest, __pycache__ and the *_cache dirs are caches, build/dist
+#     are outputs.
+#
+#     Two properties make the carve-out safe, and both are locked by the suite:
+#       * ANY non-carved target makes the WHOLE call ask. Otherwise one /tmp
+#         path in an argument list would launder every other target.
+#       * A target the splitter cannot resolve ASKS. `rm $F`, `rm "$file"`,
+#         `rm *.py` (globbing is off while splitting, so the literal token is
+#         inspected) and an argument-less `rm` all reach the prompt.
+#     The `rm` token must also sit at a command position (start, or after
+#     ; & | && || or an opening paren), so `git commit -m "rm the thing"` is
+#     not a target list. Every rm segment in a compound command is inspected,
+#     not just the first — `rm /tmp/a; rm /workspace/b` asks.
+if match '(^|[;&|(])[[:space:]]*rm[[:space:]]'; then
+  _rm_ask=0
+  _rm_segs=$(printf '%s\n' "$norm" | grep -oE '(^|[;&|(])[[:space:]]*rm[[:space:]][^|;&]*' 2>/dev/null)
+  while IFS= read -r _seg; do
+    [ -n "$_seg" ] || continue
+    _seg=${_seg#*rm }
+    set -f                     # no globbing: `rm *.py` must stay one token
+    # shellcheck disable=SC2086
+    set -- $_seg
+    set +f
+    [ $# -gt 0 ] || { _rm_ask=1; continue; }
+    for _t in "$@"; do
+      case "$_t" in
+        -*) continue ;;                                   # a flag, not a target
+        /tmp/*|/var/tmp/*|/root/.cache/*|*.pyc|*.pyo) continue ;;
+      esac
+      case "/$_t/" in
+        */.venv/*|*/node_modules/*|*/__pycache__/*|*/.pytest_cache/*|*/.mypy_cache/*|*/.ruff_cache/*|*/scratchpad/*|*/build/*|*/dist/*) continue ;;
+      esac
+      _rm_ask=1
+    done
+  done <<RM_SEGMENTS
+$_rm_segs
+RM_SEGMENTS
+  if [ "$_rm_ask" = 1 ]; then
+    emit_ask "rm-file" "deleting a file is a human step here, single files included and even when an approved plan names them. List the exact paths and wait for confirmation. Disposable targets (under /tmp, /root/.cache, .venv, node_modules, __pycache__, the *_cache dirs, build/dist, *.pyc) do not reach this prompt — if you are cleaning those up, say so and use those paths."
+  fi
 fi
 
 emit_pass
