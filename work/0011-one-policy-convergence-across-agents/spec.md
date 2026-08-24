@@ -132,39 +132,154 @@ evaluation semantics per agent rather than assume Claude's.
 0009's comparison table says `agy` has "none of ours" for permissions. That is
 now wrong (0010 F8) and should be corrected when 0009 is unparked.
 
+### F6 [V] — what an overwrite actually costs, measured
+
+All three live profiles carry exactly three keys the template lacks:
+
+| Key | fluidmomenta | nranthony | therapod |
+|---|---|---|---|
+| `model` | `claude-fable-5[1m]` | `opus[1m]` | `opus[1m]` |
+| `effortLevel` | `high` | `high` | `medium` |
+| `agentPushNotifEnabled` | `true` | `true` | `true` |
+
+`env`, `hooks` and `sandbox` are byte-identical to the template on all three.
+Settings backups add three more Claude Code has written there over time:
+`theme`, `skipWorkflowUsageWarning`, `skipAutoPermissionPrompt`.
+
+**The set is open-ended and grows with releases.** The repo's existing preserve
+list — `USER_CUSTOMIZATION_KEYS = {"theme","model","effortLevel"}` at
+`scripts/audit/probes/settings.py:30` — has already gone stale against it,
+missing three of the six. That is the argument for declaring what the sandbox
+**owns** rather than what to preserve, and for fixing that constant.
+
+Scope check (Claude settings reference): `theme`, `model`, `effortLevel`,
+`agentPushNotifEnabled` and `statusLine` are settable in **any** file, so they
+can go per-repo. **`skipAutoPermissionPrompt` is user-or-managed only** — an
+overwrite drops it with nowhere for the user to restore it, so the template must
+own it or the one-time auto-mode notice returns forever.
+`skipWorkflowUsageWarning` is undocumented; scope unknown.
+
+### F7 [V] — a per-repo file cannot promote `ask` → `allow` either
+
+`fluidmomenta`'s live `permissions` had drifted from the template: three rules
+moved from `ask` to `allow` — `Bash(myclickup comment:*)`, `set-status`,
+`update`. That is an in-session "always allow" landing in a **sandbox-owned**
+key, and the owner confirms it was deliberate and wants it kept.
+
+It cannot be kept in a repo-local file. Precedence is deny → ask → allow, first
+match wins, across all scopes: *"a matching ask rule prompts even when a more
+specific allow rule also matches the same call."* While the template lists these
+under `ask`, no `.claude/settings.local.json` can promote them.
+
+So keeping them means **editing the template**, which contradicts a decision
+`docs/permissions-model.md` records deliberately ("The template allows the 13
+reads and nothing else, so every write hits the prompt"). Owner's call to
+overrule; scoped to exactly those three, leaving `create`/`claim`/`tag`/`untag`/
+`depend`/`move`/`append-description` prompting.
+
+**Do not** instead drop them from `ask` so a per-repo allow can win: unlisted
+commands fall to `defaultMode: auto`, where a classifier decides instead of the
+human — weaker than today, before any repo file exists.
+
+### F8 [V] — opencode's precedence runs the OPPOSITE way
+
+From opencode's config docs, later sources override earlier:
+
+```
+1 remote → 2 global (~/.config/opencode/opencode.json) → 3 OPENCODE_CONFIG
+→ 4 project (opencode.json in the repo) → 5 .opencode/ → 6 OPENCODE_CONFIG_CONTENT
+→ 7 managed config files → 8 MDM (macOS only)
+```
+
+Claude gives a one-way ratchet (deny wins from any scope, repo can only tighten).
+**opencode inverts it**: a repo-root `opencode.json` overrides the global config.
+With last-match-wins globs and `allow` as opencode's default, a repo file can
+re-allow what the sandbox denies — and the agent can write that file into its own
+workspace. Same shape as the `agy` `.agents/hooks.json` bypass, except here it is
+the documented, intended mechanism.
+
+Therefore **seeding the deny posture into the global config puts it at level 2,
+under anything a repo carries — that is not a boundary.** It belongs at level 7,
+the managed config, which "overrides everything" and which "users cannot
+override". Two open items, both for opencode's own Phase 0:
+
+- the **Linux managed-config path is unstated** (docs give the macOS path only);
+- **how a project file merges into the `permission` map** — whole-object replace
+  or key-by-key — decides how much a repo can loosen. Unverified.
+
+If the managed path is a system directory it is image-baked, which would not
+converge on `up`. The fix is the trick `proxy/` already uses: bind-mount a
+per-profile host directory onto it, giving both non-overridability and
+convergence, substrate-neutral so it belongs in the base compose.
+
+This **corrects 0009 D2**, which assumes the global config is the target.
+
+Also: opencode does **not** write state back into `opencode.json` — TUI prefs
+live in a separate `tui.json`. So there is nothing of the user's in the file we
+write, and its mode is overwrite.
+
 ---
 
 ## 2. Direction
 
-**Chosen: converge every agent's policy on every `up`/`recreate`, by merging the
-keys the sandbox owns and leaving every other key alone. One function, one
-descriptor table, one reset command.**
+**Chosen: converge every agent's policy on every `up`/`recreate`. One function,
+one descriptor table, one reset command — with the write mode chosen per agent
+by one rule:**
 
-### Why merge-owned-keys rather than whole-file overwrite
+> **Overwrite where the agent has somewhere else to put its preferences.
+> Merge where it does not.**
 
-The request said overwriting Claude's settings is fine. It is *nearly* fine, and
-the small difference is worth taking:
+| Agent | Mode | Why |
+|---|---|---|
+| Claude | **overwrite** + discard file + warning | per-repo files exist for nearly everything (F6) |
+| `agy` | **merge** owned keys | no per-repo surface at all (F3), and `trustedWorkspaces` is functional state, not a preference |
+| opencode | **overwrite** | never writes to the file; prefs are in `tui.json` (F8) |
 
-- Blind overwrite resets `model` and `effortLevel` on **every `up`**. That is a
-  daily papercut whose predictable outcome is people avoiding `up` — which
-  re-creates the drift this work exists to remove.
-- The merge is not extra machinery. `converge_antigravity` already does exactly
-  this and is already tested; generalising it is strictly less code than two
-  mechanisms.
-- Inverting the list is what makes it safe: the sandbox declares the keys it
-  **owns**, and everything else is preserved by default. A new Claude runtime key
-  survives automatically; a new sandbox-owned key must be added deliberately.
+### The overwrite must be loud, but not noisy
 
-Everything security-relevant — `permissions`, `hooks`, `env`, `sandbox` — is
-owned and therefore overwritten wholesale on every `up`, which is what was
-actually asked for.
+Owner's design, with the fatigue problem fixed. Three requirements:
+
+1. **Warn only when the dropped set CHANGES.** Claude rewrites `model` and
+   `effortLevel` every session, so an unconditional warning fires on every `up`
+   forever and stops being read — going quiet in the reader's head exactly when
+   a genuinely new key appears. Keep the last dropped set on disk and compare.
+2. **Write the dropped keys to `claude-home/settings.discarded.json`, and name
+   that path in the warning.** Not copy-paste from scrollback: recoverable,
+   survives a lost terminal, and it means the data is on disk even on the silent
+   runs.
+3. **The advice must be true per key.** `skipAutoPermissionPrompt` cannot go
+   per-repo (F6), so either the template owns it or the message says so rather
+   than sending someone somewhere that will not work.
+
+This subsumes the "unexpected top-level key" detector: a new key from a Claude
+release, or an in-session `permissions` promotion, surfaces on the next `up`.
+
+### Why overwrite won for Claude
+
+An earlier draft of this spec argued for merge-owned-keys on the grounds that
+resetting `model`/`effortLevel` every `up` would drive people away from running
+`up`. Measured (F6), the cost is six preference keys, five of which can be set
+per-repo, and the owner checks the model every session anyway — it is printed at
+startup. The behavioural claim was a plausible story, not evidence, and it does
+not survive contact with the actual delta.
+
+Overwrite also buys something merge cannot: the live file **is** the template.
+Merge only guarantees the owned keys, so a future Claude release putting
+something security-relevant in a key we do not own would be silently preserved
+rather than enforced. `permissions` gaining `additionalDirectories` and
+`defaultMode` over time is that same shape of change.
+
+`agy` still merges, and the asymmetry is principled rather than arbitrary: it has
+nowhere else to put its preferences, and what it writes there is functional.
 
 ### Why the repo-local override story differs per agent, and that is acceptable
 
-- **Claude**: `.claude/settings.local.json` in each repo, tighten-only (F2).
-  Document the one-directional limit.
+- **Claude**: `.claude/settings.local.json` in each repo, tighten-only (F2) —
+  and it cannot promote `ask` to `allow` either (F7). Five of the six dropped
+  preference keys can live there; `skipAutoPermissionPrompt` cannot (F6).
 - **`agy`**: no in-repo surface exists (F3). Global policy only, for now.
-- **opencode**: 0009 Phase 0 must answer whether one exists before it is wired.
+- **opencode**: a repo-root `opencode.json` exists and **overrides** the global
+  config (F8), so the deny posture cannot live in the global config at all.
 
 Do not invent a cross-agent override file to paper over this. If per-repo
 tightening for `agy` becomes a real need, the honest route is to teach the shared

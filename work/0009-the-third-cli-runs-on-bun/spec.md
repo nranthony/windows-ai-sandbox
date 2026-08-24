@@ -29,6 +29,33 @@ a SECURITY IMPACT line, `scripts/profile.sh <p> verify` (tier 1) green, and
 `scripts/profile.sh <p> audit` (tier 2) run — see [AGENTS.md](../../AGENTS.md),
 "Security-sensitive changes". `just test-offline` before calling it done.
 
+> **Correction, 2026-08-23 (from [0011](../0011-one-policy-convergence-across-agents/spec.md) F8) — read before implementing D2 or D3.**
+>
+> Two claims in this document are now wrong or incomplete:
+>
+> 1. **The comparison table says `agy` has "none of ours" for permissions.**
+>    False. `agy` has had `permissions.{allow,ask,deny}` in
+>    `antigravity-cli/settings.json` all along, prefix-matched like Claude's
+>    (0010 F8). The three-agent table needs redrawing.
+> 2. **D2 assumes the seeded `opencode.json` goes in the GLOBAL config.** That
+>    puts the deny posture at precedence level 2, while a repo-root
+>    `opencode.json` is level 4 — so any workspace, including one the agent
+>    writes itself, overrides it. opencode's precedence runs the opposite way to
+>    Claude's, where deny wins from every scope. The posture belongs at level 7,
+>    the managed config, which "overrides everything".
+>
+> Two things Phase 0 must therefore establish, neither currently in T01: the
+> **Linux managed-config path** (the docs give only the macOS
+> `/Library/Application Support/opencode/`), and **how a project file merges into
+> the `permission` map** — whole-object replace or key-by-key — which decides how
+> much a repo can loosen. If the managed path is a system directory it is
+> image-baked and will not converge on `up`; the fix is the trick `proxy/`
+> already uses, a per-profile host directory bind-mounted onto it.
+>
+> Confirmed and unchanged: opencode does **not** write state back into
+> `opencode.json` (TUI prefs live in `tui.json`), so D2's carve-out holds and its
+> convergence mode is overwrite.
+
 ---
 
 ## 0. How to re-enter this cold

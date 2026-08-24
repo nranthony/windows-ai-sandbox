@@ -27,14 +27,37 @@ policy file is the agent's to report, not ours to silently replace.
 Descriptors live in one table near the function, not scattered through
 `ensure_state`, so adding opencode is one row.
 
+### T00 — PREREQUISITE: settle the myclickup promotions (spec F7)
+
+Blocking, because T02 reverts them the moment it lands. The owner wants
+`Bash(myclickup comment:*)`, `set-status` and `update` kept, and no repo-local
+file can hold them while the template lists them under `ask`.
+
+Move exactly those three from `ask` to `allow` in **both** templates (the parity
+suite enforces an exact match), and amend the "reads yes, writes prompt" section
+of `docs/permissions-model.md` to record what changed and why. This is a
+security widening — ClickUp writes become unprompted in every profile — so it
+needs its own `SECURITY IMPACT` line and explicit owner sign-off in the commit.
+
 ### T02 — Claude joins the convergence
 
 Replace the `[[ ! -f ... ]]` create-only guard (`profile.sh:575`) with
 `converge_agent_policy claude-settings.json claude-home/settings.json env hooks permissions sandbox`.
 
-**The regression risk is `model`/`effortLevel`/`agentPushNotifEnabled` vanishing
-on `up`.** That is the papercut the merge exists to avoid and it is the assertion
-to write first.
+Mode is **overwrite** (spec §2), so the work is the loud-but-not-noisy part:
+
+1. Write the dropped non-template keys to `claude-home/settings.discarded.json`
+   before overwriting.
+2. Warn **only when that set differs from the previous run** — an unconditional
+   warning fires on every `up` forever, because Claude rewrites `model` and
+   `effortLevel` every session, and a warning that always fires is not read.
+3. The message names the discard file, not a JSON blob to copy out of scrollback.
+4. `skipAutoPermissionPrompt` is user-or-managed scope (F6): either the template
+   owns it, or the message says it cannot go per-repo. Do not advise something
+   that will not work.
+
+Also fix `USER_CUSTOMIZATION_KEYS` at `scripts/audit/probes/settings.py:30` — it
+lists three of the six observed keys and has been stale for months.
 
 ### T03 — `converge_antigravity` becomes a descriptor
 
