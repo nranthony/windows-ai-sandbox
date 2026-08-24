@@ -108,6 +108,8 @@ convergence this item needs so new rules actually reach profiles):
 
 ## 0006 — manifest keys (`work/0006-manifest-keys-the-consumer-drops/plan.md`)
 
+**APPLIED 2026-08-24** — implemented (Option B, notes.md written, suite 65/65) in commit 9304cd2; skip at fold time.
+
 The mandatory §3 re-investigation RAN 2026-08-24 and is discharged. Create
 `notes.md` beside the plan recording:
 
@@ -130,6 +132,8 @@ The mandatory §3 re-investigation RAN 2026-08-24 and is discharged. Create
 
 ## 0007 — genericise identifiers (`work/0007-genericise-public-identifiers/spec.md`)
 
+**APPLIED 2026-08-24** — scope decided (searchable), edits + private-names check landed in commits 75748f4/a9c9b6c; skip at fold time.
+
 - Headline: "9 files, 21 hits" → 13 files / 27 lines (12/26 excluding the
   spec's own self-reference); re-count at fold time — it grows with every landing.
 - New occurrences postdating the spec: `work/0008` L4/L248 (`therapod/pipeline`),
@@ -148,6 +152,8 @@ The mandatory §3 re-investigation RAN 2026-08-24 and is discharged. Create
   six days is the drift rate that justifies it.
 
 ## 0008 — Python half of the gates (`work/0008-the-python-half-of-the-gates/plan.md`)
+
+**APPLIED 2026-08-24** — all four items implemented in commit d040d0e (plan §2.3 rewritten to verified); skip at fold time.
 
 - §2.3 rewrite: "verify BEFORE implementing" → "verified 2026-08-24", with:
   (1) precedence measured env > project `[tool.uv]` > user config —
