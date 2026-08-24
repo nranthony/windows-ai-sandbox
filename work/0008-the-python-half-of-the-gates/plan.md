@@ -1,6 +1,7 @@
 # 0008 — the Python half of the dependency gates
 
-**Status:** Not started. Raised 2026-08-18 while reviewing a supply-chain plan
+**Status:** Implemented 2026-08-24 (items 1, 2, 3, 4 — see the per-item notes below).
+Raised 2026-08-18 while reviewing a supply-chain plan
 written by an agent in `therapod/pipeline`; the findings are about THIS repo, not
 that one. **Nothing here is implemented and nothing here is broken today** — every
 item is a gap in coverage, which by construction produces no symptom.
@@ -11,9 +12,9 @@ when the work merges.
 **Security-sensitive.** Items 1 and 2 touch `scripts/with-egress.sh` and
 `scripts/depaudit.py`, both on the security-sensitive list in
 [AGENTS.md](../../AGENTS.md). Any change needs a SECURITY IMPACT line in the commit,
-`bash scripts/with-egress.test.sh` (currently 58/58) and `bash scripts/depaudit.test.sh`
-(38/38 offline) green, plus `scripts/profile.sh <p> verify`. Run `just test-offline`
-before calling it done.
+`bash scripts/with-egress.test.sh` (82/82 after this work; was 66/66) and
+`bash scripts/depaudit.test.sh` (43/43 offline after this work; was 38/38) green, plus
+`scripts/profile.sh <p> verify`. Run `just test-offline` before calling it done.
 
 ---
 
@@ -93,9 +94,11 @@ at `up`, from wherever verify runs, not from the workspace at install time.
      reuse the `python3` already required by this script. Prefer the latter — the
      script already hard-requires `python3` on the host (`:101`) and a naive grep
      would match `no-build` under an unrelated table.
-2. `depaudit.py` — a new posture check for the same thing (proposed **P09**; note
-   `P07` is an unexplained gap in the ID sequence — confirm it is free, not retired,
-   before claiming an ID). Status `FAIL` when a project disables the wheels-only
+2. `depaudit.py` — a new posture check for the same thing. **Correction 2026-08-24:
+   the ID is `P01`, not a new P09.** `P07` is NOT an unexplained gap — it is "Strict CI
+   install", deliberately deferred (`docs/rfcs/01-posture-scanner-plan.md:129`,
+   `docs/_archive/dependency-guardrails-plan.md:668`). `P01` ("Wheel-only install policy",
+   rfcs/01:123) was RESERVED and unimplemented, and is exactly this check. Status `FAIL` when a project disables the wheels-only
    default with no stated reason, `WARN` for pip's per-package `no-binary`. Evidence
    line + file + line number, per the tool's rule that every verdict carries one.
 3. `verify-sandbox.sh` — extend the G10 sweep to the Python files, or state in a
@@ -138,23 +141,41 @@ with no image-wide freeze and no per-project maintenance. Record the computed
 timestamp in the audit line, so "was this window quarantined" becomes answerable for
 Python as it already is for npm.
 
-### 2.3 Verify BEFORE implementing — three open questions
+### 2.3 VERIFIED 2026-08-24 — all three questions answered, favourably
 
-- **Precedence.** Does `UV_EXCLUDE_NEWER` beat `/etc/uv/uv.toml`, and does a project
-  `[tool.uv] exclude-newer` beat the env var? The Gate 2/Gate 3 experience says
-  assume nothing about config precedence and test it.
-- **Inert under `--frozen`?** A lockfile install performs no resolution, so this
-  should be a no-op there. Confirm rather than assume; if it is NOT inert, this
-  breaks `uv sync --frozen`, which is the install shape we most want to encourage.
-- **Container uv version.** 0.11.16 is the HOST's Homebrew build. The image installs
-  uv via the Astral installer at a different time (`Dockerfile:101-114`). The env var
-  must exist in the CONTAINER's uv, since that is where the install runs.
+Measured with **uv 0.12.5**, on the host AND inside the image. Nothing here is assumed.
 
-Also decide the opt-out. A legitimately-fresh package (a same-week security fix)
-must remain installable; the npm side answers this by editing config, which is
-visible. Whatever is chosen here must be equally visible in the audit record.
+- **Precedence: env > project `[tool.uv]` > user config.** `UV_EXCLUDE_NEWER` beats a
+  workspace `[tool.uv] exclude-newer`, so a workspace file **cannot switch the injected
+  window off**. Note this is the OPPOSITE of Gate 2 and Gate 3, where the project file
+  wins — do not generalise between them.
+- **Inert under `--frozen`.** The install plan is byte-identical with and without the
+  variable set; `uv sync --frozen` performs no resolution. The install shape we most want
+  to encourage is unaffected.
+- **Container uv version.** The image carries uv 0.12.5, which honours `UV_EXCLUDE_NEWER`
+  and also ships `uv audit` (item 3).
 
----
+### 2.4 The decision those measurements surfaced
+
+Because env wins, **a project that pins an OLDER (stricter) `exclude-newer` is silently
+LOOSENED to the injected window.** That is a real cost and it is taken deliberately: the
+alternative — deferring to the project file — lets any workspace disable the gate by
+pinning a future date, which is strictly worse.
+
+**Posture adopted:** the project's own pin is READ but never obeyed, and it is written into
+the audit line (`py_age_gate.project_pins`) whenever one exists, plus a stderr note when it
+is stricter than the window. The record therefore never implies the project's own window
+applied. Implemented as `scan_uv_exclude_newer()` in `with-egress.sh`, locked by three
+assertions in `with-egress.test.sh`.
+
+### 2.5 The opt-out
+
+`--allow-fresh "<reason>"`. The reason is **mandatory** — a bare `--allow-fresh` exits
+non-zero and says so (locked by test) — and it lands in the audit record as
+`py_age_gate.reason` with `applied: false`. It exists because a same-week security fix is
+real, and a gate with no visible escape hatch gets bypassed *invisibly* instead: someone
+runs the install outside this script, where nothing is recorded at all. Making the hatch
+loud and logged is the whole point.
 
 ## 3. `uv audit` re-prices two ADR-0002 refusals
 
@@ -191,12 +212,14 @@ clearly-labelled, **non-gating** section. Constraints:
 
 ### 3.3 Unverified claims to check, not inherit
 
-These came from the outside plan and are **not confirmed**:
-- `UV_MALWARE_CHECK=1` enabling an opt-in OSV malware lookup on every sync — no
-  `malware` string appears anywhere in uv 0.11.16's help on this host. Either it
-  postdates this version or it does not exist. `uv sync --help | grep -i malware`
-  settles it.
+These came from the outside plan and are **DEBUNKED as of 2026-08-24**:
+- `UV_MALWARE_CHECK=1` enabling an opt-in OSV malware lookup on every sync — **does not
+  exist** through uv 0.12.5. No `malware` string appears anywhere in its help. Recorded in
+  the ADR-0002 addendum so nobody re-inherits it from the outside plan.
 - "4–10× faster than pip-audit" — decoration, unverified, do not repeat it.
+
+One thing measured that the plan did not anticipate: `uv audit` prints an *experimental*
+banner. That is an argument for keeping the section non-gating, not for skipping it.
 
 ---
 
@@ -206,8 +229,8 @@ Measured 2026-08-18 with `python3 scripts/depaudit.py posture <dir>`:
 
 | Subproject | Finding |
 |---|---|
-| `container_testing/` | **P03 FAIL — no Python lockfile.** It has a `pyproject.toml` and no `uv.lock`; resolution is not reproducible. |
-| `dashboard/` | **P04 WARN — no `exclude-newer`.** `uv.lock` is present and tracked (P03/P08 pass). Resolves as a side effect if item 2 lands. |
+| `container_testing/` | **P03 FAIL — no Python lockfile.** It has a `pyproject.toml` and no `uv.lock`; resolution is not reproducible. **FIXED 2026-08-24**: `uv lock` run on the HOST (`download.pytorch.org` is not on any profile allowlist, so locking from inside a profile would need an egress window it should not need). 65 packages, all with wheels — P03 FAIL→PASS and P08 now PASS. |
+| `dashboard/` | **P04 WARN — no `exclude-newer`.** `uv.lock` is present and tracked (P03/P08 pass). ~~Resolves as a side effect if item 2 lands.~~ **It does NOT — verified 2026-08-24.** P04 asks whether the *project file* declares a window; item 2 puts the window in the install route instead, where it needs no maintenance. Writing a timestamp into `pyproject.toml` to silence P04 would recreate exactly the unmaintained per-project pin item 2 exists to replace, so the WARN stands and is accurate: outside this sandbox, `dashboard` has no uv-side age gate. |
 
 Both are small. A supply-chain scanner whose own repo does not pass it is an easy
 thing to point at, and `container_testing` is the one place here where the outside
@@ -251,3 +274,33 @@ Python controls, and carried the two unverified claims in §3.3); the value was 
 what its layer model made visible **here** by contrast. No ADR is superseded by this
 document — items 2 and 3 propose amendments to ADR-0002 and item 1 implements what
 ADR-0004 already decided.
+
+---
+
+## 8. Implementation record — 2026-08-24
+
+Landed in the order §6 asked for (1 → 4 → 2 → 3).
+
+**Item 1** — `with-egress.sh` (`gate3_scan_file`, extended `scan_workspace_rc`),
+`verify-sandbox.sh` (G10p sweep + the byte-identical parser copy), `depaudit.py` (P01).
+Tests: 6 new in `depaudit.test.sh` (43/43), 13 new in `with-egress.test.sh` (82/82),
+including the cross-file drift lock and both section-scope negatives.
+The G10 question the plan refused to leave undecided is **decided: G10 was extended**, as
+`G10p`. Install-time alone was not enough — `verify` runs at every `up` and is where an
+operator looks, and the two checks answer at different moments (what the tree says now, vs
+what it said when a window opened).
+
+**Item 2** — `UV_EXCLUDE_NEWER` injected per window, `--allow-fresh "<reason>"` opt-out,
+`py_age_gate` in the audit record, `scan_uv_exclude_newer()` for project pins. See §2.3–2.5.
+
+**Item 3** — `scripts/profile.sh <p> deps --vulns` runs `uv audit --frozen` host-side, in
+its own labelled section, not merged into depaudit's MAL-only verdict and not affecting the
+exit code. Ignore list lives inline in `profile.sh` (`UV_AUDIT_IGNORE`, empty today) and is
+applied with `--ignore-until-fixed`. Deliverable: the dated **addendum inside ADR-0002**
+(the mechanic ADR-0004 already set, and the one ADR-0002's own Consequences section asks
+for), recording the re-priced refusals, the untouched noise argument, the debunked
+`UV_MALWARE_CHECK`, and the partly-fired third re-open condition (§5).
+
+**Item 4** — `container_testing/uv.lock` generated and committed; `container_testing/AGENTS.md`
+now says the lock is committed, that `uv sync --frozen` is the install shape, and that
+regeneration is a HOST-side `uv lock`.

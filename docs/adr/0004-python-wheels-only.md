@@ -153,3 +153,47 @@ pip and uv differ in exactly the direction that matters when one package needs a
 This is why the five opt-outs are project-wide rather than package-scoped, and it is a reason
 to reach for pip's config when only one dependency is the problem — the opposite of the
 usual advice on this image, where uv is preferred for its clearer failure message.
+
+## Addendum 2026-08-24 — the project-level opt-out is now detected in three places
+
+The decision above stands unchanged; this closes a gap in how it is *observed*.
+
+The Dockerfile's Gate 3 block has always documented, as verified, that a project opts out
+wholesale with `no-build = false` in its own `uv.toml` / `[tool.uv]` — and re-confirmed
+against uv 0.12.5, that opt-out really is wholesale, since uv has no per-package exemption
+key (its only `--no-build*` relatives are the unrelated build-isolation flags). pip's
+`no-binary = <pkg>` is the narrower analogue.
+
+Nothing detected that a workspace had done so. Gate 2's equivalent — a project `.npmrc`
+beating `/usr/etc/npmrc` — was covered in three places (`verify-sandbox.sh`'s G10 sweep,
+`with-egress.sh`'s `scan_workspace_rc`, `depaudit`'s N03); Gate 3's was covered in none. The
+asymmetry was accidental, not decided (`work/0008` item 1). It matters because a workspace
+opting out restores install-time code execution for every install in the window, while the
+audit record still reads as a clean wheels-only install — and under-reporting is the worst
+failure mode an audit log has, since it is indistinguishable from a clean run.
+
+Gate 3 now has the same three layers:
+
+- `with-egress.sh` — `scan_workspace_rc` scans `uv.toml` / `pyproject.toml` / `pip.conf`
+  alongside the npm files, classifies OFF/WEAKER/UNPARSED, and writes the finding into the
+  audit record's `rc_overrides`. It **never blocks**: a weakened gate is confidence, not a
+  boundary, and hard-failing the only install route over it would break installs to defend
+  against something reported elsewhere.
+- `verify-sandbox.sh` — a G10p sweep over `/workspace` at every `up`, WARN and never FAIL,
+  same standing as G10: the workspace is the user's own repo and may have a considered
+  reason.
+- `depaudit` — **P01**, previously reserved and unimplemented in
+  [`docs/rfcs/01-posture-scanner-plan.md`](../rfcs/01-posture-scanner-plan.md) §4.2. FAIL for
+  an unexplained wholesale opt-out, WARN when a comment above it states the reason (N11's
+  logic), WARN for pip's per-package `no-binary`.
+
+The parser is section-aware and therefore `python3`, not `grep`: `no-build = false` under
+`[tool.hatch]` or behind a `#` is not an opt-out, and reporting one that is not there sends
+someone hunting for an injection that does not exist. It lives **twice** — `verify-sandbox.sh`
+is streamed into the container over stdin and can source nothing — so the two copies are
+diffed byte-for-byte by `with-egress.test.sh`. Two hand-edited parsers over one grammar
+drift; that is measured history here, not a worry.
+
+Silence is the wanted state throughout: a project that declares nothing inherits the image
+default, and a check that fires on every healthy repo becomes furniture. That lesson (G10,
+N03) is now locked by test in both suites.

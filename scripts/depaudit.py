@@ -683,6 +683,99 @@ def check_python(root: Path, rep: Report, ctx: dict) -> None:
     if (py or reqs) and not found_extra:
         rep.add("P06", PASS, "No extra-index-url", "No dependency-confusion vector configured")
 
+    # --- P01: wheels-only install policy, and who opts OUT of it ----------
+    # ADR-0004 / Dockerfile "Gate 3": an sdist runs setup.py or a PEP-517
+    # backend at INSTALL time; a wheel is unpacked, never executed. It is the
+    # exact Python analogue of the npm lifecycle script N01 covers.
+    #
+    # This is the OVERRIDE half of P01, deliberately — the same shape as N03 for
+    # Gate 2. Gate 2's project-level override was caught in three places and
+    # Gate 3's in none, an asymmetry that was accidental rather than decided
+    # (work/0008 item 1). A repo declaring nothing inherits whatever policy its
+    # environment sets, which is the wanted state, so silence is a PASS with the
+    # inheritance said out loud. Flagging every repo that does not restate the
+    # policy would fire on every healthy one, and a permanently-firing check is
+    # furniture — the G10/N03 lesson, already learned twice here.
+    #
+    # DELIBERATE DIFFERENCE from with-egress.sh's gate3_scan_file, which classes
+    # a project pip.conf carrying no `only-binary` as OFF: that scanner knows
+    # exactly which image default (/etc/pip.conf) the file replaces. depaudit
+    # runs on any repo anywhere and knows no such baseline, so inferring an
+    # opt-out from an absence there would be a guess reported as a finding.
+    #
+    # uv has no per-package exemption key (re-confirmed against uv 0.12.5 —
+    # its only `--no-build*` relatives are the unrelated build-isolation flags),
+    # so uv's opt-out is wholesale: FAIL, downgraded to WARN when a comment
+    # states why, on N11's reasoning that an unexplained exemption outlives the
+    # reason for it. pip's `no-binary = <pkg>` exempts one package while :all:
+    # still covers the rest — narrower, and it must not read the same: WARN.
+    p01_declared = False
+    for src, name in ((root / "uv.toml", "uv.toml"), (pyproject, "pyproject.toml")):
+        if not src.exists():
+            continue
+        try:
+            raw = tomllib.loads(read(src))
+        except (tomllib.TOMLDecodeError, ValueError):
+            continue  # P00 already reported the pyproject case
+        table = raw if name == "uv.toml" else (raw.get("tool") or {}).get("uv") or {}
+        if not isinstance(table, dict) or "no-build" not in table:
+            continue
+        text = read(src)
+        ln = find_line(text, r"^\s*no-build\s*=")
+        lines = text.splitlines()
+        stated = ln >= 2 and lines[ln - 2].strip().startswith("#")
+        p01_declared = True
+        if table["no-build"] is False:
+            rep.add("P01", WARN if stated else FAIL,
+                    "Project opts OUT of the wheels-only policy",
+                    "no-build = false — uv will BUILD source distributions here, running "
+                    "setup.py / a PEP-517 backend at install time (ADR-0004). uv has no "
+                    "per-package exemption, so this opt-out is wholesale"
+                    + (" (a reason is stated above it)" if stated
+                       else " and carries no stated reason"),
+                    file=name, line=ln,
+                    fix="Vendor a wheel or drop the dependency; if the build is genuinely "
+                        "required, keep no-build = false but write the reason in a comment "
+                        "directly above it")
+        elif table["no-build"] is True:
+            rep.add("P01", PASS, "Wheels-only declared in-repo", "no-build = true",
+                    file=name, line=ln)
+        else:
+            rep.add("P01", UNKNOWN, "no-build is not a boolean",
+                    f"no-build = {table['no-build']!r} — cannot tell whether source builds "
+                    "are refused, and an unknown is never a pass",
+                    file=name, line=ln)
+
+    for cfg in (root / "pip.conf", root / "pip.ini", root / ".pip" / "pip.conf"):
+        if not cfg.exists():
+            continue
+        ob, obl = ini_get(cfg, "only-binary")
+        nb, nbl = ini_get(cfg, "no-binary")
+        if ob and ob.strip() == ":all:":
+            p01_declared = True
+            rep.add("P01", PASS, "Wheels-only declared in-repo", f"only-binary={ob}",
+                    file=cfg.name, line=obl)
+        elif ob:
+            p01_declared = True
+            rep.add("P01", WARN, "Wheels-only is narrower than :all:",
+                    f"only-binary={ob} — everything outside this list may still build "
+                    "from source at install time",
+                    file=cfg.name, line=obl)
+        if nb:
+            p01_declared = True
+            rep.add("P01", WARN, "A package is exempted from wheels-only",
+                    f"no-binary={nb} — that package builds from source, running its "
+                    "setup.py at install time; :all: still covers the rest",
+                    file=cfg.name, line=nbl,
+                    fix="Keep it if the build is needed, and state the reason in a comment "
+                        "above it (see N11)")
+
+    if not p01_declared:
+        rep.add("P01", PASS, "No project override of the wheels-only policy",
+                "Nothing in-repo weakens it; this project inherits whatever the environment "
+                "sets (in this sandbox: no-build=true in /etc/uv/uv.toml and "
+                "only-binary=:all: in /etc/pip.conf)")
+
     # --- P08: sdists resolve to arbitrary code at build time --------------
     ulock = root / "uv.lock"
     if ulock.exists():

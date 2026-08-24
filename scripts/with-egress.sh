@@ -3,7 +3,8 @@
 # with-egress.sh — temporarily widen the egress proxy allowlist for one command
 # =============================================================================
 # Usage:
-#   scripts/with-egress.sh <profile> [--with pypi[,npm,git,...]] -- <cmd>
+#   scripts/with-egress.sh <profile> [--with pypi[,npm,git,...]]
+#                                    [--allow-fresh "<reason>"] -- <cmd>
 #
 # Default --with: pypi
 # Section tags match `[<tag>]` in proxy/allowed_domains.txt — typical
@@ -30,6 +31,19 @@
 #   T22  persist    — one JSON line per window appended to
 #        ~/.ai-sandbox/profiles/<profile>/audit/depgate.jsonl (host side, so it
 #        survives `docker rm`). Read it back with `profile.sh <p> deps --history`.
+#   T24  age gate   — UV_EXCLUDE_NEWER is injected into the command's
+#        environment at (now - 7 days), giving Python the same relative
+#        quarantine npm gets from min-release-age=7. `exclude-newer` takes a
+#        TIMESTAMP, not a duration, which is why this could never be an
+#        image-wide setting; the install window is the one place that knows the
+#        moment it opens and can do the conversion. Suppress it for one window
+#        with `--allow-fresh "<reason>"` — the reason is required and lands in
+#        the audit record, because an opt-out nobody can see later is not one.
+#
+# --allow-fresh exists for the legitimately-fresh package: a same-week security
+# fix is real, and a gate with no visible escape hatch gets bypassed invisibly
+# instead (someone runs the install outside this script). Making the hatch
+# loud and recorded is the point.
 #
 # Requires python3 on the HOST (for the OSV check and JSON emission). Failure to
 # write the audit line warns; it never fails an otherwise-successful install.
@@ -62,6 +76,7 @@ PROFILES_ROOT="$HOME/.ai-sandbox/profiles"
 
 profile=""
 sections="pypi"
+allow_fresh=""
 cmd=()
 
 while [[ $# -gt 0 ]]; do
@@ -70,13 +85,20 @@ while [[ $# -gt 0 ]]; do
       sections="${2:?--with requires a value}"
       shift 2
       ;;
+    --allow-fresh)
+      # The reason is MANDATORY. A bare --allow-fresh would make the gate
+      # switchable with no trace of why, which is the state this whole item
+      # exists to end.
+      allow_fresh="${2:?--allow-fresh requires a reason, e.g. --allow-fresh \"CVE-2026-1234 fix published today\"}"
+      shift 2
+      ;;
     --)
       shift
       cmd=("$@")
       break
       ;;
     -h|--help)
-      sed -n '2,34p' "$0"
+      sed -n '2,49p' "$0"
       exit 0
       ;;
     -*)
@@ -339,7 +361,136 @@ print(json.dumps(out))
   return 0
 }
 
-# scan_workspace_rc <dir> — release-age overrides in the tree about to install.
+# gate3_scan_file <file> — Gate 3 (Python wheels-only) opt-outs declared in ONE file.
+#
+# BYTE-IDENTICAL with the copy in scripts/verify-sandbox.sh, deliberately.
+# verify-sandbox.sh is STREAMED into the container over stdin (profile.sh
+# `verify`), so it can neither source this file nor have it mounted; the parser
+# has to exist twice. with-egress.test.sh extracts both bodies and diffs them
+# exactly, because two hand-edited parsers over one grammar drift — the two
+# agent deny lists already proved that here. Edit both or neither.
+#
+# Emits `key=value<TAB>CLASS`, and emits NOTHING for a file that declares no
+# opinion. Silence is the wanted state: a project inheriting the image default
+# is the healthy case, and a check that fires on every healthy repo becomes
+# furniture (the G10 and N03 lesson, learned twice).
+#
+# Classes: OK (as strong as the default) · WEAKER (a per-package exemption —
+# pip only; uv has no per-package key, re-confirmed against uv 0.12.5, whose
+# only `--no-build*` relatives are the unrelated build-isolation flags) · OFF
+# (the wholesale opt-out) · UNPARSED (could not tell, which is never a pass).
+#
+# python3 rather than grep because this is SECTION-SCOPED: `no-build = false`
+# under [tool.hatch], inside a comment, or in a string is not an opt-out, and a
+# line-grep cannot tell those apart from the real thing. The file is parsed,
+# never executed. stderr is deliberately NOT swallowed — a parser that dies
+# silently under-reports, which reads exactly like a clean tree.
+gate3_scan_file() {
+  python3 - "$1" <<'PY'
+import configparser, os, sys, tomllib
+
+path = sys.argv[1]
+name = os.path.basename(path)
+out = []
+
+def emit(key, val, cls):
+    out.append("%s=%s\t%s" % (key, val, cls))
+
+try:
+    if name == "pip.conf":
+        cp = configparser.ConfigParser(strict=False)
+        cp.read(path)
+        only_binary = no_binary = None
+        for sect in cp.sections():
+            if cp.has_option(sect, "only-binary"):
+                only_binary = (cp.get(sect, "only-binary") or "").strip()
+            if cp.has_option(sect, "no-binary"):
+                no_binary = (cp.get(sect, "no-binary") or "").strip()
+        # A pip.conf in the tree REPLACES /etc/pip.conf wherever it is in
+        # effect (PIP_CONFIG_FILE, a CI step, a tox env) rather than merging
+        # with it, so the wheels-only default is simply absent there. pip does
+        # not read it from the CWD on its own — which is exactly why this
+        # reports and never blocks.
+        if only_binary is None:
+            emit("only-binary", "<unset>", "OFF")
+        elif only_binary == ":all:":
+            emit("only-binary", only_binary, "OK")
+        else:
+            emit("only-binary", only_binary, "WEAKER")
+        if no_binary:
+            emit("no-binary", no_binary, "WEAKER")
+    else:
+        with open(path, "rb") as fh:
+            data = tomllib.load(fh)
+        table = data if name == "uv.toml" else (data.get("tool") or {}).get("uv") or {}
+        if not isinstance(table, dict):
+            table = {}
+        if "no-build" in table:
+            v = table["no-build"]
+            if v is False:
+                emit("no-build", "false", "OFF")
+            elif v is True:
+                emit("no-build", "true", "OK")
+            else:
+                emit("no-build", str(v), "UNPARSED")
+except (OSError, tomllib.TOMLDecodeError, configparser.Error, UnicodeDecodeError) as e:
+    emit("parse", type(e).__name__, "UNPARSED")
+
+for row in out:
+    print(row)
+PY
+}
+
+# scan_uv_exclude_newer <dir> — the project's OWN uv age pin, if it has one.
+#
+# Host-side only, and not a verdict: it exists because this script injects
+# UV_EXCLUDE_NEWER (below), env beats `[tool.uv] exclude-newer` in uv's
+# precedence (measured 2026-08-24, uv 0.12.5, host and container), and a project
+# that pins an OLDER timestamp than the injected window is therefore silently
+# LOOSENED by the very gate meant to tighten it. Recording the project's pin in
+# the audit record is what makes that visible afterwards; suppressing the
+# injection instead would let any workspace turn the gate off by pinning a
+# future date, which is the opposite of the intent.
+#
+# Emits `path<TAB>exclude-newer=<value>`; nothing when no project pins one.
+scan_uv_exclude_newer() {
+  local dir="$1" f val
+  [[ -d "$dir" ]] || return 0
+  while IFS= read -r f; do
+    val="$(python3 - "$f" <<'PY'
+import os, sys, tomllib
+
+path = sys.argv[1]
+try:
+    with open(path, "rb") as fh:
+        data = tomllib.load(fh)
+except Exception:
+    raise SystemExit(0)
+table = data if os.path.basename(path) == "uv.toml" else (data.get("tool") or {}).get("uv") or {}
+if isinstance(table, dict) and table.get("exclude-newer"):
+    print(table["exclude-newer"])
+PY
+)" || val=""
+    # `[[ ... ]] && printf` as the LAST command in this loop body makes the whole
+    # function exit 1 whenever the final file carries no pin — and under this
+    # script's `set -e` that killed the run before the window ever opened.
+    # Measured on a live profile, 2026-08-24. Locked in with-egress.test.sh.
+    if [[ -n "$val" ]]; then
+      printf '%s\texclude-newer=%s\n' "${f#$dir/}" "$val"
+    fi
+  done < <(find "$dir" -maxdepth 4 \( -name uv.toml -o -name pyproject.toml \) \
+             -not -path '*/node_modules/*' -not -path '*/.venv/*' \
+             -not -path '*/.venv-*/*' -not -path '*/site-packages/*' \
+             -not -path '*/.git/*' 2>/dev/null | sort)
+}
+
+# scan_workspace_rc <dir> — gate overrides in the tree about to install.
+#
+# Covers BOTH gates: Gate 2's release-age quarantine (.npmrc /
+# pnpm-workspace.yaml) and Gate 3's Python wheels-only policy (uv.toml /
+# pyproject.toml / pip.conf, parsed by gate3_scan_file above). Gate 2 was
+# defended at three layers and Gate 3 at one; that asymmetry was accidental,
+# not decided (work/0008 item 1).
 #
 # The install is the moment this matters: a child .npmrc or pnpm-workspace.yaml
 # that zeroes the quarantine means the packages resolved inside THIS window were
@@ -357,10 +508,22 @@ print(json.dumps(out))
 # confidence, not a boundary, and hard-failing the only install route over it
 # would break installs to defend against something already reported elsewhere.
 scan_workspace_rc() {
-  local dir="$1" f key val mins base class
+  local dir="$1" f key val mins base class row
   [[ -d "$dir" ]] || return 0
   while IFS= read -r f; do
     case "$f" in
+      *uv.toml|*pyproject.toml|*pip.conf)
+        # Gate 3 (ADR-0004), the Python half of the same finding. An sdist runs
+        # setup.py / a PEP-517 backend at INSTALL time, so a project that opts
+        # out restores arbitrary code execution for every install inside THIS
+        # window — and the audit record would otherwise read as a clean
+        # wheels-only install. Under-reporting is the worst failure mode an
+        # audit log has, because it is indistinguishable from a clean run.
+        while IFS= read -r row; do
+          [[ -n "$row" ]] || continue
+          printf '%s\t%s\n' "${f#$dir/}" "$row"
+        done < <(gate3_scan_file "$f")
+        ;;
       *pnpm-workspace.yaml)
         while IFS= read -r line; do
           val="${line#*:}"; val="${val//[[:space:]]/}"
@@ -392,8 +555,12 @@ scan_workspace_rc() {
         done < <(grep -hE '^[[:space:]]*(min-release-age|minimum-release-age)[[:space:]]*=' "$f" 2>/dev/null)
         ;;
     esac
-  done < <(find "$dir" -maxdepth 4 \( -name .npmrc -o -name pnpm-workspace.yaml \) \
-             -not -path '*/node_modules/*' 2>/dev/null | sort)
+  done < <(find "$dir" -maxdepth 4 \
+             \( -name .npmrc -o -name pnpm-workspace.yaml \
+                -o -name uv.toml -o -name pyproject.toml -o -name pip.conf \) \
+             -not -path '*/node_modules/*' -not -path '*/.venv/*' \
+             -not -path '*/.venv-*/*' -not -path '*/site-packages/*' \
+             -not -path '*/.git/*' 2>/dev/null | sort)
 }
 
 RC_OVERRIDE_JSON="[]"
@@ -407,8 +574,9 @@ posture_preflight() {
   local bad_rows
   bad_rows="$(printf '%s\n' "$rows" | grep -vE '\tOK$' || true)"
   if [[ -n "$bad_rows" ]]; then
-    echo "WARN: the workspace weakens the resolution quarantine — packages resolved in" >&2
-    echo "      this window may NOT have been held to the 7-day age gate:" >&2
+    echo "WARN: the workspace weakens a dependency gate — packages resolved or built in" >&2
+    echo "      this window may NOT have been held to the 7-day age gate (Gate 2) or to" >&2
+    echo "      the wheels-only policy (Gate 3, ADR-0004 — an sdist runs code at install):" >&2
     printf '%s\n' "$bad_rows" | while IFS=$'\t' read -r p kv c; do
       printf '        %-10s %s  (%s)\n' "$c" "$p" "$kv" >&2
     done
@@ -427,6 +595,84 @@ for line in sys.stdin.read().splitlines():
     out.append({"path": parts[0], "setting": parts[1], "class": parts[2]})
 print(json.dumps(out))
 ' 2>/dev/null || echo '[]')"
+}
+
+# --- T24: the Python half of the age gate ----------------------------------
+#
+# npm gets a RELATIVE 7-day quarantine from `min-release-age=7` in the image.
+# uv's equivalent, `exclude-newer`, takes a TIMESTAMP and not a duration, which
+# is why it was never set image-wide: a fixed date on an ML sandbox is a
+# resolution freeze that rots, and per-project pins go unmaintained (dashboard
+# carried a P04 WARN from the day it was written). ADR-0003 makes this script
+# the only route a dependency enters a profile by, and it is the one place that
+# knows the moment the window opens — so it can do the duration→timestamp
+# conversion per window, which no static config can.
+#
+# MEASURED 2026-08-24, uv 0.12.5, on the host AND in the image:
+#   * precedence is env > project `[tool.uv] exclude-newer` > user config, so a
+#     workspace file CANNOT switch the injected window off. (This is the
+#     opposite of Gate 2 and Gate 3, where the project file wins — do not
+#     generalise between them.)
+#   * inert under `--frozen`: `uv sync --frozen` performs no resolution and the
+#     install plan is byte-identical with and without the variable set. The
+#     install shape we most want to encourage is unaffected.
+#   * the image carries uv 0.12.5, which honours UV_EXCLUDE_NEWER and ships
+#     `uv audit`.
+#
+# THE ONE UNCOMFORTABLE CONSEQUENCE, recorded rather than hidden: because env
+# wins, a project pinning an OLDER (stricter) exclude-newer is silently
+# LOOSENED to this window. The alternative — deferring to the project file —
+# would let any workspace disable the gate by pinning a future date, which is
+# strictly worse. So the project's own pin is read and written into the audit
+# record whenever it differs, and said aloud here when it is stricter.
+PY_EXCLUDE_NEWER=""
+PY_AGE_GATE_JSON='{"applied":false,"reason":"not evaluated"}'
+python_age_gate() {
+  local pins pin_json
+  pins="$(scan_uv_exclude_newer "${HOME}/repo/$profile")"
+  pin_json="$(printf '%s\n' "$pins" | python3 -c '
+import sys, json
+out = []
+for line in sys.stdin.read().splitlines():
+    if not line.strip():
+        continue
+    parts = line.split("\t")
+    while len(parts) < 2:
+        parts.append("")
+    out.append({"path": parts[0], "setting": parts[1]})
+print(json.dumps(out))
+' 2>/dev/null || echo '[]')"
+
+  if [[ -n "$allow_fresh" ]]; then
+    echo "→ python age gate: SUPPRESSED for this window — $allow_fresh" >&2
+    PY_EXCLUDE_NEWER=""
+    PY_AGE_GATE_JSON="$(WE_REASON="$allow_fresh" WE_PINS="$pin_json" python3 -c '
+import os, json
+print(json.dumps({"applied": False, "reason": os.environ["WE_REASON"],
+                  "project_pins": json.loads(os.environ.get("WE_PINS") or "[]")},
+                 separators=(",", ":"), sort_keys=True))')"
+    return 0
+  fi
+
+  PY_EXCLUDE_NEWER="$(date -u -d '7 days ago' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
+                      || date -u -v-7d +%Y-%m-%dT%H:%M:%SZ)"
+  echo "→ python age gate: UV_EXCLUDE_NEWER=$PY_EXCLUDE_NEWER (7 days, same window as npm)" >&2
+
+  if [[ -n "$pins" ]]; then
+    while IFS=$'\t' read -r p kv; do
+      [[ -n "$p" ]] || continue
+      if [[ "${kv#exclude-newer=}" < "$PY_EXCLUDE_NEWER" ]]; then
+        echo "   ! $p pins ${kv} — STRICTER than this window, and the env var beats it." >&2
+        echo "     Its packages resolve to the 7-day window instead. Recorded in the audit line." >&2
+      fi
+    done <<< "$pins"
+  fi
+
+  PY_AGE_GATE_JSON="$(WE_TS="$PY_EXCLUDE_NEWER" WE_PINS="$pin_json" python3 -c '
+import os, json
+print(json.dumps({"applied": True, "exclude_newer": os.environ["WE_TS"], "window_days": 7,
+                  "project_pins": json.loads(os.environ.get("WE_PINS") or "[]")},
+                 separators=(",", ":"), sort_keys=True))')"
 }
 
 # Confirm the proxy can READ the widened allowlist at the expected path.
@@ -661,6 +907,11 @@ preflight || exit 4
 # was when the window opened, not after the install rewrote lockfiles.
 posture_preflight
 
+# T24 — compute this window's Python quarantine (and read any project pin it
+# will override). Before the window opens, so the timestamp describes the
+# window, and so a suppressed gate is announced before anything is reachable.
+python_age_gate
+
 TS_OPEN="$(date +%s)"
 snapshot > "$snap_before"
 
@@ -685,7 +936,17 @@ require_window_enforced || exit 5
 
 echo "→ exec $AGENT: ${cmd[*]}" >&2
 rc=0
-docker exec "$AGENT" bash -lc "${cmd[*]}" || rc=$?
+# The age gate rides in as an ENV VAR rather than a flag, so it applies to every
+# uv invocation the command makes — `uv add`, `uv lock`, `uv pip install`, and
+# anything a script inside <cmd> shells out to. A flag would only cover the one
+# uv call written on the command line. Empty means suppressed by --allow-fresh:
+# passing `-e UV_EXCLUDE_NEWER=` would set it to the empty string, which uv
+# rejects, so the array stays empty instead.
+gate_env=()
+[[ -n "$PY_EXCLUDE_NEWER" ]] && gate_env=(-e "UV_EXCLUDE_NEWER=$PY_EXCLUDE_NEWER")
+# ${a[@]+"${a[@]}"} rather than "${a[@]}": under `set -u` an empty array is an
+# unbound expansion in bash 3.2, which macolima still runs (docs/sibling-repo-relationship.md).
+docker exec ${gate_env[@]+"${gate_env[@]}"} "$AGENT" bash -lc "${cmd[*]}" || rc=$?
 
 close_window
 TS_CLOSE="$(date +%s)"
@@ -712,6 +973,7 @@ mkdir -p "$AUDIT_DIR" 2>/dev/null || true
 if WE_TS_OPEN="$TS_OPEN" WE_TS_CLOSE="$TS_CLOSE" WE_PROFILE="$profile" \
    WE_SECTIONS="$sections" WE_CMD="${cmd[*]}" WE_RC="$rc" \
    WE_PREFLIGHT="$PREFLIGHT_JSON" WE_RC_OVERRIDES="$RC_OVERRIDE_JSON" \
+   WE_PY_AGE_GATE="$PY_AGE_GATE_JSON" \
    WE_ALLOWED="$hosts_allowed" WE_DENIED="$hosts_denied" \
    WE_LOCKS="$locks_changed" WE_ADDED="$mods_added" WE_REMOVED="$mods_removed" \
    python3 - >> "$AUDIT_LOG" <<'PY'
@@ -740,6 +1002,17 @@ try:
 except json.JSONDecodeError:
     rc_overrides = []
 
+# T24. `applied` answers "was this window quarantined" for Python the way the
+# npm side has always been answerable; `reason` is populated only when
+# --allow-fresh suppressed it, so an opt-out is legible months later.
+# `project_pins` records any exclude-newer the workspace set for itself: the env
+# var beats it, so a stricter project pin was LOOSENED to this window and the
+# record has to say so rather than imply the project's own window applied.
+try:
+    py_age_gate = json.loads(os.environ.get("WE_PY_AGE_GATE") or "{}")
+except json.JSONDecodeError:
+    py_age_gate = {}
+
 rec = {
     "ts_open":   int(os.environ["WE_TS_OPEN"]),
     "ts_close":  int(os.environ["WE_TS_CLOSE"]),
@@ -750,6 +1023,7 @@ rec = {
     "rc":        int(os.environ.get("WE_RC") or 0),
     "preflight": preflight,
     "rc_overrides": rc_overrides,
+    "py_age_gate": py_age_gate,
     "egress":    {"allowed": lines("WE_ALLOWED"), "denied": lines("WE_DENIED")},
     "lockfiles_changed": lines("WE_LOCKS"),
     "modules_added":     capped("WE_ADDED"),

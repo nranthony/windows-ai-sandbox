@@ -530,5 +530,179 @@ else
 fi
 rm -rf "$WSFIX"
 
+# ---------------------------------------------------------------------------
+# gate3_scan_file() — Gate 3 (Python wheels-only) project opt-outs
+# ---------------------------------------------------------------------------
+# Gate 2's project-level override was defended in three places; Gate 3's was
+# defended in none (work/0008 item 1). An sdist runs setup.py at INSTALL time,
+# so a workspace that opts out restores arbitrary code execution for every
+# install in the window — while the audit record still reads as a clean
+# wheels-only install. Under-reporting is the worst failure mode an audit log
+# has, because it is indistinguishable from a clean run.
+echo
+echo "gate3_scan_file() — Gate 3 project opt-outs"
+
+# The parser lives in TWO files because verify-sandbox.sh is streamed into the
+# container over stdin and can source nothing. Two hand-edited parsers over one
+# grammar drift — that is not hypothetical here, it is what the two agent deny
+# lists did. Diff them exactly, in both directions, with no exception list.
+VS_SRC="$HERE/verify-sandbox.sh"
+extract_fn_body() {  # <fn> <file>
+  awk -v f="$1" '$0 ~ "^" f "\\(\\) \\{" { inside = 1 } inside { print } inside && /^\}$/ { exit }' "$2"
+}
+g3_a="$(extract_fn_body gate3_scan_file "$SRC")"
+g3_b="$(extract_fn_body gate3_scan_file "$VS_SRC")"
+if [[ -n "$g3_a" && "$g3_a" == "$g3_b" ]]; then
+  ok "gate3_scan_file is byte-identical in with-egress.sh and verify-sandbox.sh  <-- DRIFT LOCK"
+else
+  bad "gate3_scan_file byte-identical across both scripts" "identical, non-empty" \
+      "$(diff <(printf '%s\n' "$g3_a") <(printf '%s\n' "$g3_b") | head -5 | tr '\n' '; ')"
+fi
+
+import_fn gate3_scan_file
+
+G3FIX="$(mktemp -d "${TMPDIR:-/tmp}/g3fix.XXXXXX")"
+mkdir -p "$G3FIX"/{optout,decoy,strong,uvtoml,pipnaked,pipexempt,broken,clean}
+mkdir -p "$G3FIX/vendored/.venv/lib/python3.12/site-packages/thirdparty"
+printf '[project]\nname = "o"\n\n[tool.uv]\nno-build = false\n'  > "$G3FIX/optout/pyproject.toml"
+printf '[project]\nname = "d"\n\n[tool.hatch]\nno-build = false\n\n[tool.uv]\n# no-build = false\n' \
+                                                                 > "$G3FIX/decoy/pyproject.toml"
+printf '[project]\nname = "s"\n\n[tool.uv]\nno-build = true\n'   > "$G3FIX/strong/pyproject.toml"
+printf 'no-build = false\n'                                      > "$G3FIX/uvtoml/uv.toml"
+printf '[global]\nindex-url = https://pypi.org/simple\n'         > "$G3FIX/pipnaked/pip.conf"
+printf '[global]\nonly-binary = :all:\nno-binary = torchsparse\n' > "$G3FIX/pipexempt/pip.conf"
+printf '[tool.uv\nno-build = false\n'                            > "$G3FIX/broken/pyproject.toml"
+printf '[project]\nname = "c"\n'                                 > "$G3FIX/clean/pyproject.toml"
+printf '[tool.uv]\nno-build = false\n' \
+  > "$G3FIX/vendored/.venv/lib/python3.12/site-packages/thirdparty/pyproject.toml"
+
+g3_class() {  # <fixture>/<file> <setting> -> class, or MISSING
+  gate3_scan_file "$G3FIX/$1" \
+    | awk -F'\t' -v s="$2" '$1==s {print $2; f=1} END{if(!f) print "MISSING"}'
+}
+expect_g3() {
+  local desc="$1" file="$2" setting="$3" want="$4" got; got="$(g3_class "$file" "$setting")"
+  if [[ "$got" == "$want" ]]; then ok "$desc"; else bad "$desc" "$want" "$got"; fi
+}
+
+expect_g3 "[tool.uv] no-build = false is OFF" \
+  "optout/pyproject.toml" "no-build=false" "OFF"
+expect_g3 "top-level no-build = false in uv.toml is OFF" \
+  "uvtoml/uv.toml" "no-build=false" "OFF"
+expect_g3 "no-build = true restates the default and is OK" \
+  "strong/pyproject.toml" "no-build=true" "OK"
+expect_g3 "a pip.conf with no only-binary is OFF (it REPLACES /etc/pip.conf, not merges)" \
+  "pipnaked/pip.conf" "only-binary=<unset>" "OFF"
+expect_g3 "pip no-binary=<pkg> is WEAKER, not OFF — it exempts one package, :all: covers the rest" \
+  "pipexempt/pip.conf" "no-binary=torchsparse" "WEAKER"
+expect_g3 "unparseable TOML is UNPARSED — an unknown is never a pass" \
+  "broken/pyproject.toml" "parse=TOMLDecodeError" "UNPARSED"
+
+# SECTION-SCOPE LOCK. `no-build = false` under [tool.hatch] and the same line
+# behind a `#` are both non-events. A bare line-grep reports each of them, and a
+# reported opt-out that does not exist sends someone hunting for it — the same
+# false-phantom failure X05 is locked against in depaudit.
+if [[ -z "$(gate3_scan_file "$G3FIX/decoy/pyproject.toml")" ]]; then
+  ok "no-build=false under [tool.hatch] / behind a # emits nothing  <-- SECTION-SCOPE LOCK"
+else
+  bad "decoy no-build emits nothing" "no output" "$(gate3_scan_file "$G3FIX/decoy/pyproject.toml" | tr '\n' '; ')"
+fi
+
+# A project that declares no opinion inherits the image default, which is the
+# wanted state. A row there would fire on every healthy repo, and a
+# permanently-firing check is furniture (the G10/N03 lesson).
+if [[ -z "$(gate3_scan_file "$G3FIX/clean/pyproject.toml")" ]]; then
+  ok "a pyproject.toml that declares no policy emits nothing"
+else
+  bad "clean pyproject emits nothing" "no output" "present"
+fi
+
+# scan_workspace_rc must carry the Gate 3 rows with a path prefix, in the same
+# three-column shape the audit record's rc_overrides already parses.
+if scan_workspace_rc "$G3FIX" \
+     | awk -F'\t' '$1=="optout/pyproject.toml" && $2=="no-build=false" && $3=="OFF"{f=1} END{exit !f}'; then
+  ok "scan_workspace_rc emits Gate 3 rows in the path/setting/class shape"
+else
+  bad "scan_workspace_rc Gate 3 row" "optout/pyproject.toml no-build=false OFF" \
+      "$(scan_workspace_rc "$G3FIX" | tr '\n' '; ')"
+fi
+
+# Every .venv carries hundreds of vendored pyproject.toml files. Scanning them
+# buries the real finding under third-party noise that the workspace does not
+# install from — the same reason node_modules is pruned above.
+if scan_workspace_rc "$G3FIX" | grep -qE 'site-packages|\.venv'; then
+  bad "site-packages is excluded" "no .venv/site-packages rows" "vendored row present"
+else
+  ok "a vendored pyproject.toml inside .venv/site-packages is excluded from the scan"
+fi
+rm -rf "$G3FIX"
+
+# ---------------------------------------------------------------------------
+# T24 — the Python age gate and its escape hatch
+# ---------------------------------------------------------------------------
+echo
+echo "T24 — UV_EXCLUDE_NEWER window + --allow-fresh"
+
+import_fn scan_uv_exclude_newer
+
+T24FIX="$(mktemp -d "${TMPDIR:-/tmp}/t24.XXXXXX")"
+mkdir -p "$T24FIX"/{pinned,uvtoml,unpinned}
+mkdir -p "$T24FIX/vendored/.venv/lib/python3.12/site-packages/thirdparty"
+printf '[project]\nname = "p"\n\n[tool.uv]\nexclude-newer = "2026-01-01T00:00:00Z"\n' \
+  > "$T24FIX/pinned/pyproject.toml"
+printf 'exclude-newer = "2026-02-02T00:00:00Z"\n' > "$T24FIX/uvtoml/uv.toml"
+printf '[project]\nname = "u"\n'                  > "$T24FIX/unpinned/pyproject.toml"
+printf '[tool.uv]\nexclude-newer = "2020-01-01T00:00:00Z"\n' \
+  > "$T24FIX/vendored/.venv/lib/python3.12/site-packages/thirdparty/pyproject.toml"
+
+pins="$(scan_uv_exclude_newer "$T24FIX")"
+# The project's own pin is READ but never obeyed: env beats [tool.uv] in uv's
+# precedence, so a stricter project pin is loosened to the injected window. That
+# is a deliberate trade (deferring to the project file would let any workspace
+# disable the gate by pinning a future date) and the audit record is where it
+# stays visible — so the scan must actually find it.
+if printf '%s\n' "$pins" \
+     | awk -F'\t' '$1=="pinned/pyproject.toml" && $2=="exclude-newer=2026-01-01T00:00:00Z"{f=1} END{exit !f}'; then
+  ok "a project [tool.uv] exclude-newer is read into the audit record"
+else
+  bad "project exclude-newer found" "pinned/pyproject.toml exclude-newer=2026-01-01T00:00:00Z" \
+      "$(printf '%s' "$pins" | tr '\n' '; ')"
+fi
+if printf '%s\n' "$pins" | grep -q '^uvtoml/uv.toml'; then
+  ok "a top-level uv.toml exclude-newer is read too"
+else
+  bad "uv.toml exclude-newer found" "uvtoml/uv.toml row" "$(printf '%s' "$pins" | tr '\n' '; ')"
+fi
+if printf '%s\n' "$pins" | grep -qE 'unpinned|site-packages|\.venv'; then
+  bad "only real project pins are reported" "no unpinned/vendored rows" \
+      "$(printf '%s' "$pins" | tr '\n' '; ')"
+else
+  ok "a project with no pin, and a vendored one inside .venv, produce no rows"
+fi
+# REGRESSION LOCK, and it bit for real on 2026-08-24. The scan runs inside a
+# script with `set -euo pipefail`, and a `[[ -n "$val" ]] && printf` as the last
+# command of the loop body returns 1 whenever the final file carries no pin — so
+# the function exited 1, the command substitution failed, and the whole run died
+# BEFORE the window opened. The unit assertions above all passed, because
+# import_fn eval's the body into a shell with no `set -e`. Exercise it the way
+# the script does.
+if ( set -euo pipefail; scan_uv_exclude_newer "$T24FIX/unpinned" >/dev/null ); then
+  ok "scan_uv_exclude_newer returns 0 on a tree with no pins, under set -e  <-- REGRESSION LOCK"
+else
+  bad "scan_uv_exclude_newer under set -e" "exit 0 on a pin-less tree" "non-zero exit"
+fi
+rm -rf "$T24FIX"
+
+# The escape hatch must be UNUSABLE without a reason. A bare --allow-fresh would
+# make the gate switchable with no trace of why, which is precisely the state
+# this gate exists to end — and an unexplained exemption outlives the reason for
+# it (N11, one gate over). This exits before any docker call, so it is offline.
+af_out="$("$SRC" someprofile --allow-fresh 2>&1)"; af_rc=$?
+if (( af_rc != 0 )) && [[ "$af_out" == *reason* ]]; then
+  ok "--allow-fresh with no reason is refused, naming the reason  <-- ESCAPE-HATCH LOCK"
+else
+  bad "--allow-fresh requires a reason" "non-zero exit naming 'reason'" "rc=$af_rc out=$af_out"
+fi
+
 printf "\n  %d passed, %d failed\n" "$PASS" "$FAIL"
 [[ "$FAIL" -eq 0 ]]

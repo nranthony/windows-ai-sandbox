@@ -107,6 +107,69 @@ Re-open the registry-proxy decision (Verdaccio/devpi) if **any** of these become
 Until then, the application plan's phase 2 — allowlist-gated registries plus per-tool age
 gates — is the cheaper substitute covering most of it.
 
+## Addendum 2026-08-24 — the price of a vulnerability scan went to zero; the noise argument did not
+
+This ADR says explicitly that "a future proposal to add one of these is an amendment to this
+ADR, not a fresh argument". This is that amendment. Nothing above is reversed; two refusals
+are re-priced and one re-open condition is recorded as partly fired. Mechanically it is a
+dated addendum rather than a superseding ADR, following
+[ADR-0004](0004-python-wheels-only.md)'s precedent — the decision still stands, the world
+around two of its cost arguments changed.
+
+**What changed.** Both the `osv-scanner` refusal ("a Go binary to avoid writing a `urllib`
+POST") and the local-mirror refusal ("~240k advisory records to sync and keep fresh") were
+arguments about **cost**, not about value. Measured 2026-08-24: `uv audit` exists in uv
+0.12.5, reads `uv.lock` directly, and carries `--frozen`, `--output-format json`,
+`--service-format osv`, `--service-url`, `--ignore` and `--ignore-until-fixed`. uv is
+already on the host and already baked into the image. No new binary, no vendored corpus, no
+API key, no vendor in the trust path — the exact costs both refusals were made of. It caches
+what it fetches under `~/.cache/uv/osv-v0/`. It still prints an "experimental" banner, which
+is a reason to keep it non-gating, not a reason to skip it.
+
+**What did NOT change, and must not.** `depaudit` reports `MAL-` records only, because
+`GHSA-`/`PYSEC-`/`CVE-` answer a different question, and *mixing them is how a supply-chain
+gate becomes a CVE treadmill nobody reads.* That reasoning is untouched by cost. So the
+wiring is walled off from it (`scripts/profile.sh <p> deps --vulns`):
+
+- opt-in, so a bare `deps` stays offline and tier-1 `verify` stays offline by contract;
+- printed under its own heading, never merged into depaudit's counts or its verdict;
+- it does not affect the command's exit code — a known CVE in a transitive dependency is not
+  the same event as a malicious package and must not fail the same command;
+- **host-side only.** `api.osv.dev` remains deliberately absent from
+  `proxy/allowed_domains.txt`, and the "zero new egress surface" consequence above is still
+  banked. Adding osv.dev to the allowlist is not the answer to anything here;
+- `--ignore-until-fixed` is the survivability mechanism: it suppresses an ID only while no
+  fix exists, so the finding returns by itself the day one lands. The ignore list lives in
+  `profile.sh` beside the call, and an entry without a stated reason is not a decision.
+
+**Also debunked, so nobody re-inherits it.** `UV_MALWARE_CHECK=1` — claimed by an outside
+plan to enable an opt-in OSV malware lookup on every sync — **does not exist** through uv
+0.12.5. Neither does any `malware` string in its help output. And the "4–10× faster than
+pip-audit" figure that travelled with it is unverified decoration; do not repeat it.
+
+**Re-open condition status.** The first condition above — *"pip/uv usage grows enough that
+the missing Python age gate is the dominant risk"* — is now **answered without reopening
+anything**. `exclude-newer` takes a timestamp and not a duration, which is why it could never
+be an image-wide setting; but ADR-0003 makes `scripts/with-egress.sh` the only route a
+dependency enters a profile by, and that script knows the moment each window opens, so it
+does the duration→timestamp conversion per window and injects `UV_EXCLUDE_NEWER` at
+now−7 days. Python gets the same relative quarantine npm has from `min-release-age=7`, with
+no registry proxy, no image-wide resolution freeze and no per-project maintenance. Measured
+2026-08-24 on uv 0.12.5: env beats a project `[tool.uv] exclude-newer`, and the variable is
+inert under `--frozen`.
+
+The third condition above — *"artifact-level inspection,
+rather than name-level, becomes a requirement"* — has **partly fired**. `scripts/vendor-tools.sh`
+now performs artifact-level content verification for every vendored payload: it extracts the
+wheel and diffs it against the `source_commit` it claims, which a hash cannot answer. The
+ADR's stated posture is therefore behind the code. This records that; it is not a decision to
+reopen the registry-proxy question, because the artifact inspection that exists is over a
+handful of vendored payloads we publish ourselves, not over the general dependency stream.
+
+**Related but still refused:** PEP 740 / attestation verification. `pypi-attestations`
+carries its own dependency tree, which is precisely what `depaudit`'s stdlib-only rule exists
+to refuse. Unchanged.
+
 ## Alternatives considered
 
 - **Build `depgate` as specified.** Rejected: it is a design for an environment without

@@ -219,6 +219,40 @@ else
   FAIL=$((FAIL+1)); printf "  FAIL P08 detail named neither requests nor idna: %s\n" "$p08_detail"
 fi
 
+# --- P01: Gate 3's project-level opt-out (work/0008 item 1) ---------------
+# The whole point of P01 is section scope. `no-build = false` is an opt-out only
+# under [tool.uv] (or at the top level of a uv.toml); the same eight characters
+# under another table, or behind a `#`, are not — and a line-grep cannot tell
+# the difference. These three cases are one lock, not three: a scanner that
+# passes the positive with a bare grep also fails both negatives.
+expect python-uv      P01  PASS "no project override of wheels-only — inheritance is the wanted state"
+
+P01FIX="$(mktemp -d "${TMPDIR:-/tmp}/p01.XXXXXX")"
+mkdir -p "$P01FIX"/{optout,decoy,stated,pipexempt}
+printf '[project]\nname = "o"\n\n[tool.uv]\nno-build = false\n' > "$P01FIX/optout/pyproject.toml"
+expect_path "$P01FIX/optout" P01 FAIL "[tool.uv] no-build = false is a wholesale opt-out  <-- SECTION-SCOPE LOCK"
+
+# Two decoys in one file: an unrelated table, and a comment. Neither disables
+# anything, and reporting either would send someone hunting for an opt-out that
+# is not there — the false-phantom failure X05 is already locked against.
+printf '[project]\nname = "d"\n\n[tool.hatch]\nno-build = false\n\n[tool.uv]\n# no-build = false\n' \
+  > "$P01FIX/decoy/pyproject.toml"
+expect_path "$P01FIX/decoy" P01 PASS "no-build=false under [tool.hatch] / behind a # is NOT an opt-out  <-- SECTION-SCOPE LOCK"
+
+# An opt-out with a reason written above it is still an opt-out, but a stated
+# one: WARN, not FAIL. N11's reasoning, one gate over — an unexplained exemption
+# outlives the reason for it.
+printf '[project]\nname = "s"\n\n[tool.uv]\n# torchsparse ships no wheel for cu126\nno-build = false\n' \
+  > "$P01FIX/stated/pyproject.toml"
+expect_path "$P01FIX/stated" P01 WARN "a stated reason downgrades the opt-out to WARN"
+
+# pip's per-package exemption is NARROWER than uv's wholesale opt-out and must
+# not read the same.
+printf '[project]\nname = "p"\n' > "$P01FIX/pipexempt/pyproject.toml"
+printf '[global]\nonly-binary = :all:\nno-binary = torchsparse\n' > "$P01FIX/pipexempt/pip.conf"
+expect_path "$P01FIX/pipexempt" P01 WARN "pip no-binary=<pkg> is WARN, not FAIL"
+rm -rf "$P01FIX"
+
 printf "\n-- lockfile enumeration (offline) --\n"
 # Locks the peer-dependency-suffix bug: pnpm v9 keys look like
 # `@scope/pkg@1.2.3(peer@4.5.6)`, and splitting on the LAST '@' produced the
