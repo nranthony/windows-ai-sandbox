@@ -10,8 +10,8 @@
 data/
 
 # personal-project / workload docs (kept locally, not published to this public repo)
-numerai-setup.md
-docs/therapod-pipeline-db-setup.md
+# (matches at any depth, e.g. a top-level "*-setup.md" or a "docs/*-setup.md")
+*-setup.md
 
 **.pyc
 **/**.pyc
@@ -46,6 +46,10 @@ AGENTS.local.md
 # and it does NOT supersede the two pointers above: the channel supplies the
 # artifacts, those supply the SOURCE the content half diffs them against.
 .depot-dir.local
+# real client/project names to scan for on public-repo surfaces
+# (scripts/private-names-check.sh, work/0007) — never committed, since the
+# names living in the tracked tree is exactly what the check exists to catch
+.private-names.local
 
 # vendored myclickup payload — NEVER commit. This repo is public and
 # nranthony/myclickup is private; a py3-none-any wheel is a zip of the .py

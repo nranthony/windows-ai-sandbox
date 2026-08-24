@@ -306,9 +306,9 @@ Any FAIL indicates the corresponding fix didn't stick — most likely the host V
   ID does not fail closed — it allow-lists egress from a hardened image to a
   third party's attachment bucket. Nothing depends on it yet (the hosts serve
   attachment downloads and the CLI has no `--download` flag). Settle it from
-  inside the therapod profile with `myclickup spaces --live --workspace
-  90141295179`, then correct the entry; the annotation in `allowed_domains.txt`
-  carries the same warning inline.
+  inside a profile whose workspace pin is `90141295179`, with `myclickup
+  spaces --live --workspace 90141295179`, then correct the entry; the
+  annotation in `allowed_domains.txt` carries the same warning inline.
 - **Don't commit the vendored `myclickup` payload.** This repo is public and
   `nranthony/myclickup` is private; a `py3-none-any` wheel is a zip of the `.py`
   files, so committing it publishes the tool's source. `.gitignore` covers
