@@ -10,7 +10,7 @@ when the work merges.
 **Security-sensitive.** Touches `scripts/vendor-tools.sh`, which is on the
 security-sensitive list in [AGENTS.md](../../AGENTS.md): it is the one door every
 vendored payload enters through. Any change here needs a SECURITY IMPACT line in
-the commit, `bash scripts/vendor-tools.test.sh` green (currently 57/57), and
+the commit, `bash scripts/vendor-tools.test.sh` green (currently 65/65), and
 `scripts/profile.sh <p> verify`. Run `just test-offline` before calling it done.
 
 ---
@@ -24,7 +24,7 @@ one entry turned out to carry a key the consumer never sees:
 ```toml
 [artifact.myconv]
 kind = "plugin"
-version = "0.4.0"
+version = "0.6.0"
 ...
 asserts = { myclickup = ">=0.3.0" }     # <- consumed by nobody on this side
 ```
@@ -65,6 +65,7 @@ same pass rather than found one at a time later:
 | float `1.5` | `float` | **dropped silently** |
 | array of tables `[[artifact.x.files]]` | `list[dict]` | **worse than dropped** — emits the Python `repr` (`{'a': 'b'}`) as the value, so a downstream `mf` lookup returns plausible-looking garbage rather than nothing |
 | bool `true` | `bool` | emitted, but as `True`/`False` — `isinstance(True, int)` is `True` in Python, so it passes the scalar branch and renders in Python spelling, not TOML's |
+| date/datetime `2026-08-17` | `datetime.date` / `datetime.datetime` | **dropped silently** — same `else`-less gap as the dict case; reproduced empirically 2026-08-24 (§3), no live exposure — no manifest key of this shape exists today |
 
 ### 2.2 Why the existing guards do not catch it
 

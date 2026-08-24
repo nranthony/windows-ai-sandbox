@@ -115,9 +115,13 @@ resolve_channel() {
 }
 
 # --- the single manifest extraction point ------------------------------------
-# Emits `artifact<TAB>key<TAB>value`. Anything the manifest gains that this does
-# not know about is ignored here and caught by the schema guard below, never
-# silently half-consumed.
+# Emits `artifact<TAB>key<TAB>value`. A new SCHEMA version, or a new artifact
+# KIND, is caught below (the schema guard here, the `case` in verify_all).
+# Neither guard catches a new KEY inside schema 1 whose value is not a shape
+# this loop represents: it is reported by name via [NOTE] on stderr (never
+# stdout — verify_all returns the flat table on stdout, so a note there would
+# be captured into it as a bogus row) and otherwise silently skipped, never
+# half-consumed as a stringified repr.
 manifest_flat() {
   local root="$1"
   python3 - "$root/manifest.toml" <<'PY'
@@ -128,13 +132,24 @@ schema = doc.get("schema")
 if schema != 1:
     sys.exit(f"manifest schema {schema!r} is not 1 — this script was written "
              f"against schema 1; read the channel's ADR before widening it")
+
+def is_scalar(v):
+    # bool is an int subclass in Python; excluded here so it renders in TOML
+    # spelling (true/false) via its own branch, not Python's (True/False).
+    return isinstance(v, (str, int)) and not isinstance(v, bool)
+
 for name, art in sorted(doc.get("artifact", {}).items()):
     for key, val in sorted(art.items()):
-        if isinstance(val, (str, int)):
+        if isinstance(val, bool):
+            print(f"{name}\t{key}\t{'true' if val else 'false'}")
+        elif is_scalar(val):
             print(f"{name}\t{key}\t{val}")
-        elif isinstance(val, list):
+        elif isinstance(val, list) and all(is_scalar(i) for i in val):
             for item in val:
                 print(f"{name}\t{key}[]\t{item}")
+        else:
+            print(f"[NOTE] {name}: key {key!r} is TOML type {type(val).__name__}, "
+                  f"not represented in the flat manifest", file=sys.stderr)
 PY
 }
 
@@ -477,9 +492,11 @@ do_check() {
 # WHAT IT CANNOT SEE, stated up front because a permissions check that implies
 # more coverage than it has is worse than none. This compares the manifest's
 # generated proposal against the TEMPLATE FILE. It cannot see:
-#   * what a running profile has — settings seeding is create-only, so a template
-#     edit reaches nothing until `profile.sh <p> reset-settings`; the block this
-#     compares sat undeployed on all three profiles for five days in 2026-08.
+#   * what a running profile has — policy converges on every `up` since
+#     ADR-0007, but a profile that has not been brought up since a template
+#     edit is still behind it (`profile.sh <p> converge` closes the gap by
+#     hand); under the old create-only seeding the block this compares sat
+#     undeployed on all three profiles for five days in 2026-08.
 #   * what the RUNTIME does with a command on none of the lists. Under
 #     defaultMode:auto that is decided by a classifier, not prompted by default —
 #     measured 2026-08-15. Which is why proposed_ask exists and why a write being
@@ -548,8 +565,8 @@ print("security-sensitive list; an edit here is a human's, with `verify` + `audi
 if rc_gaps:
     print(f"\n{len(rc_gaps)} WRITE-SURFACE GAP(S): a write on neither `ask` nor `deny` is")
     print("not gated by absence — under defaultMode:auto a classifier decides.")
-print("\nThis compares the TEMPLATE, not any running profile: seeding is create-only,")
-print("so run `scripts/profile.sh <p> reset-settings` to deploy a template change.")
+print("\nThis compares the TEMPLATE, not any running profile: a template change")
+print("reaches profiles on their next `up` (or `scripts/profile.sh <p> converge`).")
 PY
 }
 

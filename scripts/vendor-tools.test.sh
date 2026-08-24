@@ -112,6 +112,8 @@ source_repo = "agentic-conventions"
 source_commit = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 tree = "dist/plugins/myconv"
 tree_sha256 = "$tsha"
+asserts = { myclickup = ">=0.3.0" }
+verified = true
 EOF
 }
 
@@ -162,6 +164,38 @@ check "$(grep -c 'unknown artifact kind' "$ROOT/err")" 1 "unknown kind says so b
 
 cp -R "$CHAN" "$ROOT/nosha"; sed -i '/^wheel_sha256/d' "$ROOT/nosha/manifest.toml"
 check "$(run_vt "$ROOT/nosha" --dry-run)" 1 "a missing hash field FAILS"
+
+# --- 2b. manifest key coverage — no TOML value shape passes through unrepresented
+# work/0006: manifest_flat's type test used to have no `else`, so a dict-valued
+# key (the live producer's own `asserts`, mirrored into the fixture above) fell
+# off the end silently, and a bool rendered in Python spelling (True/False) by
+# accident of `isinstance(True, int)`. Neither is hypothetical: $CHAN's myconv
+# artifact now carries both on every run in this suite, not just here.
+#
+# manifest_flat is extracted from the REAL script by name (as regen_manifest's
+# own fixture pattern in this file's header does), so this exercises the actual
+# type test, not a reimplementation of it.
+manifest_flat_src="$(sed -n '/^manifest_flat() {/,/^}/p' "$REAL_SCRIPT")"
+eval "$manifest_flat_src"
+FLAT_ERR="$ROOT/flat_err"
+FLAT="$(manifest_flat "$CHAN" 2>"$FLAT_ERR")"
+
+check "$(grep -c "^myconv	kind	plugin$" <<<"$FLAT")" 1 "a known str scalar still extracts correctly"
+check "$(grep -c "^myconv	verified	true$" <<<"$FLAT")" 1 \
+  "a bool renders in TOML spelling (true), not Python's (True)  <-- LOCK"
+check "$(grep -c "True\|False" <<<"$FLAT")" 0 "Python bool spelling never reaches the flat table"
+check "$(grep -c "asserts" <<<"$FLAT")" 0 "a dict-valued key (asserts) is not silently emitted  <-- LOCK"
+check "$(grep -c "^\[NOTE\] myconv: key 'asserts' is TOML type dict" "$FLAT_ERR")" 1 \
+  "the dropped dict key is reported by artifact, key, and type, on stderr"
+
+# The whole run must not fail just because one key is unrepresented: an additive
+# producer-side publish is non-breaking here (Option B).
+reset_templates
+check "$(run_vt "$CHAN" --dry-run)" 0 "an unknown/dict-valued key does not fail the run"
+run_vt "$CHAN" --dry-run >/dev/null
+check "$(grep -c '\[NOTE\]' "$ROOT/out")" 0 "the [NOTE] never reaches stdout  <-- LOCK"
+check "$(grep -c "\[NOTE\] myconv: key 'asserts' is TOML type dict" "$ROOT/err")" 1 \
+  "the [NOTE] reaches stderr on a real (non-extraction-only) run"
 
 # --- 3. path containment ------------------------------------------------------
 cp -R "$CHAN" "$ROOT/escape"
