@@ -100,9 +100,11 @@ derived cache. Consequences:
 - a directory the sandbox never seeded is left alone — `claude plugin init`
   scaffolds into `~/.claude/skills/<name>/`, so pruning is scoped to `*.bak.*`
   and names in `claude-home/skills/.sandbox-seeded`;
-- **settings are still create-only** — `profile.sh <p> reset-settings` re-seeds
-  `settings.json` from the template, and that one does keep a `.bak`, outside the
-  skills directory;
+- **agent POLICY converges too, since 2026-08-24**
+  ([ADR-0007](adr/0007-policy-templates-are-source-of-truth-for-every-agent.md)) —
+  `claude-home/settings.json` is overwritten from the template on every `up`, with
+  anything it does not own captured to `claude-home/settings.discarded.json`
+  first. It is no longer create-only, and no longer keeps a `.bak`;
 - restart `claude` in the container to pick any of it up.
 
 Intentional per-profile variation therefore has a different home: per-repo
@@ -160,7 +162,7 @@ anything you want tomorrow.
 
 **A new agent capability (skill).** Author under
 `sandbox_templates/skills/<name>/SKILL.md` → `profile.sh <p> up` (or
-`reset-skills` to converge without touching the container) → restart `claude`.
+`converge` to do it without touching the container) → restart `claude`.
 Never `COPY` it into the image. A directory carrying
 `.claude-plugin/plugin.json` is seeded by the same path and loads as
 `<name>@skills-dir`, so a plugin needs no separate mechanism.

@@ -75,22 +75,31 @@ just up <profile>           # start stack, seed state, converge skills
 
 **4 · Settings** — optional; only when the template has moved
 
-Settings seeding is **create-only**: `up` leaves an existing `settings.json` alone
-however far the template has moved, and `verify` does not check it. So diff first, and
-reset only if the difference matters to you:
+Policy **converges on every `up`** ([ADR-0007](docs/adr/0007-policy-templates-are-source-of-truth-for-every-agent.md)),
+for every agent, and `verify` reports drift. It used to be create-only, which meant the
+repo's most security-relevant file was the one thing that silently lagged its template.
+To converge without touching containers:
 
 ```bash
-diff sandbox_templates/claude/claude-settings.json \
-     ~/.ai-sandbox/profiles/<profile>/claude-home/settings.json   # has it drifted?
-just reset-settings <profile>   # overwrite from template, backing up old
+just converge <profile>         # every agent's policy + skills + the agent notice
 ```
 
-Reset **discards whatever that profile accumulated locally** and replaces it wholesale:
-the per-profile choices Claude Code writes back into the file during a session (model,
-effort level) and any permission you widened in-session with "always allow". Reverting
-that last one is usually the point. The `.bak.<stamp>` written beside it is the only
-undo. Restart `claude` inside the container afterwards — a running session holds the old
-rules in memory.
+For Claude that is an **overwrite**: the live `settings.json` becomes the template.
+Whatever the profile accumulated locally goes — the choices Claude Code writes back
+during a session (`model`, `effortLevel`, `agentPushNotifEnabled`) and any permission
+widened in-session with "always allow". Reverting that last one is the point. Nothing is
+lost silently: the dropped keys and the content diff of any sandbox-owned key are
+captured to `claude-home/settings.discarded.json` first, and you are warned once —
+warned *again* only when that set changes, so the message stays worth reading. Set a
+preference back per-repo in `<repo>/.claude/settings.local.json`; make a **permission**
+permanent by editing the template, because a repo file can only tighten
+([docs/permissions-model.md](docs/permissions-model.md)).
+
+`agy`'s policy is **merged** instead — it has no per-repo file of any kind, so its
+`colorScheme`/`model`/`trustedWorkspaces` are preserved.
+
+Restart `claude`/`agy` inside the container afterwards — a running session holds the old
+rules in memory and can write them back over the converge.
 
 **5 · Verify**
 
@@ -111,9 +120,6 @@ just docker-gc --dry-run    # report stale containers + build cache
 stopped containers older than 30d plus excess BuildKit cache. It never touches
 `ai-sandbox-*` containers, and only *reports* images and volumes — the two places
 durable data can be.
-
-Don't run `clean --deep` between a `reset-settings` and confirming the result — the
-backup is the only undo.
 
 **If `up` fails with "network not found"**: a stale DB container is pinned to the
 old network. `docker rm -f postgres-<profile>`, then `just up <profile>`.
@@ -205,9 +211,7 @@ Profile is the first argument to every per-profile recipe. `build`, `list`,
 | `vendor-tools` / `tools-check` | consume the depot channel / check the lock against it |
 | `check-permissions` | manifest permission proposal vs the settings template (read-only) |
 | **State** | |
-| `reset-settings` | overwrite claude `settings.json` from the template (backs up the old) |
-| `reset-skills` | converge this profile's skills to `sandbox_templates/skills/` |
-| `reset-antigravity` | converge the `agy` policy: `hooks.json` replaced, `permissions` **merged** into agy's own settings.json. Run `build` FIRST — the hook engine is baked into the image, and a `hooks.json` naming a missing script leaves `agy` unguarded without saying so |
+| `converge` | re-run what `up` seeds, touching no container: every agent's policy (claude `settings.json` **overwritten**, dropped keys captured first; `agy`'s **merged**; `hooks.json` replaced), the skills tree, the agent notice. Run `build` FIRST if the hook ENGINE changed — it is baked into the image, and a `hooks.json` naming a missing script leaves `agy` unguarded without saying so. Replaced `reset-settings`/`reset-skills`/`reset-antigravity` on 2026-08-24 ([ADR-0007](docs/adr/0007-policy-templates-are-source-of-truth-for-every-agent.md)); there are no aliases |
 | `clean` [`--deep`] | prune rotating state (backups, paste-cache, MCP logs) |
 | `wipe` / `db-reset` | destructive — read the header first |
 | `docker-gc` | host-wide Docker hygiene; report-only for images and volumes |

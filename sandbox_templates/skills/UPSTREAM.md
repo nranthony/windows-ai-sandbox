@@ -44,5 +44,5 @@ Live profiles converge to this tree on their next `up` (ADR-0005). To push the
 change now without touching the container:
 
 ```
-scripts/profile.sh <profile> reset-skills   # converge (no backups kept)
+scripts/profile.sh <profile> converge       # policy + skills (no backups kept)
 ```

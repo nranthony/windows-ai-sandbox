@@ -1,12 +1,12 @@
 {
-  "_comment": "Antigravity (`agy`) static tool policy — the sandbox-owned half of /root/.gemini/antigravity-cli/settings.json. SEEDED AND MERGED by scripts/profile.sh on every `up`: only the two keys in this file are written, every other key agy stores there (colorScheme, model, trustedWorkspaces, enableTelemetry) is preserved. Run `scripts/profile.sh <profile> reset-antigravity` to re-merge by hand. See sandbox_templates/antigravity/README.md and docs/adr/0006-antigravity-is-two-layer-like-claude.md.",
-  "_comment_parity": "Mirrors permissions.allow/ask/deny in ../claude/claude-settings.json, converted from Claude's `Bash(x:*)` matcher to agy's `command(x)` grant. BOTH matchers are PREFIX matchers over the command line, so the conversion is one-to-one and the two agents deny the same set. scripts/antigravity-parity.test.sh fails if they ever diverge — that suite is the anti-drift control, so add a command to BOTH files or to neither.",
+  "_comment": "Antigravity (`agy`) static tool policy — the sandbox-owned half of /root/.gemini/antigravity-cli/settings.json. SEEDED AND MERGED by scripts/profile.sh on every `up`: only the two keys in this file are written, every other key agy stores there (colorScheme, model, trustedWorkspaces, enableTelemetry) is preserved. Convergence runs on every `up`/`recreate`/`rebuild`/`wipe`; `scripts/profile.sh <profile> converge` runs the same thing without touching containers (the three reset-* commands it replaced were removed in work/0011). Restart `agy` inside the container to pick it up. See sandbox_templates/antigravity/README.md and docs/adr/0006-antigravity-is-two-layer-like-claude.md.",
+  "_comment_parity": "Mirrors permissions.allow/ask/deny in ../claude/claude-settings.json, converted from Claude's `Bash(x:*)` matcher to agy's `command(x)` grant. BOTH matchers are PREFIX matchers over the command line, so the conversion is one-to-one and the two agents deny the same set. scripts/agent-policy.test.sh fails if they ever diverge — that suite is the anti-drift control, so add a command to BOTH files or to neither.",
   "_comment_deny_is_the_tamper_resistant_layer": "The hard denials live HERE rather than in the PreToolUse hook because a workspace .agents/hooks.json can disable the hook by name (measured — work/0010 Phase 0, test G), and nothing in a workspace can reach settings.json. The hook is defence-in-depth on top of this list, not a substitute for it.",
   "_comment_ask_cache": "agy caches an `ask` approval as an Always-Allow grant, so an entry here prompts ONCE, unlike Claude's permissions.ask which re-prompts. The hook re-asserts this set as `force_ask`, which ignores that cache; the static entries below are the backstop for when the hook is not running.",
   "_comment_toolPermission": "request-review is already agy's default. Pinning it means a future change to that default, or an accidental `always-proceed`, does not silently widen the profile. Other values: strict, always-proceed, proceed-in-sandbox.",
   "toolPermission": "request-review",
   "permissions": {
-    "_comment_allow": "Read-only inspection, the safe git verbs, project-local build/test runners, and the myclickup read subcommands. Prefix matching: command(ls) covers `ls -la /x`.",
+    "_comment_allow": "Read-only inspection, the safe git verbs, project-local build/test runners, the myclickup read subcommands, and the three myclickup writes promoted on 2026-08-24 (comment/set-status/update \u2014 see _comment_ask). Prefix matching: command(ls) covers `ls -la /x`.",
     "allow": [
       "command(git status)",
       "command(git diff)",
@@ -57,15 +57,15 @@
       "command(myclickup workspaces)",
       "command(myclickup query)",
       "command(myclickup subtasks)",
+      "command(myclickup comment)",
+      "command(myclickup set-status)",
+      "command(myclickup update)",
       "command(myclickup --dry-run)"
     ],
-    "_comment_ask": "Mutating myclickup subcommands — a write to a real ClickUp workspace is the user\u0027s call, not the agent\u0027s.",
+    "_comment_ask": "Mutating myclickup subcommands — a write to a real ClickUp workspace is the user\u0027s call, not the agent\u0027s. THREE writes are deliberately ABSENT from this list and sit in `allow` instead \u2014 comment, set-status and update, promoted by explicit owner sign-off on 2026-08-24 (work/0011 T00, spec F7). The twin promotion in claude-settings.json is not optional: scripts/agent-policy.test.sh diffs the two grammars exactly in BOTH directions for allow and ask alike, so a one-sided edit fails offline. Note agy caches an `ask` approval as an Always-Allow grant, so for agy these three were already one prompt away from permanent; the promotion makes that explicit and reviewable in the template rather than implicit in a cache.",
     "ask": [
       "command(myclickup create)",
-      "command(myclickup update)",
-      "command(myclickup set-status)",
       "command(myclickup claim)",
-      "command(myclickup comment)",
       "command(myclickup tag)",
       "command(myclickup untag)",
       "command(myclickup depend)",

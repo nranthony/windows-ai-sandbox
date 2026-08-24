@@ -39,6 +39,15 @@ of `docs/permissions-model.md` to record what changed and why. This is a
 security widening — ClickUp writes become unprompted in every profile — so it
 needs its own `SECURITY IMPACT` line and explicit owner sign-off in the commit.
 
+**Owner sign-off 2026-08-24.** Confirmed by the owner on the day; recorded here
+and in the commit message. Implemented: the three moved from `ask` to `allow` in
+both templates, the `_myclickup_note`/`_ask_note`/`_comment_ask` blocks rewritten
+to say what changed and why, and `docs/permissions-model.md`'s "reads yes, writes
+prompt" section corrected — including the stale "19 commands: 13 reads and 6
+writes … every write hits the `defaultMode: auto` prompt" sentence, which was
+wrong on the count (real surface 28/17/11 as of 0.6.0) and on the mechanism (the
+operative control is the `_ask_note` rule set; absence alone does not prompt).
+
 ### T02 — Claude joins the convergence
 
 Replace the `[[ ! -f ... ]]` create-only guard (`profile.sh:575`) with
@@ -47,17 +56,50 @@ Replace the `[[ ! -f ... ]]` create-only guard (`profile.sh:575`) with
 Mode is **overwrite** (spec §2), so the work is the loud-but-not-noisy part:
 
 1. Write the dropped non-template keys to `claude-home/settings.discarded.json`
-   before overwriting.
+   before overwriting — **including the content diff of any owned key that
+   differs from the template**. Top-level capture alone misses a change
+   *inside* an owned key: the F7 `permissions` promotion would be reverted
+   without record otherwise (spec §2 requirement 4).
 2. Warn **only when that set differs from the previous run** — an unconditional
    warning fires on every `up` forever, because Claude rewrites `model` and
    `effortLevel` every session, and a warning that always fires is not read.
+   The owned-key diffs from (1) participate in this comparison.
 3. The message names the discard file, not a JSON blob to copy out of scrollback.
-4. `skipAutoPermissionPrompt` is user-or-managed scope (F6): either the template
-   owns it, or the message says it cannot go per-repo. Do not advise something
-   that will not work.
+4. `skipAutoPermissionPrompt` is user-or-managed scope (F6): **decided** — the
+   overwrite carries a preserve list for it (a key with nowhere else to live is
+   merged, per the spec's own mode rule).
+
+   **Owner decision 2026-08-24, revising this item:** the preserve list is
+   **four** keys, not one — `skipAutoPermissionPrompt`, `model`, `effortLevel`,
+   `agentPushNotifEnabled`. Re-picking a model and an effort level after every
+   `up` is friction the sandbox gains nothing from; none of the three carries a
+   security opinion.
+
+   Preserve has two halves. A live value survives; a live file that **lacks**
+   the key takes the **template default**, which is why
+   `sandbox_templates/claude/claude-settings.json` now carries `"model": "opus"`,
+   `"effortLevel": "medium"`, `"agentPushNotifEnabled": false`. Without the
+   second half a fresh profile — and every profile the pre-decision converge had
+   already stripped — stays unset forever.
+
+   The four are **preserved, not owned**: tier-1 `check_agent_policy_sync`
+   compares the owned keys only, and tier-2's `template_diff` now strips the
+   preference keys from **both** sides (stripping only `live` would have made
+   the new template defaults read as DRIFT on every profile where the operator
+   picked something else).
+
+   Opt-out: `profile.sh <p> converge --defaults` / `just converge <p> --defaults`
+   overwrites all four with the template defaults instead, capturing what it
+   replaced under a `preference_resets` key in `settings.discarded.json`.
+   `skipAutoPermissionPrompt` has no template default, so `--defaults` leaves it
+   alone rather than dropping a key no repo file can hold.
+
+   `skipWorkflowUsageWarning` goes to the discard file like any other unowned key.
 
 Also fix `USER_CUSTOMIZATION_KEYS` at `scripts/audit/probes/settings.py:30` — it
-lists three of the six observed keys and has been stale for months.
+lists three of the six observed keys, and the 2026-08-24 audits show the
+consequence live: `template_diff` reports DRIFT on all three profiles today
+(`agentPushNotifEnabled`; plus `permissions` on fluidmomenta).
 
 ### T03 — `converge_antigravity` becomes a descriptor
 
@@ -68,14 +110,26 @@ the check that the generalisation did not quietly alter it.
 ### T04 — `just converge <profile>`, and delete the three
 
 `profile.sh <p> converge` runs every agent descriptor + `converge_skills` +
-`sync-agent-notice`, touching no container. `reset-settings`, `reset-skills`,
+`sync-agent-notice`, touching no container. When the profile's container is
+running, it prints the same "restart the agent inside the container to pick up"
+instruction every `reset-*` branch ends with today
+(`profile.sh:1431/:1442/:1454`) — converging under a live session is a
+lost-update race in both directions (spec §2), and the restart line is the
+contract that closes it. `reset-settings`, `reset-skills`,
 `reset-antigravity` are removed from `profile.sh`, the `justfile`, and the usage
 header. No aliases — the repo's standing rule is no compatibility shims, and the
 whole point is to stop having three commands with three semantics.
 
-Breaking change; say so in the commit body and in the docs that name them
-(`README`, `.agents/skills/profile-lifecycle.md`, `AGENTS.md` quick reference,
-and the two downstream handoffs ADR-0005 mentions).
+Breaking change; say so in the commit body and in **every** doc and string that
+names the removed commands — the sweep is larger than the obvious docs:
+`README`, `.agents/skills/profile-lifecycle.md`, `AGENTS.md` quick reference,
+the two downstream handoffs ADR-0005 mentions, `verify-sandbox.sh`'s
+remediation strings (:177/:190/:192/:251/:254 — printed *from inside
+containers*), the DEPLOYMENT paragraph in the shipped template's
+`_myclickup_note`, `init-profile-state.sh:82-83`'s create-only note,
+`justfile:176-187`, `profile.sh` header (:29-33) and help (:1607),
+`docs/extending-a-profile.md:103/:163`, `docs/sandbox-design-notes.md:30`,
+`docs/deny-destructive-hook-plan.md:29`, and ADR-0006:123.
 
 ---
 
@@ -87,14 +141,19 @@ Nothing today reports that a profile's Claude policy is behind its template.
 Assert the live file matches the template **on the owned keys only** — comparing
 whole files would fire on `model` and be trained away as noise.
 
-### T06 — fix or retire the tier-2 `template_diff`
+### T06 — verify the tier-2 `template_diff` after T02's constant fix
 
-`scripts/audit/probes/settings.py` reads
-`/workspace/temp_audit_package/config/claude-settings.json`. That path exists in
-one profile, so for every other profile the check silently does not run and the
-probe still reports OK. Either stage the template where the probe can always see
-it, or delete the check and let T05 own drift. A check that quietly does not run
-is worse than no check.
+An earlier draft said the probe's staged path exists in only one profile and
+the check silently does not run. **Measured 2026-08-24: wrong on both halves.**
+`profile.sh:1395` runs `stage-audit-package.sh` on every `audit`, all three
+profiles carry the staged template md5-identical to the source, and a missing
+file reports UNKNOWN, never OK. The real defect is the stale
+`USER_CUSTOMIZATION_KEYS` — the 2026-08-24 audit JSONs report DRIFT on all
+three profiles (`agentPushNotifEnabled`; plus `permissions` on fluidmomenta,
+the F7 promotion caught live). T02 fixes the constant; T06 is the check on the
+check: after T02, `template_diff` goes OK on a converged profile and still
+reports DRIFT on a hand-edited one (prove the second by editing, not by
+reading the code).
 
 ### T07 — extend the offline suite
 

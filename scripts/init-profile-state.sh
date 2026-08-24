@@ -78,9 +78,15 @@ if [[ ! -s "$BASE/claude.json" ]]; then
 fi
 chmod 644 "$BASE/claude.json"
 
-# Seed claude-home/settings.json with our restricted-agent template if the
-# profile doesn't have one yet. Only runs on first `up` — use `profile.sh
-# <p> reset-settings` to re-seed after the template changes.
+# Bootstrap claude-home/settings.json from the restricted-agent template if the
+# profile doesn't have one yet. This is the BOOTSTRAP half only: since
+# work/0011 the file is no longer create-only — `profile.sh ensure_state`
+# CONVERGES it on every `up` (the sandbox-owned keys are overwritten from the
+# template, anything else is captured to claude-home/settings.discarded.json
+# first), and `profile.sh <p> converge` runs the same thing without touching
+# containers. Seeding here still matters only for the path where init runs
+# before ensure_state; the two agree by construction because the converge
+# rewrites whatever this wrote.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SEED="$SCRIPT_DIR/sandbox_templates/claude/claude-settings.json"
 DEST="$BASE/claude-home/settings.json"

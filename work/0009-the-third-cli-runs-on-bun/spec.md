@@ -133,7 +133,7 @@ Three CLIs, three integration surfaces. The table is the spec:
 | Version bump | `--refresh-ai`, `--claude-version=` | `--refresh-ai` | `--refresh-ai`, `--opencode-version=` (T05) |
 | Auth | `/root/.claude/.credentials.json` (bind mount, persists) | console sign-in, **not** persisted | env key from `secrets.env` (D1) |
 | Config home | `/root/.claude` → profile `claude-home/` | `/root/.gemini` → profile `gemini-home/` | `/root/.config/opencode/` → profile `config/` — **already mounted, no new volume** |
-| Permissions | `permissions.{allow,ask,deny}`, prefix matcher | none of ours | `permission.{read,edit,bash,…}`, last-match-wins globs (D3) |
+| Permissions | `permissions.{allow,ask,deny}`, prefix matcher | **`permissions.{allow,ask,deny}` in `command(x)` grammar, prefix matcher — the same deny set, diffed exactly against Claude's** (ADR-0006; this cell said "none of ours" until 2026-08-24) | `permission.{read,edit,bash,…}`, last-match-wins globs (D3) |
 | Autoupdate off | `DISABLE_AUTOUPDATER=1` env + settings | n/a (image-baked) | `OPENCODE_DISABLE_AUTOUPDATE` env + `"autoupdate": false` |
 | Egress | `[claude]` always-on | `[antigravity]` always-on, `[antigravity-install]` gated | `[openrouter]` always-on (exists), `[opencode-install]` gated (T07) |
 | Detector | `settings.py` probe, `verify` checks | `[antigravity]` in probe `REQUIRED_DOMAINS` | new probe section (T12) |

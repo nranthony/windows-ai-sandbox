@@ -49,31 +49,68 @@ drop network isolation).
 ```bash
 scripts/profile.sh <profile> clean              # prune rotating state
 scripts/profile.sh <profile> clean --deep       # + MCP logs + settings backups
-scripts/profile.sh <profile> reset-settings     # re-seed settings.json from sandbox_templates/claude/
-scripts/profile.sh <profile> reset-skills       # re-seed skills from sandbox_templates/skills/
-scripts/profile.sh <profile> reset-antigravity  # re-converge the agy policy (see below)
+scripts/profile.sh <profile> converge           # re-converge every agent's policy + skills (see below)
+scripts/profile.sh <profile> converge --defaults  # ... and RESET the preserved preferences to the template
 scripts/profile.sh <profile> wipe [--dry-run|--yes|--all-volumes]  # blank slate, KEEPS auth
 ```
 
 `down` also age-prunes MCP logs + session transcripts older than
 `SANDBOX_LOG_RETENTION_DAYS` (default 14).
 
-### `reset-antigravity` — build first, and know what it does not touch
+### `converge` — one command, per-agent write modes, build first
 
-`up` already converges the `agy` policy; this is the same operation without
-touching the container ([ADR-0006](../../docs/adr/0006-antigravity-is-two-layer-like-claude.md)).
-Two files, two different modes:
+`up`/`recreate`/`rebuild`/`wipe` already converge every agent's policy; this is
+the same operation without touching the container
+([ADR-0007](../../docs/adr/0007-policy-templates-are-source-of-truth-for-every-agent.md),
+extending [ADR-0005](../../docs/adr/0005-skill-templates-are-source-of-truth.md)).
+It replaced `reset-settings`, `reset-skills` and `reset-antigravity` on
+2026-08-24; there are no aliases, so an old script calling one of those fails
+loudly rather than silently doing nothing.
 
-- `gemini-home/config/hooks.json` — **replaced**. Ours alone.
+Four files, three write modes, and the differences are load-bearing:
+
+- `claude-home/settings.json` — **overwritten**. `env`, `hooks`, `permissions`
+  and `sandbox` are sandbox-owned, and the live file simply becomes the
+  template. Everything else it held is written to
+  `claude-home/settings.discarded.json` first — including the content diff of a
+  sandbox-owned key, which is how an in-session "always allow" that landed in
+  `permissions` gets recorded rather than silently reverted. You are warned once
+  per *change* in that set, not on every run. **Four keys are kept**:
+  `skipAutoPermissionPrompt` (user-or-managed scope: a repo file cannot hold it)
+  plus `model`, `effortLevel` and `agentPushNotifEnabled` (owner decision
+  2026-08-24 — re-picking a model after every `up` is friction with no security
+  value). Preserve has two halves: a live value survives, and a live file that
+  *lacks* the key takes the template default — `opus` / `medium` / `false`. A
+  live preference that differs from the template is **not** drift, and neither
+  tier reports it as such.
 - `gemini-home/antigravity-cli/settings.json` — **merged**, only `permissions`
   and `toolPermission`. `agy` writes `colorScheme`, `model` and
-  `trustedWorkspaces` into that same file during ordinary use, so overwriting it
-  would quietly discard the user's settings on every `up`. Nothing is backed up
-  because nothing is at risk.
+  `trustedWorkspaces` into that same file during ordinary use, and it has **no**
+  per-repo settings surface of any kind, so overwriting it would discard the
+  user's settings with nowhere to restore them from.
+- `gemini-home/config/hooks.json` — **replaced**. Ours alone.
+- `claude-home/skills/` — **mirrored** from the template tree (ADR-0005).
 
-Neither is a directory mirror. `gemini-home/config/` also holds `config.json`,
-`mcp_config.json`, `.migrated` and `projects/` — live `agy` state that a mirror
-would delete.
+None of the file modes is a directory mirror. `gemini-home/config/` also holds
+`config.json`, `mcp_config.json`, `.migrated` and `projects/` — live `agy` state
+that a mirror would delete — and `claude-home/` holds plenty the sandbox never
+seeded.
+
+**`--defaults` is the one flag `up` never passes.** It inverts the first half of
+preserve for one run: the template defaults overwrite the live preferences
+instead of the other way round, and the replaced values go to
+`settings.discarded.json` under `preference_resets`. Use it when a profile's
+preferences have drifted somewhere you do not want; it is an operator action, so
+it always says what it reset, never silently.
+
+**Restart `claude`/`agy` in the container afterwards.** Converging under a live
+session is a lost-update race in both directions: the session can write its
+in-memory settings back over the converge, and the converge can revert a grant
+the session just made. `converge` says so when the container is running.
+
+**Nothing here reaches the hook ENGINE.** It is baked into the image and needs
+`build` + recreate. Policy converges on `up`, the engine does not — that split
+is the single most common confusion about this system.
 
 **Run `build` before this on a fresh clone.** The hook engine
 (`/usr/local/lib/sandbox-hooks/guardrails.sh`) is baked into the image. A
@@ -108,7 +145,7 @@ the skill (for a skills-dir plugin the backup wins the name race), so stale ones
 are pruned on sight. Directories the sandbox never seeded — e.g. `claude plugin
 init` output — are reported and left alone.
 
-`reset-skills` runs the same convergence without touching the container.
+`converge` runs the same convergence without touching the container.
 
 `sandbox_templates/skills/` mixes sandbox-native skills (this repo is their
 source of truth) with material VENDORED through the depot channel —
@@ -130,7 +167,7 @@ just tools-check               # has the channel moved ahead of VENDORED.lock?
 ```
 
 Channel path comes from `$DEPOT_DIR` or the gitignored `.depot-dir.local`; the
-script writes only the template tree, so follow it with `reset-skills` per
+script writes only the template tree, so follow it with `converge` per
 profile to push edits into a live profile.
 
 `sandbox_templates/skills/myclickup/` arrives the same way, pair-vendored with

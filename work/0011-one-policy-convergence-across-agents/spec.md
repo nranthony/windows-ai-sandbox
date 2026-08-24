@@ -3,6 +3,11 @@
 **Status:** **Draft — direction chosen, awaiting go-ahead.** Raised 2026-08-23 by
 owner after [0010](../0010-antigravity-permissions-and-hooks/spec.md) exposed the
 inconsistency: `agy` policy now converges on every `up`, Claude Code's does not.
+Pre-go-ahead corrections applied 2026-08-24 from an independent verification
+audit (F4 overlap, F7 residual list, §2 discard capture, DoD 4/5/6, invariant 2);
+0010 has since been built, brought up and verified live — the antigravity probe
+runs its full in-container path OK on all three profiles, and the tier-2
+`template_diff` DRIFT this spec predicts is now measured fact (see DoD 4).
 
 **Shelf life:** delete or archive on merge.
 
@@ -117,7 +122,13 @@ not exist.
 | Claude | `env`, `hooks`, `permissions`, `sandbox`, `_*comment` | `model`, `effortLevel`, `agentPushNotifEnabled` |
 | `agy` | `permissions`, `toolPermission` | `colorScheme`, `model`, `enableTelemetry`, `trustedWorkspaces` |
 
-No overlap. Both templates are **strict JSON** with `_comment` keys — neither
+**One overlap, and it matters: Claude writes into `permissions`.** An
+in-session "Yes, and don't ask again" lands an `allow` rule in the sandbox's
+most-owned key — F7 is the live proof, three sections down. The write-back
+column above is what each agent writes *routinely*; `permissions` is written
+*occasionally*, and the convergence design must capture that write before
+overwriting (§2). For `agy` the split is clean.
+Both templates are **strict JSON** with `_comment` keys — neither
 uses `//` comments, so one merge implementation serves both. (The `//`-stripping
 in `antigravity-parity.test.sh` is therefore dead code whose comment claims a
 difference that does not exist; clean it up.)
@@ -157,7 +168,42 @@ Scope check (Claude settings reference): `theme`, `model`, `effortLevel`,
 can go per-repo. **`skipAutoPermissionPrompt` is user-or-managed only** — an
 overwrite drops it with nowhere for the user to restore it, so the template must
 own it or the one-time auto-mode notice returns forever.
-`skipWorkflowUsageWarning` is undocumented; scope unknown.
+**Decided (2026-08-24):** the Claude overwrite carries a **preserve list** of
+four keys — `skipAutoPermissionPrompt`, `model`, `effortLevel`,
+`agentPushNotifEnabled`.
+
+The first is the mode rule (§2) applied literally: a key with nowhere else to
+live is merged, not dropped. The other three are an **owner decision taken the
+same day**, revising an earlier "exactly `skipAutoPermissionPrompt`" here. Their
+scope permits a per-repo file, but the table above is the argument against
+relying on that: all three live profiles had picked a model and an effort level,
+and an overwrite makes every operator re-pick them after every `up` — friction
+with no security value, since the sandbox has no opinion about any of the three.
+
+Preserve has **two halves**, and the second is why the template changed too:
+
+1. a **live** value survives convergence;
+2. when the live file **lacks** the key, the **template default** seeds it.
+
+Without (2), "preserve" on a fresh profile means "leave it unset" forever — and
+after the pre-decision converge every profile was in exactly that state, its
+keys already dropped. So `claude-settings.json` now carries `"model": "opus"`,
+`"effortLevel": "medium"`, `"agentPushNotifEnabled": false` (owner-chosen;
+`opus`, deliberately not a variant-suffixed id). They are **preserved, not
+owned**: tier-1 `check_agent_policy_sync` compares the owned list only, so a
+live value differing from these defaults is the design working rather than
+drift, and tier-2's `template_diff` strips the preference keys from **both**
+sides for the same reason.
+
+The opt-out is `scripts/profile.sh <p> converge --defaults`, which overwrites
+all four preserved keys with the template defaults instead of keeping the live
+ones. It still writes the discard capture — under a `preference_resets` key
+carrying the replaced value — because a reset the operator cannot undo is the
+same silent loss the capture exists to prevent. `skipAutoPermissionPrompt` has
+no template default, so `--defaults` leaves it alone rather than dropping it.
+
+`skipWorkflowUsageWarning` is undocumented; scope unknown — it goes to the
+discard file like any other unowned key.
 
 ### F7 [V] — a per-repo file cannot promote `ask` → `allow` either
 
@@ -171,11 +217,15 @@ match wins, across all scopes: *"a matching ask rule prompts even when a more
 specific allow rule also matches the same call."* While the template lists these
 under `ask`, no `.claude/settings.local.json` can promote them.
 
-So keeping them means **editing the template**, which contradicts a decision
-`docs/permissions-model.md` records deliberately ("The template allows the 13
-reads and nothing else, so every write hits the prompt"). Owner's call to
-overrule; scoped to exactly those three, leaving `create`/`claim`/`tag`/`untag`/
-`depend`/`move`/`append-description` prompting.
+So keeping them means **editing the template**, which contradicts the
+reads-allowed/writes-prompt design `docs/permissions-model.md` records. (The
+sentence there quoting "13 reads … every write hits the prompt" is itself stale
+twice over — the template's own `_myclickup_note` records the surface as 28
+commands / 17 reads / 11 writes as of 0.6.0, and the operative control is the
+`_ask_note` rule set, not the `defaultMode: auto` prompt. T00/T08 must correct
+that paragraph too, not quote it.) Owner's call to overrule; scoped to exactly
+those three, leaving the **eight** others — `create`/`claim`/`tag`/`untag`/
+`depend`/`undepend`/`move`/`append-description` — prompting.
 
 **Do not** instead drop them from `ask` so a per-repo allow can win: unlisted
 commands fall to `defaultMode: auto`, where a classifier decides instead of the
@@ -246,13 +296,38 @@ Owner's design, with the fatigue problem fixed. Three requirements:
 2. **Write the dropped keys to `claude-home/settings.discarded.json`, and name
    that path in the warning.** Not copy-paste from scrollback: recoverable,
    survives a lost terminal, and it means the data is on disk even on the silent
-   runs.
+   runs. `claude-home/` is inside the container mount, so the file is
+   agent-writable — treat it as recovery capture, not audit evidence; the
+   authoritative drift signal is the tier-1 check (DoD 4), and tier-1 verify
+   should learn the file is *expected* there (cf. the existing no-`*.bak*`
+   assertion beside the seeded skills).
 3. **The advice must be true per key.** `skipAutoPermissionPrompt` cannot go
-   per-repo (F6), so either the template owns it or the message says so rather
-   than sending someone somewhere that will not work.
+   per-repo (F6) — resolved by the F6 decision: it rides the preserve list
+   rather than the discard file. **Revised by the owner, 2026-08-24:** so do
+   `model`, `effortLevel` and `agentPushNotifEnabled`, and the template gains
+   defaults (`opus` / `medium` / `false`) so a profile that lacks the key gets
+   seeded rather than left unset. Those four are therefore never in the discard
+   file on an ordinary run — a preserved key is not a dropped key. The one time
+   they do appear is under `converge --defaults`, the explicit opt-out, which
+   overwrites them with the template defaults and records the replaced values
+   under `preference_resets`.
+4. **The capture must include owned-key content diffs.** Dropped *top-level*
+   keys alone do NOT catch a change **inside** an owned key: an in-session
+   `ask`→`allow` promotion lands in `permissions`, which the overwrite would
+   revert with no record — the fluidmomenta promotion (F7) is exactly this, and
+   silent reversion is the failure this item exists to prevent. So when an
+   owned key's live content differs from the template, that diff is written to
+   the discard file too and participates in the warn-on-change comparison.
+5. **State the behavioural change.** Under overwrite, "Yes, and don't ask
+   again" survives only until the next `up`/`converge` — captured, warned,
+   reverted. Making a grant permanent means editing the template (as T00 does
+   for the three myclickup writes). That is the intended posture; it goes in
+   the docs (T08), not into someone's surprise.
 
-This subsumes the "unexpected top-level key" detector: a new key from a Claude
-release, or an in-session `permissions` promotion, surfaces on the next `up`.
+With requirement 4 in place, this subsumes the "unexpected top-level key"
+detector: a new key from a Claude release surfaces as a dropped key, and an
+in-session `permissions` promotion surfaces as an owned-key diff, both on the
+next `up`.
 
 ### Why overwrite won for Claude
 
@@ -294,6 +369,15 @@ One command, `just converge <profile>` — the verb this repo already uses
 runs, without touching containers: every agent's policy, the skills tree, and the
 agent-notice sync.
 
+Converging under a **running** agent is a lost-update race in both directions:
+the session's in-memory settings can rewrite the file after the converge, and
+the converge can clobber a grant the session just wrote. Every existing
+`reset-*` branch ends with "restart claude/agy inside the container to pick up"
+for exactly this reason (`profile.sh:1431/:1442/:1454`). `converge` keeps that
+contract: when the profile's container is running it prints the same restart
+instruction — and the §2 discard capture is what bounds the damage when the
+instruction is ignored.
+
 `reset-settings`, `reset-skills` and `reset-antigravity` are **deleted**, not
 aliased. Per the repo's own standing rule against compatibility shims, and
 because three near-identical commands with different semantics is the confusion
@@ -309,7 +393,7 @@ Adding an agent becomes one descriptor plus a template, never a new code path.
 | Field | Claude Code | Antigravity | opencode (0009) | codex |
 |---|---|---|---|---|
 | Template | `claude/claude-settings.json` | `antigravity/antigravity-settings.json` | `opencode/opencode.json` | tbd |
-| Live path (in profile) | `claude-home/settings.json` | `gemini-home/antigravity-cli/settings.json` | `config/opencode/opencode.json` | tbd |
+| Live path (in profile) | `claude-home/settings.json` | `gemini-home/antigravity-cli/settings.json` | **tbd — F8**: the managed-config path (per-profile bind mount), NOT the global `config/opencode/opencode.json` this row used to name | tbd |
 | Sandbox-owned keys | `env`, `hooks`, `permissions`, `sandbox` | `permissions`, `toolPermission` | `permission`, `autoupdate` | tbd |
 | Whole-file extras | — | `gemini-home/config/hooks.json` | — | tbd |
 | Hook engine | `deny-destructive.sh` | same, `--dialect=antigravity` | none yet (0009 T-) | tbd |
@@ -320,8 +404,10 @@ Invariants the descriptor must preserve, all of them already learned the hard wa
 
 1. **Merge owned keys; never mirror a directory.** `gemini-home/config/` holds
    live `agy` state; a mirror deletes it (0010 F7).
-2. **Never overwrite a file the agent writes to.** Both agents write runtime keys
-   into their policy file.
+2. **Never overwrite a file the agent writes to without first capturing what it
+   wrote.** Both agents write runtime keys into their policy file, and Claude
+   also occasionally writes into an owned key (`permissions` — F4/F7).
+   Overwrite is permitted only behind the §2 discard-and-diff capture.
 3. **Idempotent** — it runs on every `up`; a no-op change must not rewrite the file.
 4. **Comment keys are `_`-prefixed and strict-JSON**, so the merge needs no JSONC parser.
 
@@ -331,22 +417,52 @@ Invariants the descriptor must preserve, all of them already learned the hard wa
 
 1. `converge_agent_policy` in `profile.sh`, descriptor-driven, replacing the
    bespoke `converge_antigravity` body and the create-only Claude seed.
-2. Claude policy converges on `up`/`recreate`/`rebuild`/`wipe`; `model`,
-   `effortLevel` and `agentPushNotifEnabled` demonstrably survive.
+2. Claude policy converges on `up`/`recreate`/`rebuild`/`wipe` with a **four-key
+   preserve list** — `skipAutoPermissionPrompt`, `model`, `effortLevel`,
+   `agentPushNotifEnabled` (owner-decided 2026-08-24; see F6) — and all four
+   demonstrably survive. The template carries defaults for the latter three
+   (`opus` / `medium` / `false`), so a profile whose live file lacks a key is
+   **seeded** rather than left unset. `converge --defaults` (and
+   `just converge <p> --defaults`) is the opt-out: it overwrites all four with
+   the template defaults and captures the replaced values to
+   `settings.discarded.json` under `preference_resets`.
 3. `just converge <profile>` added; the three `reset-*` commands removed, with
-   the break called out in the commit and in `README`/`profile-lifecycle`.
+   the break called out in the commit and in **every** place that names them —
+   the blast radius is larger than README/`profile-lifecycle`:
+   `verify-sandbox.sh`'s remediation strings (:177/:190/:192/:251/:254 —
+   printed *from inside containers*), the DEPLOYMENT paragraph in the shipped
+   template's `_myclickup_note`, `init-profile-state.sh:82-83`'s create-only
+   note, the `justfile` (:176-187), `profile.sh` header (:29-33) and help
+   (:1607), `docs/extending-a-profile.md:103/:163`,
+   `docs/sandbox-design-notes.md:30`, `docs/deny-destructive-hook-plan.md:29`,
+   and ADR-0006:123.
 4. Tier-1 verify asserts the LIVE Claude policy matches the template on the
    owned keys — the drift detector that does not exist today. The tier-2
-   `settings.py` `template_diff` check reads
-   `/workspace/temp_audit_package/config/claude-settings.json`, a path present in
-   one profile, so for most profiles it silently does not run; fix or retire it.
-5. `antigravity-parity.test.sh` extended to cover the generalised converge for
-   both agents, and its dead `//`-stripping removed. All suites green.
+   `template_diff` check needs its **constant** fixed, not its path: measured
+   2026-08-24, `stage-audit-package.sh` stages the template on every `audit`
+   (`profile.sh:1395`), all three profiles carry it md5-identical to the
+   source, and an absent file reports UNKNOWN, never OK. The real defect is the
+   stale `USER_CUSTOMIZATION_KEYS` (`settings.py:30`): the 2026-08-24 audit
+   JSONs report DRIFT on all three profiles (`agentPushNotifEnabled`
+   everywhere; plus `permissions` on fluidmomenta — F7 caught live). T02's
+   constant fix clears it; the check then stands as-is.
+5. `antigravity-parity.test.sh` becomes `agent-policy.test.sh` (T07 — renamed,
+   per the plan; the rename touches the `justfile` eight-suite list and every
+   `AGENTS.md` paragraph naming the file and its 28/28 count), covering the
+   generalised converge for both agents, with the dead `//`-stripping removed.
+   All suites green.
 6. Docs: `permissions-model.md` gains the tighten-only rule and the per-agent
-   override table; `ARCHITECTURE.md`, `AGENTS.md`, `README`,
-   `profile-lifecycle.md` updated; ADR-0005 amended or a new ADR records that
-   policy convergence now covers every agent.
-7. 0009's comparison table corrected where it says `agy` has no permissions.
+   override table (and the F7 correction to its stale "13 reads" paragraph);
+   `ARCHITECTURE.md`, `AGENTS.md`, `README`, `profile-lifecycle.md` updated;
+   ADR-0005 extended **by supersession** — a short ADR-0007 pointing back at
+   it, per the append-only rule (plan T10, never "amend in place") — records
+   that policy convergence now covers every agent.
+7. 0009's comparison table cell corrected where it still says `agy` has "none
+   of ours" (`0009/spec.md:136` — the 2026-08-23 correction block landed but
+   left the cell). 0009's `plan.md` still targets the global-config path this
+   spec's F8 rejects; the full fold is deferred to
+   `docs/incoming/2026-08-24-work-item-audit-corrections.md` after this item
+   merges.
 
 **Out of scope:** the `agy` per-repo override (F3); `force_ask` (0010 follow-up);
 opencode and codex wiring beyond leaving the descriptor slot ready.

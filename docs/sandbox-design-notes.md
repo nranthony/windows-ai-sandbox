@@ -27,7 +27,7 @@ Do **not** "re-harden" by re-enabling `sandbox.enabled` or re-adding `bubblewrap
 
 ## Per-profile Claude Code skills are seeded from `sandbox_templates/skills/`
 
-Skills live at `sandbox_templates/skills/<name>/SKILL.md` and are seeded into each profile's `claude-home/skills/<name>/` by `ensure_state()` on first `up` — copy only if absent, so user customisations survive subsequent `up`s. To force-refresh from template: `scripts/profile.sh <p> reset-skills`.
+Skills live at `sandbox_templates/skills/<name>/SKILL.md` and are CONVERGED into each profile's `claude-home/skills/<name>/` by `ensure_state()` on every `up` — the template tree is the source of truth and the profile copy is a derived cache ([ADR-0005](adr/0005-skill-templates-are-source-of-truth.md)); every agent's POLICY converges the same way ([ADR-0007](adr/0007-policy-templates-are-source-of-truth-for-every-agent.md)). Copy-if-absent seeding was the earlier behaviour and is what let profiles drift behind the template. To converge without touching the container: `scripts/profile.sh <p> converge`.
 
 ## Commit identity: `git config` is denied — seed `user.*` host-side
 

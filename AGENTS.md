@@ -46,7 +46,13 @@ These files carry the sandbox's guarantees:
 - `seccomp.json`
 - `proxy/squid.conf` + `proxy/allowed_domains.txt`
 - `sandbox_templates/claude/claude-settings.json` + `sandbox_templates/claude/hooks/`
-  (the hook under `hooks/` is now shared by BOTH agents — see below)
+  (the hook under `hooks/` is now shared by BOTH agents — see below). Since
+  [ADR-0007](docs/adr/0007-policy-templates-are-source-of-truth-for-every-agent.md)
+  the settings template CONVERGES: an edit here reaches every profile on its
+  next `up`, so it is live policy, not a seed. **The two halves reach a
+  container by different routes and that is the recurring confusion**: the
+  policy file converges on `up`, the hook ENGINE is baked into the image and
+  still needs `build` + recreate.
 - `sandbox_templates/antigravity/` — the `agy` half of the same policy
   ([ADR-0006](docs/adr/0006-antigravity-is-two-layer-like-claude.md)). The
   **static** `permissions.deny` there is the load-bearing layer, not the hook:
@@ -63,6 +69,12 @@ These files carry the sandbox's guarantees:
   this is the **only** route by which a dependency can enter a profile. It widens
   the allowlist, so a bug here is an egress hole; and it writes the install audit
   log, so a bug here silently *under-reports* — which reads exactly like a clean run.
+  It also **is** the Python age gate: `exclude-newer` takes a timestamp, not a
+  duration, so no static config can express "7 days"; this script computes it per
+  window and injects `UV_EXCLUDE_NEWER`. Env beats a project `[tool.uv]`
+  exclude-newer (measured, uv 0.12.5) — the opposite of Gate 2 and Gate 3, where
+  the project file wins, so do not generalise between them. `--allow-fresh
+  "<reason>"` is the only way off it and the reason is mandatory and recorded.
 - `scripts/vendor-tools.sh` — per [ADR-0014](docs/adr/) (channel-side, myclickup
   work/0016) this is the route by which vendored payloads enter the build
   context: the wheel bakes into the image, the skills converge into every
@@ -87,24 +99,59 @@ blocks a misbehaving hook regardless). Claude's pass-through `{}` is a **deny**
 to `agy`, so the antigravity pass must stay an explicit `{"decision":"allow"}`.
 Unifying any of that is the likeliest way to turn this into a hole; the suite
 locks all three.
-Edits to `sandbox_templates/antigravity/` or to either static deny list require
-`bash scripts/antigravity-parity.test.sh` (28/28, offline — no docker, no `agy`).
-It diffs the two deny lists EXACTLY, in both directions, with no exception list,
-because two hand-edited lists that must agree will drift — `pnpm dlx` and its
-five fetch-and-run siblings already did exactly that. It also locks that
-convergence MERGES and is file-scoped: `gemini-home/config/` holds live `agy`
-state (`config.json`, `mcp_config.json`, `projects/`) and
-`antigravity-cli/settings.json` is shared with the running agent, so applying
-ADR-0005's mirror semantics there is silent data loss on a routine `up`.
-Edits to `scripts/depaudit.py` require `bash scripts/depaudit.test.sh` (38/38
+Edits to `sandbox_templates/antigravity/`, to either static policy list, or to
+`converge_agent_policy` / `AGENT_POLICY_DESCRIPTORS` in `scripts/profile.sh`
+require `bash scripts/agent-policy.test.sh` (53/53, offline — no docker, no
+`agy`, no `claude`). It diffs the two policy lists EXACTLY, in both directions,
+for `allow`/`ask`/`deny` alike, with no exception list, because two hand-edited
+lists that must agree will drift — `pnpm dlx` and its five fetch-and-run
+siblings already did exactly that, and the 2026-08-24 myclickup promotion is the
+same shape in the other direction. It also locks the convergence for BOTH agents
+([ADR-0007](docs/adr/0007-policy-templates-are-source-of-truth-for-every-agent.md)):
+the two write modes must stay OPPOSITE — claude overwrites because its
+preferences have repo-local files to live in, `agy` merges because it has none
+and what it stores there is functional state — and unifying them either destroys
+live `agy` state or lets a stale Claude key survive enforcement. Convergence is
+file-scoped in both directions: `gemini-home/config/` holds live `agy` state
+(`config.json`, `mcp_config.json`, `projects/`), `antigravity-cli/settings.json`
+is shared with the running agent, and `claude-home/` holds files the sandbox
+never seeded, so applying ADR-0005's mirror semantics anywhere here is silent
+data loss on a routine `up`. Three more locks are recovery-shaped: the claude
+overwrite must capture what it drops **including the content diff of an owned
+key** (a top-level capture alone misses an in-session `ask`→`allow` promotion
+landing in `permissions` — measured live in a profile); the warning must go
+QUIET when the captured set has not changed (claude rewrites `model` every
+session, and a warning that always fires is not read); and a clean run must not
+BLANK the previous capture, or the operator gets exactly one `up` to notice.
+Three more lock the PRESERVE list, which is four keys as of 2026-08-24
+(`skipAutoPermissionPrompt`, `model`, `effortLevel`, `agentPushNotifEnabled`) and
+has TWO halves that are easy to implement as one: a **live** value must survive
+converge, AND a live file that **lacks** the key must take the template default
+(`opus`/`medium`/`false`). Implementing only the first leaves every fresh profile
+— and every profile the pre-decision converge had already stripped — unset
+forever. The preserved keys are deliberately NOT owned keys: tier-1
+`check_agent_policy_sync` compares the owned list only, and tier-2's
+`template_diff` strips the preference set from **both** sides now that the
+template carries defaults (stripping only `live` makes the template's
+`"model": "opus"` read as DRIFT on every profile where the operator picked
+something else). `converge --defaults` is the opt-out and captures what it
+replaced under `preference_resets`.
+Edits to `scripts/depaudit.py` require `bash scripts/depaudit.test.sh` (43/43
 offline; `--online` adds the OSV corpus). Two of its assertions are regression
 locks for checks that shipped **inverted** — read the header before changing them.
 Edits to `scripts/with-egress.sh` require `bash scripts/with-egress.test.sh`
-(66/66, offline — no docker or network). It covers five parsers — two here and
+(82/82, offline — no docker or network). It covers five parsers — two here and
 `list_denied_domains` in `profile.sh`, which reads the same file — locks a
 bracket bug that made a real install log zero egress, and asserts the
 container-side allowlist path agrees across all five places it appears. Edits to
 either script's allowlist parsing run it.
+It also owns the **Gate 3 drift lock**: `gate3_scan_file` (the section-aware
+parser for project-level `no-build = false` / `no-binary`) exists byte-identically
+in `with-egress.sh` AND `verify-sandbox.sh`, because the latter is streamed into
+the container over stdin and can source nothing. The suite extracts both bodies
+and diffs them exactly. Edit both or neither. Its section scope is the point: a
+line-grep also matches `no-build = false` under `[tool.hatch]` or behind a `#`,
+and a reported opt-out that does not exist sends someone hunting for it.
 Edits to the `Dockerfile` require `bash scripts/dockerfile-order.test.sh` (8/8,
 offline). The install-layer order is a load-bearing chain — beads < claude/agy <
 npmrc (Gate 2) < uv/pip (Gate 3) — because `min-release-age` applies at **build**
@@ -112,7 +159,7 @@ time too: write it above the CLI install and `@anthropic-ai/claude-code@latest`
 becomes unresolvable whenever the newest release is inside the quarantine window.
 That break is intermittent (it depends on when upstream last published) and
 surfaces on a routine `--refresh-ai`, not just a cold build.
-Edits to `converge_skills` / `reset-skills` in `scripts/profile.sh` require
+Edits to `converge_skills` or the `converge` subcommand in `scripts/profile.sh` require
 `bash scripts/profile-skills.test.sh` (24/24, offline — no docker). Three of its
 assertions are regression locks: a `<name>.bak.<stamp>`
 inside `claude-home/skills/` is a second LIVE copy (for a skills-dir plugin the
@@ -122,9 +169,11 @@ plugin init` scaffolds into `~/.claude/skills/<name>/`; and convergence MIRRORS
 a skill rather than merging into it — a file deleted inside a skill must vanish
 from the profile, including at depth and behind a dot-directory (all three live
 profiles carried phantom skill copies four levels down for three upstream
-releases). See [ADR-0005](docs/adr/0005-skill-templates-are-source-of-truth.md).
+releases). See [ADR-0005](docs/adr/0005-skill-templates-are-source-of-truth.md),
+extended to every agent's POLICY by
+[ADR-0007](docs/adr/0007-policy-templates-are-source-of-truth-for-every-agent.md).
 Edits to `scripts/vendor-tools.sh` require `bash scripts/vendor-tools.test.sh`
-(57/57, offline — no docker, no network, no real channel). It is the door every
+(65/65, offline — no docker, no network, no real channel). It is the door every
 vendored payload now enters through, so three of its assertions are regression
 locks, each proven to bite by mutation: **nothing is copied when any hash fails**
 (the gate runs over every artifact before the first file moves — a per-artifact
@@ -163,7 +212,12 @@ locked now. The suite also asserts every fetch-and-run form the notice names has
 a real `permissions.deny` entry behind it: a notice promising a denial that does
 not exist is never tested, because the agent reads it and does not attempt.
 
-`just test-offline` runs all eight suites, then `just check-upstreams`. Verify
+Edits to the scanned surfaces in the public-repo check below require
+`bash scripts/private-names-check.sh`; it prints a loud `[SKIP]` and exits 0
+when `.private-names.local` is unconfigured, so a green run there is not
+proof of coverage — see "Public-repo constraints".
+
+`just test-offline` runs all nine suites, then `just check-upstreams`. Verify
 additionally asserts no `*.bak*` sits beside the seeded skills: `converge_skills`
 prunes only `*.bak.*`, so the unstamped form survives it.
 
@@ -270,6 +324,24 @@ right. It deliberately splits what may be automated from what may not:
 Never `docker commit` a container as a backup: it captures caches, not data,
 and cannot be diffed or restored selectively. Back up the source dir or volume.
 
+## Public-repo constraints
+
+This repo is **public**; real profile names double as real client/project
+names. The standard is **searchable, not "present at all"**
+([work/0007-genericise-public-identifiers](work/0007-genericise-public-identifiers/spec.md)):
+high-visibility surfaces — README, ARCHITECTURE, this file, `justfile`,
+`scripts/`, `sandbox_templates/`, `docs/index.md`, `docker-compose*.yml`,
+`Dockerfile`, `seccomp.json`, `proxy/` — must carry no client name,
+case-insensitive. Archived narrative (`docs/_archive/`), RFCs, and `work/*/`
+are deliberately KEPT as historical record — rewriting them to look tidier is
+worse than the disclosure, and no git history is rewritten either. Evidence-
+bearing uses are also kept: `proxy/allowed_domains.txt`'s provenance comments
+name which account a workspace ID belongs to and why one was unverified, and
+the name there IS the checkable evidence, not a leak. `scripts/private-names-check.sh`
+enforces the searchable standard on the scanned surfaces, reading the name
+list from a gitignored `.private-names.local` (owner-provided; loud `[SKIP]`,
+exit 0, when unconfigured) — wired into `just test-offline`.
+
 ## Operational guides (host-agent skills)
 
 - Profile lifecycle, builds, DBs, ephemeral runs, agent-skill seeding:
@@ -304,7 +376,8 @@ cross-repo conventions gets an ADR; local implementation details never do.
 
 ```bash
 scripts/profile.sh <profile> up|down|attach|verify|audit
-scripts/profile.sh <p> reset-antigravity     # re-converge the agy policy (build FIRST)
+scripts/profile.sh <p> converge              # re-converge every agent's policy + skills
+                                             # (build FIRST if the hook engine changed)
 scripts/profile.sh list
 scripts/profile.sh build --refresh-ai        # bump AI CLIs (tail layer only)
 scripts/with-egress.sh <p> --with pypi -- '<cmd>'   # temporary egress widening

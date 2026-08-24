@@ -2,7 +2,7 @@
 # =============================================================================
 # profile-skills.test.sh — converge_skills regression suite (offline)
 # =============================================================================
-# No docker, no network. Runs the REAL `scripts/profile.sh <p> reset-skills`
+# No docker, no network. Runs the REAL `scripts/profile.sh <p> converge`
 # against a throwaway repo root + throwaway HOME, so the dispatch path under
 # test is the one `up` uses (ensure_state → converge_skills).
 #
@@ -58,9 +58,9 @@ mk_plugin() { # <name> <version>
   printf -- "---\nname: inner\ndescription: inner skill\n---\n" > "$TPL/$1/skills/inner/SKILL.md"
 }
 
-run() { # -> stdout+stderr of a reset-skills run
+run() { # -> stdout+stderr of a converge run
   ( cd "$ROOT" && HOME="$HOME_DIR" SANDBOX_GPU=0 \
-      bash "$REPO/scripts/profile.sh" testp reset-skills 2>&1 )
+      bash "$REPO/scripts/profile.sh" testp converge 2>&1 )
 }
 
 echo "-- converge_skills --"

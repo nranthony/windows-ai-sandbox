@@ -174,7 +174,7 @@ fi
 if [[ -s "$AGY_HOOKS_JSON" ]] && jq -e '."sandbox-guardrails".enabled == true' "$AGY_HOOKS_JSON" >/dev/null 2>&1; then
   pass "antigravity hooks.json seeded and enabled ($AGY_HOOKS_JSON)"
 else
-  fail "antigravity hooks.json missing, invalid, or disabled — run: profile.sh <p> reset-antigravity"
+  fail "antigravity hooks.json missing, invalid, or disabled — run (host): profile.sh <p> converge"
 fi
 
 if [[ -s "$AGY_SETTINGS" ]] && jq -e '(.permissions.deny // []) | length > 0' "$AGY_SETTINGS" >/dev/null 2>&1; then
@@ -187,9 +187,9 @@ if [[ -s "$AGY_SETTINGS" ]] && jq -e '(.permissions.deny // []) | length > 0' "$
     jq -e --arg g "$g" '.permissions.deny | index($g)' "$AGY_SETTINGS" >/dev/null 2>&1 || _missing="$_missing $g"
   done
   [[ -z "$_missing" ]] && pass "antigravity deny list covers network/installer/shell-escape/remote-vcs" \
-                       || fail "antigravity deny list missing:$_missing — run: profile.sh <p> reset-antigravity"
+                       || fail "antigravity deny list missing:$_missing — run (host): profile.sh <p> converge"
 else
-  fail "antigravity permissions.deny absent from $AGY_SETTINGS — run: profile.sh <p> reset-antigravity"
+  fail "antigravity permissions.deny absent from $AGY_SETTINGS — run (host): profile.sh <p> converge"
 fi
 
 # --- antigravity upstream-contract drift ------------------------------------
@@ -230,6 +230,24 @@ else
   fail "workspace hooks.json found (outranks the global guardrail and can disable it by name): $(printf '%s' "$_wshooks" | tr '\n' ' ')"
 fi
 
+# --- the converge discard capture is EXPECTED, not a leftover ---------------
+# /root/.claude/settings.discarded.json is written by the host-side policy
+# convergence (work/0011): the keys the Claude template does not own, captured
+# before the overwrite that drops them. It is here so a lost grant is
+# recoverable from disk rather than from scrollback, and it is named here so
+# nobody deletes it as debris or mistakes it for a stale backup — the same
+# argument as the no-`*.bak*` assertion below, in the opposite direction.
+#
+# It is recovery capture, NOT audit evidence: this path is inside the container
+# mount and the agent can write it. The authoritative drift signal is the
+# host-side owned-key comparison in `profile.sh <p> verify`.
+DISCARDED=/root/.claude/settings.discarded.json
+if [[ -s "$DISCARDED" ]]; then
+  note "converge discard capture present ($DISCARDED) — expected; it records what the last policy converge dropped"
+else
+  note "no converge discard capture ($DISCARDED) — nothing has been dropped since the last one was cleared"
+fi
+
 # --- no backup copies inside the scanned skills dir -------------------------
 # ADR-0005, measured in-container 2026-08-10 (claude 2.1.223): a `<name>.bak*`
 # sibling in ~/.claude/skills/ is a SECOND LIVE COPY, and for a skills-dir
@@ -248,10 +266,10 @@ if [[ -d "$SKILLS_DIR" ]]; then
     pass "no backup copies beside the seeded skills ($SKILLS_DIR)"
   else
     fail "backup copies in $SKILLS_DIR shadow the live skill (a plugin backup WINS the name race — ADR-0005): $(printf '%s' "$BAKS" | tr '\n' ' ')
-       fix from the host: scripts/profile.sh <profile> reset-skills"
+       fix from the host: scripts/profile.sh <profile> converge"
   fi
 else
-  warn "$SKILLS_DIR missing — skills were never seeded (host: scripts/profile.sh <profile> reset-skills)"
+  warn "$SKILLS_DIR missing — skills were never seeded (host: scripts/profile.sh <profile> converge)"
 fi
 
 # --- deliberately-absent tools ----------------------------------------------
@@ -581,6 +599,115 @@ if [[ -f /etc/pip.conf ]]; then
     fi
   else
     fail "/etc/pip.conf does not set only-binary=:all: — pip will build sdists (Dockerfile 'Gate 3')"
+  fi
+fi
+
+# G10p: the PYTHON half of G10, and the reason work/0008 item 1 exists. Gate 2's
+# project-level override was defended in three places (here, with-egress.sh's
+# scan_workspace_rc, depaudit's N03); Gate 3's was defended in none. The
+# asymmetry was accidental, not decided.
+#
+# What it catches: a repo under /workspace carrying `no-build = false` (uv.toml
+# or [tool.uv]) or a pip.conf without `only-binary = :all:`. Either restores
+# source builds for that project — an sdist runs setup.py / a PEP-517 backend at
+# INSTALL time, which is the Python analogue of the npm lifecycle script this
+# image already blocks (ADR-0004). The system-file and behavioural probes above
+# say nothing about it: they assert the IMAGE default, and a project override is
+# precisely what beats an image default.
+#
+# WARN, never FAIL — same standing as G10. The workspace is the user's own repo
+# and may have a considered reason; this reports, the human decides. Silence on
+# a project that declares nothing is the wanted state (the N03 lesson: a check
+# that fires on every healthy repo is furniture).
+#
+gate3_scan_file() {
+  python3 - "$1" <<'PY'
+import configparser, os, sys, tomllib
+
+path = sys.argv[1]
+name = os.path.basename(path)
+out = []
+
+def emit(key, val, cls):
+    out.append("%s=%s\t%s" % (key, val, cls))
+
+try:
+    if name == "pip.conf":
+        cp = configparser.ConfigParser(strict=False)
+        cp.read(path)
+        only_binary = no_binary = None
+        for sect in cp.sections():
+            if cp.has_option(sect, "only-binary"):
+                only_binary = (cp.get(sect, "only-binary") or "").strip()
+            if cp.has_option(sect, "no-binary"):
+                no_binary = (cp.get(sect, "no-binary") or "").strip()
+        # A pip.conf in the tree REPLACES /etc/pip.conf wherever it is in
+        # effect (PIP_CONFIG_FILE, a CI step, a tox env) rather than merging
+        # with it, so the wheels-only default is simply absent there. pip does
+        # not read it from the CWD on its own — which is exactly why this
+        # reports and never blocks.
+        if only_binary is None:
+            emit("only-binary", "<unset>", "OFF")
+        elif only_binary == ":all:":
+            emit("only-binary", only_binary, "OK")
+        else:
+            emit("only-binary", only_binary, "WEAKER")
+        if no_binary:
+            emit("no-binary", no_binary, "WEAKER")
+    else:
+        with open(path, "rb") as fh:
+            data = tomllib.load(fh)
+        table = data if name == "uv.toml" else (data.get("tool") or {}).get("uv") or {}
+        if not isinstance(table, dict):
+            table = {}
+        if "no-build" in table:
+            v = table["no-build"]
+            if v is False:
+                emit("no-build", "false", "OFF")
+            elif v is True:
+                emit("no-build", "true", "OK")
+            else:
+                emit("no-build", str(v), "UNPARSED")
+except (OSError, tomllib.TOMLDecodeError, configparser.Error, UnicodeDecodeError) as e:
+    emit("parse", type(e).__name__, "UNPARSED")
+
+for row in out:
+    print(row)
+PY
+}
+
+if [[ -d /workspace ]]; then
+  if command -v python3 >/dev/null 2>&1; then
+    g3_off=""; g3_weaker=""; g3_unparsed=""; g3_ok=0
+    while IFS= read -r g3f; do
+      while IFS=$'\t' read -r g3kv g3cls; do
+        [[ -n "$g3kv" ]] || continue
+        g3label="${g3f#/workspace/} [$g3kv]"
+        case "$g3cls" in
+          OFF)      g3_off="${g3_off}${g3label}  " ;;
+          WEAKER)   g3_weaker="${g3_weaker}${g3label}  " ;;
+          UNPARSED) g3_unparsed="${g3_unparsed}${g3label}  " ;;
+          *)        g3_ok=$(( g3_ok + 1 )) ;;
+        esac
+      done < <(gate3_scan_file "$g3f" 2>/dev/null)
+    done < <(find /workspace -maxdepth 4 \
+               \( -name uv.toml -o -name pyproject.toml -o -name pip.conf \) \
+               -not -path '*/node_modules/*' -not -path '*/.venv/*' \
+               -not -path '*/.venv-*/*' -not -path '*/site-packages/*' \
+               -not -path '*/.git/*' 2>/dev/null)
+
+    [[ -n "$g3_off" ]] && warn "project config OPTS OUT of wheels-only (project > /etc/uv/uv.toml, /etc/pip.conf): $g3_off— installs there build from source, running setup.py at install time (ADR-0004)"
+    [[ -n "$g3_weaker" ]] && warn "project config exempts package(s) from wheels-only: $g3_weaker— each exemption builds from source; confirm the reason is recorded"
+    [[ -n "$g3_unparsed" ]] && warn "project config could not be parsed, so its wheels-only stance is UNKNOWN (never read an unknown as a pass): $g3_unparsed"
+    if [[ -z "$g3_off$g3_weaker$g3_unparsed" ]]; then
+      if (( g3_ok > 0 )); then
+        pass "$g3_ok project wheels-only setting(s) under /workspace match the image default"
+      else
+        pass "no project uv.toml / pyproject.toml / pip.conf under /workspace overrides wheels-only"
+      fi
+    fi
+  else
+    warn "python3 absent — cannot check /workspace for project-level wheels-only opt-outs (G10p)"
   fi
 fi
 

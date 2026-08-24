@@ -145,7 +145,8 @@ test-offline:
     bash {{justfile_directory()}}/scripts/profile-skills.test.sh
     bash {{justfile_directory()}}/scripts/vendor-tools.test.sh
     bash {{justfile_directory()}}/scripts/agent-notice.test.sh
-    bash {{justfile_directory()}}/scripts/antigravity-parity.test.sh
+    bash {{justfile_directory()}}/scripts/agent-policy.test.sh
+    bash {{justfile_directory()}}/scripts/private-names-check.sh
     @just --justfile {{justfile()}} check-upstreams
 
 # build-layer ordering tripwire (Dockerfile only; see the header for why the
@@ -172,26 +173,30 @@ db profile *args:
 db-reset profile *args:
     {{profile_sh}} {{profile}} db-reset {{args}}
 
-# overwrite this profile's claude settings.json from sandbox_templates/claude/ (backs up old)
-reset-settings profile:
-    {{profile_sh}} {{profile}} reset-settings
-
-# converge this profile's claude skills to sandbox_templates/skills/ (no backups, ADR-0005)
-reset-skills profile:
-    {{profile_sh}} {{profile}} reset-skills
-
-# hooks.json replaced; permissions MERGED into agy's settings.json (ADR-0006) so
-# colorScheme/model/trustedWorkspaces survive — never an overwrite of that file
-# converge this profile's antigravity (agy) policy to sandbox_templates/antigravity/
-reset-antigravity profile:
-    {{profile_sh}} {{profile}} reset-antigravity
+# re-run everything `up` seeds, touching NO container: every agent's policy, the
+# skills tree, the agent-notice. Replaces reset-settings / reset-skills /
+# reset-antigravity, removed 2026-08-24 (work/0011, ADR-0007) with no aliases —
+# three near-identical commands with three different write semantics is what let
+# the Claude policy lag its template. Claude's settings.json is OVERWRITTEN from
+# the template (non-owned keys captured to claude-home/settings.discarded.json
+# first); agy's is MERGED on permissions/toolPermission so colorScheme, model and
+# trustedWorkspaces survive; agy's hooks.json is replaced. Restart the agent in
+# the container afterwards — converging under a live session races it.
+#
+# Claude's four PRESERVED keys — skipAutoPermissionPrompt, model, effortLevel,
+# agentPushNotifEnabled — keep whatever the live file holds, or take the
+# template default when it holds nothing (a fresh profile). Accepts --defaults
+# to reset those four to the template defaults instead, capturing the replaced
+# values to settings.discarded.json.
+converge profile *args:
+    {{profile_sh}} {{profile}} converge {{args}}
 
 # ---- vendored payload refresh (host-side, no profile arg) -------------------
 #
 # Developer actions, NOT lifecycle: they pull material from a sibling checkout
 # into this build context. Never run during a build or `up`. Seeding converges
 # (ADR-0005), so a synced skill reaches a live profile on its next `up` — or now,
-# via `just reset-skills <profile>`. A vendored WHEEL is different: it is baked
+# via `just converge <profile>`. A vendored WHEEL is different: it is baked
 # into the image, so it needs `just build` and then a recreate.
 
 # ---- boundary monitors ------------------------------------------------------

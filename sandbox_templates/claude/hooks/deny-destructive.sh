@@ -226,7 +226,7 @@ case "$tool_name" in
       /root/.gemini/config/hooks.json|/root/.gemini/antigravity-cli/settings.json)
         # The two files that ARE the antigravity policy: the hook registration
         # and the static permissions.allow/deny/ask list.
-        emit_block "hook-tamper" "edit to the live antigravity policy ($rp) is denied; ask the user to run 'profile.sh <p> reset-antigravity'" ;;
+        emit_block "hook-tamper" "edit to the live antigravity policy ($rp) is denied; ask the user to run 'profile.sh <p> converge' on the host" ;;
       */.agents/hooks.json|*/.agent/hooks.json|*/_agents/hooks.json|*/_agent/hooks.json)
         # MEASURED BYPASS, not a hypothetical (work/0010 Phase 0, test G).
         # agy discovers workspace customizations under these four directory

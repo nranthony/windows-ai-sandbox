@@ -25,9 +25,46 @@ REQUIRED_HOOKS = [
     {"matcher": "Edit|Write|MultiEdit", "command_endswith": "deny-destructive.sh"},
 ]
 
-# Documented user-customization fields seeded after first `up` and intentionally
-# not template-mirrored. Strip before diffing.
-USER_CUSTOMIZATION_KEYS = {"theme", "model", "effortLevel"}
+# Keys Claude Code writes back into its own settings.json during ordinary use.
+# They are not template-mirrored, so they are stripped before the diff.
+#
+# THIS SET IS OPEN-ENDED AND GROWS WITH RELEASES, and it has already gone stale
+# once: it listed three of the six keys observed across the live profiles, so
+# `template_diff` reported DRIFT on all three of them on 2026-08-24 over
+# `agentPushNotifEnabled` alone — a false alarm that would have been trained
+# away long before a real one arrived. Enumerating what the AGENT writes is
+# guesswork against an upstream we do not control; enumerating what the SANDBOX
+# OWNS is a closed set we do. The host-side convergence (work/0011,
+# `converge_agent_policy`) is authoritative for that ownership — env, hooks,
+# permissions, sandbox — and it captures anything else it drops to
+# claude-home/settings.discarded.json, which is where a genuinely new key
+# surfaces now. Keep this list in step with that capture rather than adding to
+# it reactively.
+#
+# Observed 2026-08-24 across all three live profiles and their settings
+# backups: model, effortLevel, agentPushNotifEnabled live; theme,
+# skipWorkflowUsageWarning, skipAutoPermissionPrompt in backups. `statusLine` is
+# documented as settable in any file and is included pre-emptively.
+#
+# FOUR of these are on the convergence PRESERVE list as of 2026-08-24 (owner
+# decision, work/0011 F6): skipAutoPermissionPrompt, model, effortLevel,
+# agentPushNotifEnabled. A live value survives converge, and for the latter
+# three the template now carries a DEFAULT that seeds a profile lacking one.
+# That means the template and the live file can legitimately hold DIFFERENT
+# values for the same key, which is precisely what this diff must not report.
+# So the strip is applied to BOTH sides below, not just to `live`: stripping
+# only the live copy would leave the template's "model": "opus" facing nothing
+# and report DRIFT on every profile where the operator picked a different model
+# — a false alarm on the ordinary case, which is how a check gets trained away.
+USER_CUSTOMIZATION_KEYS = {
+    "theme",
+    "model",
+    "effortLevel",
+    "agentPushNotifEnabled",
+    "skipWorkflowUsageWarning",
+    "skipAutoPermissionPrompt",
+    "statusLine",
+}
 
 
 def _strip_doc_keys(obj):
@@ -162,7 +199,10 @@ def run():
     # Live vs. template diff.
     if os.path.isfile(TEMPLATE):
         try:
-            template = _strip_doc_keys(json.load(open(TEMPLATE)))
+            template = _strip_doc_keys({
+                k: v for k, v in json.load(open(TEMPLATE)).items()
+                if k not in USER_CUSTOMIZATION_KEYS
+            })
             live_filtered = _strip_doc_keys({
                 k: v for k, v in live.items()
                 if k not in USER_CUSTOMIZATION_KEYS

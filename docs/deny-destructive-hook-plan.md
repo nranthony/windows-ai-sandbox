@@ -26,9 +26,11 @@ What's pending (after this port lands):
 
 - `scripts/profile.sh build` — rebuild base image with the hook baked in.
 - `scripts/profile.sh <p> rebuild` — per running profile, picks up new image.
-- `scripts/profile.sh <p> reset-settings` — re-seed live `settings.json`
-  with the new `hooks` block. `init-profile-state.sh` only seeds settings
-  on first up; existing profiles need explicit re-seed.
+- live `settings.json` picks up the new `hooks` block on the next `up`, or
+  immediately via `scripts/profile.sh <p> converge` — the policy file converges
+  from the template now ([ADR-0007](adr/0007-policy-templates-are-source-of-truth-for-every-agent.md)).
+  It used to be seeded create-only, which is why this step once read
+  "existing profiles need explicit re-seed".
 - End-to-end smoke: ask the agent to `find /tmp/<sentinel> -delete` against
   a sentinel — confirm block reason in transcript; sentinel survives.
 
