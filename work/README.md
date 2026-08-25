@@ -36,6 +36,8 @@ weeks after their content went stale.
 | [0003](0003-repo-scan-audit/plan.md) | Repo scan — audit + housekeeping | Refreshed 2026-08-24, shelved; execute after the branch merges |
 | [0009](0009-the-third-cli-runs-on-bun/spec.md) | opencode as the third in-container CLI (OpenRouter provider) — its runtime is Bun, so unparking is a RECONCILIATION with the existing bun deny surface | **Parked** — corrections folded 2026-08-24; Phase 0 measurement on unparking |
 | [0012](0012-numerai-profile-enablement/spec.md) | Numerai profile enablement — egress done; credentials + MCP wiring remain | **Parked** — two decision gates (§3) go to the owner before implementing |
+| [0013](0013-lan-access-to-in-container-agents/spec.md) | Reaching an in-container agent from a second device on the LAN — the source note's `claude serve --port` mechanism does not exist; ACP is stdio, so the honest transport is SSH, not a published port. Buzz now assessed (§3.5): its harness dials the relay OUTBOUND, so it moots the listener question — but the agent under it runs with none of this repo's tool-level guardrails | **Parked** — decision gates in §5 (D1a/D1b/D2); D1a may close the LAN half with no code |
+| [0014](0014-bump-base-image-to-cuda-12.9.1/spec.md) | Bump the shared image base from CUDA 12.6.3 to 12.9.1 (still 12.x, not 13) — the 12.6.3 tag hasn't rebuilt upstream, so its CVE set only clears by bumping the pin | **Parked** — two decision gates (§3); full image rebuild + GPU re-verify on pickup |
 
 Exited 2026-08-24, all merged the same day (the batch verified by the nine
 per-item audits and implemented on `feat/0010-antigravity-guardrails`):

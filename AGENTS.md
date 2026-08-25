@@ -342,7 +342,7 @@ and cannot be diffed or restored selectively. Back up the source dir or volume.
 
 This repo is **public**; real profile names double as real client/project
 names. The standard is **searchable, not "present at all"**
-([work/0007-genericise-public-identifiers](work/0007-genericise-public-identifiers/spec.md)):
+([0007-genericise-public-identifiers](docs/_archive/0007-genericise-public-identifiers-spec.md), archived on merge):
 high-visibility surfaces — README, ARCHITECTURE, this file, `justfile`,
 `scripts/`, `sandbox_templates/`, `docs/index.md`, `docker-compose*.yml`,
 `Dockerfile`, `seccomp.json`, `proxy/` — must carry no client name,

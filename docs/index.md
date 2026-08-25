@@ -14,6 +14,8 @@ right: an **RFC** proposes → an **ADR** records → **work/** implements → t
   - [ADR-0005](adr/0005-skill-templates-are-source-of-truth.md) — skill templates are the source of truth; profile copies converge on `up` and keep no backups *(Accepted 08-10)*
   - [ADR-0006](adr/0006-antigravity-is-two-layer-like-claude.md) — `agy` carries the same two layers as Claude; the STATIC deny list is the load-bearing one *(Accepted 08-22)*
   - [ADR-0007](adr/0007-policy-templates-are-source-of-truth-for-every-agent.md) — policy templates are the source of truth for EVERY agent; one converge, per-agent overwrite/merge *(Accepted 08-24, supersedes ADR-0005)*
+  - [ADR-0008](adr/0008-deletion-is-a-human-step.md) — deletion is a human step: the shared hook engine has three tiers, and the `ask` tier is dialect-branched (claude `ask`, `agy` `force_ask`) *(Accepted 08-25)*
+  - [ADR-0009](adr/0009-public-repo-names-are-searchable-not-absent.md) — public-repo client names: the standard is SEARCHABLE, not "present at all"; archived narrative, evidence-bearing uses and git history are kept *(Accepted 08-25)*
 - [docs/rfcs/](rfcs/) — proposals, with their resolution ([TEMPLATE.md](rfcs/TEMPLATE.md))
   - [DEPENDENCY_GUARDRAILS.md](rfcs/DEPENDENCY_GUARDRAILS.md) — slopsquatting threat + agent behavioural rules — **shipped**, phase 0
   - [01-posture-scanner-plan.md](rfcs/01-posture-scanner-plan.md) — `depaudit` posture/inventory scanner — **built in part** as `scripts/depaudit.py`
@@ -22,7 +24,12 @@ right: an **RFC** proposes → an **ADR** records → **work/** implements → t
   - [05-deps-repo-filter.md](rfcs/05-deps-repo-filter.md) — `--repo <name>` for `profile.sh deps`, to scan one repo instead of the whole workspace — **draft, not implemented** *(2026-08-06)*
 - [work/](../work/) — in-flight items, deleted or archived on merge ([README](../work/README.md))
   - 0001-dependency-guardrails — **complete (T00–T26), archived 2026-08-03**; live record is the [handoff](dependency-guardrails-handoff.md), plan preserved at [_archive/](_archive/dependency-guardrails-plan.md)
-  - [0003-repo-scan-audit](../work/0003-repo-scan-audit/plan.md) — audit + housekeeping scan
+  - [0003-repo-scan-audit](../work/0003-repo-scan-audit/plan.md) — audit + housekeeping scan; refreshed 2026-08-24, **shelved**
+  - [0009-the-third-cli-runs-on-bun](../work/0009-the-third-cli-runs-on-bun/spec.md) — opencode as a third in-container CLI; **parked**, unparking is a reconciliation with the bun deny surface
+  - [0012-numerai-profile-enablement](../work/0012-numerai-profile-enablement/spec.md) — credentials + MCP wiring for the numerai workspace; **parked** behind two owner gates
+  - [0013-lan-access-to-in-container-agents](../work/0013-lan-access-to-in-container-agents/spec.md) — reaching an in-container agent from another device; SSH + `attach` is the answer unless a graphical client is wanted; carries the Buzz fit assessment (§3.5); **parked**, owner to revisit
+  - [0014-bump-base-image-to-cuda-12.9.1](../work/0014-bump-base-image-to-cuda-12.9.1/spec.md) — base image 12.6.3 → 12.9.1 (not 13); **parked** behind two gates, full rebuild + GPU re-verify on pickup
+  - 0004, 0006, 0007, 0008, 0010, 0011 — merged 2026-08-24, archived to [_archive/](_archive/) (listed below); 0002 closed without implementation, folder deleted
 - [docs/incoming/](incoming/) — raw unprocessed input, **unverified** ([README](incoming/README.md))
 
 ## Architecture & Security
@@ -113,6 +120,13 @@ Superseded or exploratory documents in [`_archive/`](_archive/):
 - [claude_internal_audit_wsl.md](_archive/claude_internal_audit_wsl.md) — manual audit prompt, superseded by tier-2 probes + tier-3 skill
 - [agent_repo_conventions_advice.md](_archive/agent_repo_conventions_advice.md) — agent-native repo conventions proposal, implemented 2026-07-04 (AGENTS.md, .agents/skills/, sandbox_templates/)
 - [IN_TRANSIT_agent-native-migration.md](_archive/IN_TRANSIT_agent-native-migration.md) — execution plan distilled from the above; all 8 steps landed 2026-07-04, archived from the repo root 2026-07-31
+- [cross-repo-skill-pipeline-notes.md](_archive/cross-repo-skill-pipeline-notes.md) — `work/0005` execution log, archived 2026-08-18; its durable rule (*the detector belongs on the side that owns the stale copy; a skip is not a pass*) lives in AGENTS.md "Boundary monitors"
+- [0004-deletion-is-a-human-step-plan.md](_archive/0004-deletion-is-a-human-step-plan.md) — the hook's third tier (`ask` / agy `force_ask`), merged 2026-08-24; carries the headless-ask measurements that AGENTS.md summarises
+- [0006-manifest-keys-plan.md](_archive/0006-manifest-keys-plan.md) / [-notes.md](_archive/0006-manifest-keys-notes.md) — `manifest_flat` Option B (unrepresentable TOML values reported on stderr, never dropped), merged 2026-08-24
+- [0007-genericise-public-identifiers-spec.md](_archive/0007-genericise-public-identifiers-spec.md) — the **searchable, not present-at-all** standard for client names in this public repo and the scope decision behind `scripts/private-names-check.sh`; merged 2026-08-24
+- [0008-python-half-of-the-gates-plan.md](_archive/0008-python-half-of-the-gates-plan.md) — Gate 3 opt-out detection (P01 / G10p), the `UV_EXCLUDE_NEWER` window, `deps --vulns`; merged 2026-08-24
+- [0010-antigravity-guardrails-spec.md](_archive/0010-antigravity-guardrails-spec.md) / [-plan.md](_archive/0010-antigravity-guardrails-plan.md) — the `agy` policy work whose durable record is [ADR-0006](adr/0006-antigravity-is-two-layer-like-claude.md); the plan carries the Phase 0 measurements
+- [0011-policy-convergence-spec.md](_archive/0011-policy-convergence-spec.md) / [-plan.md](_archive/0011-policy-convergence-plan.md) — one policy convergence for every agent, durable record [ADR-0007](adr/0007-policy-templates-are-source-of-truth-for-every-agent.md); the plan carries the F1–F6 findings and the preserve-list decision
 - [dependency-guardrails-plan.md](_archive/dependency-guardrails-plan.md) — the `work/0001` implementation plan; all phases (T00–T26) merged 2026-08-03, archived per its own exit rule. Superseded by [dependency-guardrails-handoff.md](dependency-guardrails-handoff.md), which carries what shipped, what remains, and the defect log
 - [post_gpt5-6-sol_sandbox_break_ai_security_checklist_01.md](_archive/post_gpt5-6-sol_sandbox_break_ai_security_checklist_01.md) — third-party self-audit *prompt* (unverified, written without tree access). Same genre as `claude_internal_audit_wsl.md` and superseded the same way: tier-2 probes + the tier-3 audit skill. Its package/egress sections restate ADR-0003/0004 and the Gate 2/3 layers
 - [post_gpt5-6-sol_sandbox_break_ai_security_checklist_02.md](_archive/post_gpt5-6-sol_sandbox_break_ai_security_checklist_02.md) — terser sibling of the above. Its five **host-trust** sections (D/E/F/I/J) were the only genuinely new material in the incoming set and are folded into [RFC-04 §8](rfcs/04-portable-guardrails-outside-sandbox.md); the rest restated existing controls

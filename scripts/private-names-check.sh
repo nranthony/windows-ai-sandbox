@@ -8,8 +8,8 @@
 # shipped templates, compose/Dockerfile/seccomp) must carry no client names,
 # case-insensitive. Archived narrative, work items, RFCs, and evidence-bearing
 # uses (proxy/allowed_domains.txt's provenance comments, where the name IS the
-# checkable evidence) are deliberately OUT of scope — see work/0007/spec.md's
-# scope decision. No git-history rewriting either; this is a going-forward gate.
+# checkable evidence) are deliberately OUT of scope — see the scope decision in
+# docs/_archive/0007-genericise-public-identifiers-spec.md (work/0007, archived). No git-history rewriting either; this is a going-forward gate.
 #
 # The name list itself must NOT live in the tracked tree — that would
 # re-introduce exactly what this checks for. Following the repo's existing
@@ -30,7 +30,8 @@
 #   docker-compose*.yml Dockerfile seccomp.json
 #   proxy/ EXCEPT proxy/allowed_domains.txt, whose provenance comments name a
 #   workspace ID's owning account and are the deliberate keep documented in
-#   work/0007/spec.md — the name there is the evidence, not a leak.
+#   docs/_archive/0007-genericise-public-identifiers-spec.md — the name there
+#   is the evidence, not a leak.
 # =============================================================================
 set -euo pipefail
 
