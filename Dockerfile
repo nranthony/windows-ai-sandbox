@@ -59,6 +59,13 @@ RUN apt-get update \
       postgresql-client \
       tesseract-ocr poppler-utils \
       zsh lsd fontconfig locales lsof \
+ # CVE-2026-45447 (openssl/libssl3t64): the FROM digest pin above has not
+ # been rebuilt upstream, so re-pulling it fetches identical bytes and
+ # cannot clear the finding. This upgrades exactly the two flagged packages
+ # while leaving the base digest — and its reproducibility — untouched.
+ # Drop the matching .trivyignore.yaml entry (expires 2026-08-31) once a
+ # rebuilt base image scans clean on its own.
+ && apt-get install -y --only-upgrade openssl libssl3t64 \
  && apt-get purge -y openssh-client \
  && if dpkg -l openssh-client 2>/dev/null | awk '/^ii/{found=1} END{exit !found}'; then \
       echo "FATAL: openssh-client still installed after purge — invariant violated" >&2; \
