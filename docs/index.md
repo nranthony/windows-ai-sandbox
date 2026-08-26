@@ -3,8 +3,10 @@
 ## Provenance tiers
 
 Adopted 2026-07-31 ([ADR-0001](adr/0001-provenance-tiers.md)). The chain reads left to
-right: an **RFC** proposes → an **ADR** records → **work/** implements → the commit
-(citing the ADR) is the outcome.
+right: a **`work/NNNN-slug/spec.md` proposal** → an **ADR** records → **work/** implements
+→ the commit (citing the ADR) is the outcome. The separate `docs/rfcs/` tier closed
+2026-08-25 — [ADR-0010](adr/0010-one-proposal-home-close-the-rfc-tier.md) — in favour of
+this one proposal home; its five files are kept, unrenumbered, in `docs/_archive/`.
 
 - [docs/adr/](adr/) — decisions and their rationale. Append-only.
   - [ADR-0001](adr/0001-provenance-tiers.md) — adopt these tiers *(Accepted)*
@@ -16,21 +18,16 @@ right: an **RFC** proposes → an **ADR** records → **work/** implements → t
   - [ADR-0007](adr/0007-policy-templates-are-source-of-truth-for-every-agent.md) — policy templates are the source of truth for EVERY agent; one converge, per-agent overwrite/merge *(Accepted 08-24, supersedes ADR-0005)*
   - [ADR-0008](adr/0008-deletion-is-a-human-step.md) — deletion is a human step: the shared hook engine has three tiers, and the `ask` tier is dialect-branched (claude `ask`, `agy` `force_ask`) *(Accepted 08-25)*
   - [ADR-0009](adr/0009-public-repo-names-are-searchable-not-absent.md) — public-repo client names: the standard is SEARCHABLE, not "present at all"; archived narrative, evidence-bearing uses and git history are kept *(Accepted 08-25)*
-- [docs/rfcs/](rfcs/) — proposals, with their resolution ([TEMPLATE.md](rfcs/TEMPLATE.md))
-  - [DEPENDENCY_GUARDRAILS.md](rfcs/DEPENDENCY_GUARDRAILS.md) — slopsquatting threat + agent behavioural rules — **shipped**, phase 0
-  - [01-posture-scanner-plan.md](rfcs/01-posture-scanner-plan.md) — `depaudit` posture/inventory scanner — **built in part** as `scripts/depaudit.py`
-  - [02-layered-gates-plan.md](rfcs/02-layered-gates-plan.md) — `depgate`, five-gate model — **rejected as a system → ADR-0002**; the gate model is retained as vocabulary
-  - [04-portable-guardrails-outside-sandbox.md](rfcs/04-portable-guardrails-outside-sandbox.md) — what applies on the host, outside the egress boundary — **partially applied, unowned**
-  - [05-deps-repo-filter.md](rfcs/05-deps-repo-filter.md) — `--repo <name>` for `profile.sh deps`, to scan one repo instead of the whole workspace — **draft, not implemented** *(2026-08-06)*
-- [work/](../work/) — in-flight items, deleted or archived on merge ([README](../work/README.md))
+  - [ADR-0010](adr/0010-one-proposal-home-close-the-rfc-tier.md) — one proposal home: `docs/rfcs/` is closed, new proposals are `work/NNNN-slug/spec.md`, the exit rule tightens to archived-not-deleted *(Accepted 08-25)*
+- [work/](../work/) — in-flight items AND new proposals, archived on merge ([README](../work/README.md), [ADR-0010](adr/0010-one-proposal-home-close-the-rfc-tier.md))
   - 0001-dependency-guardrails — **complete (T00–T26), archived 2026-08-03**; live record is the [handoff](dependency-guardrails-handoff.md), plan preserved at [_archive/](_archive/dependency-guardrails-plan.md)
   - [0003-repo-scan-audit](../work/0003-repo-scan-audit/plan.md) — audit + housekeeping scan; refreshed 2026-08-24, **shelved**
   - [0009-the-third-cli-runs-on-bun](../work/0009-the-third-cli-runs-on-bun/spec.md) — opencode as a third in-container CLI; **parked**, unparking is a reconciliation with the bun deny surface
   - [0012-numerai-profile-enablement](../work/0012-numerai-profile-enablement/spec.md) — credentials + MCP wiring for the numerai workspace; **parked** behind two owner gates
   - [0013-lan-access-to-in-container-agents](../work/0013-lan-access-to-in-container-agents/spec.md) — reaching an in-container agent from another device; SSH + `attach` is the answer unless a graphical client is wanted; carries the Buzz fit assessment (§3.5); **parked**, owner to revisit
   - [0014-bump-base-image-to-cuda-12.9.1](../work/0014-bump-base-image-to-cuda-12.9.1/spec.md) — base image 12.6.3 → 12.9.1 (not 13); **parked** behind two gates, full rebuild + GPU re-verify on pickup
-  - 0004, 0006, 0007, 0008, 0010, 0011 — merged 2026-08-24, archived to [_archive/](_archive/) (listed below); 0002 closed without implementation, folder deleted
-- [docs/incoming/](incoming/) — raw unprocessed input, **unverified** ([README](incoming/README.md))
+  - 0004, 0006, 0007, 0008, 0010, 0011 — merged 2026-08-24, archived to [_archive/](_archive/) (listed below); 0002 closed without implementation, restored 2026-08-25 to [_archive/](_archive/0002-host-side-skill-slot-plan.md)
+- [docs/incoming/](incoming/) — raw unprocessed input, **unverified** ([README](incoming/README.md)); graduates to `work/`
 
 ## Architecture & Security
 
@@ -129,5 +126,13 @@ Superseded or exploratory documents in [`_archive/`](_archive/):
 - [0011-policy-convergence-spec.md](_archive/0011-policy-convergence-spec.md) / [-plan.md](_archive/0011-policy-convergence-plan.md) — one policy convergence for every agent, durable record [ADR-0007](adr/0007-policy-templates-are-source-of-truth-for-every-agent.md); the plan carries the F1–F6 findings and the preserve-list decision
 - [dependency-guardrails-plan.md](_archive/dependency-guardrails-plan.md) — the `work/0001` implementation plan; all phases (T00–T26) merged 2026-08-03, archived per its own exit rule. Superseded by [dependency-guardrails-handoff.md](dependency-guardrails-handoff.md), which carries what shipped, what remains, and the defect log
 - [post_gpt5-6-sol_sandbox_break_ai_security_checklist_01.md](_archive/post_gpt5-6-sol_sandbox_break_ai_security_checklist_01.md) — third-party self-audit *prompt* (unverified, written without tree access). Same genre as `claude_internal_audit_wsl.md` and superseded the same way: tier-2 probes + the tier-3 audit skill. Its package/egress sections restate ADR-0003/0004 and the Gate 2/3 layers
-- [post_gpt5-6-sol_sandbox_break_ai_security_checklist_02.md](_archive/post_gpt5-6-sol_sandbox_break_ai_security_checklist_02.md) — terser sibling of the above. Its five **host-trust** sections (D/E/F/I/J) were the only genuinely new material in the incoming set and are folded into [RFC-04 §8](rfcs/04-portable-guardrails-outside-sandbox.md); the rest restated existing controls
+- [post_gpt5-6-sol_sandbox_break_ai_security_checklist_02.md](_archive/post_gpt5-6-sol_sandbox_break_ai_security_checklist_02.md) — terser sibling of the above. Its five **host-trust** sections (D/E/F/I/J) were the only genuinely new material in the incoming set and are folded into [RFC-04 §8](_archive/04-portable-guardrails-outside-sandbox.md); the rest restated existing controls
 - [securing_agentic_coding_environments_gemini_deep_research.md](_archive/securing_agentic_coding_environments_gemini_deep_research.md) — outside model's architecture research (MicroVMs/Firecracker, SPIFFE, eBPF Falco/Tetragon). Not proceeding, per the `PODMAN_MIGRATION_PLAN_gemini.md` precedent: these are enterprise-fleet controls for a single workstation, and its recommendation 5 (rootless Docker, Colima on macOS, VS Code socket hygiene) is already the shipped posture. Its one unexamined idea — a shared package cache as the high-value target — was extracted to the handoff's §6 watch item before archiving
+- [0002-host-side-skill-slot-plan.md](_archive/0002-host-side-skill-slot-plan.md) — closed 2026-08-24 without implementation (host-side planning stays container-only); folder deleted in `151cebf`, restored 2026-08-25 to `docs/_archive/` per [ADR-0010](adr/0010-one-proposal-home-close-the-rfc-tier.md)'s tightened exit rule
+- **`docs/rfcs/` (closed 2026-08-25, [ADR-0010](adr/0010-one-proposal-home-close-the-rfc-tier.md))** — all five files kept, unrenumbered:
+  [DEPENDENCY_GUARDRAILS.md](_archive/DEPENDENCY_GUARDRAILS.md) (slopsquatting threat + agent behavioural rules — shipped, phase 0),
+  [01-posture-scanner-plan.md](_archive/01-posture-scanner-plan.md) (`depaudit` — built in part as `scripts/depaudit.py`),
+  [02-layered-gates-plan.md](_archive/02-layered-gates-plan.md) (`depgate`, five-gate model — rejected as a system → ADR-0002; the gate model is retained as vocabulary),
+  [04-portable-guardrails-outside-sandbox.md](_archive/04-portable-guardrails-outside-sandbox.md) (host-side subset — partially applied, unowned),
+  [05-deps-repo-filter.md](_archive/05-deps-repo-filter.md) (`--repo` filter for `profile.sh deps` — **Rejected** with the tier, draft was never implemented),
+  [TEMPLATE.md](_archive/TEMPLATE.md) (the RFC status-header template)

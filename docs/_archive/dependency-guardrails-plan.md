@@ -17,11 +17,11 @@ Prerequisites T00/T01 discharged — see §0.1.
 **Exit rule (discharged):** archive to `docs/_archive/` when T22 merges — see §13.1.
 **Owner decision gate:** §13. Five decisions need an answer; four of them only block later phases.
 
-**Inputs (RFC tier):**
-[`01-posture-scanner-plan.md`](../../docs/rfcs/01-posture-scanner-plan.md) (`depaudit`) ·
-[`02-layered-gates-plan.md`](../../docs/rfcs/02-layered-gates-plan.md) (`depgate`) ·
-[`DEPENDENCY_GUARDRAILS.md`](../../docs/rfcs/DEPENDENCY_GUARDRAILS.md) ·
-[`04-portable-guardrails-outside-sandbox.md`](../../docs/rfcs/04-portable-guardrails-outside-sandbox.md)
+**Inputs (RFC tier, `docs/rfcs/` closed 2026-08-25 per ADR-0010, kept unrenumbered in `docs/_archive/`):**
+[`01-posture-scanner-plan.md`](01-posture-scanner-plan.md) (`depaudit`) ·
+[`02-layered-gates-plan.md`](02-layered-gates-plan.md) (`depgate`) ·
+[`DEPENDENCY_GUARDRAILS.md`](DEPENDENCY_GUARDRAILS.md) ·
+[`04-portable-guardrails-outside-sandbox.md`](04-portable-guardrails-outside-sandbox.md)
 (the host-side subset, out of scope here).
 Prose below refers to these as "plan 01", "plan 02", "plan 04".
 

@@ -6,7 +6,9 @@ against this repo, or accepted.**
 
 Scope narrowed 2026-07-31 — [ADR-0001](../adr/0001-provenance-tiers.md). This directory
 previously also held live proposals and an in-flight implementation plan; those graduated
-to [`docs/rfcs/`](../rfcs/) and [`work/`](../../work/).
+to `docs/rfcs/` and [`work/`](../../work/). The `docs/rfcs/` tier closed 2026-08-25 —
+[ADR-0010](../adr/0010-one-proposal-home-close-the-rfc-tier.md) — so graduation now targets
+`work/` alone.
 
 ## Exit rule
 
@@ -14,7 +16,7 @@ Material leaves this directory in one of three directions. Nothing is meant to s
 
 | Outcome | Destination |
 |---|---|
-| It becomes a proposal this repo is weighing | [`docs/rfcs/`](../rfcs/) — add the RFC status header |
+| It becomes a proposal this repo is weighing | [`work/NNNN-slug/spec.md`](../../work/README.md) — carry the `Draft → Accepted → ADR-NNNN \| Rejected` status header |
 | It is superseded, or turns out to say nothing new | [`docs/_archive/`](../_archive/) or delete |
 | It is verified fact about this system | fold into the relevant `docs/` page, delete the source |
 
@@ -38,7 +40,7 @@ post-incident checklists and the Gemini deep-research report all landed in
 [`docs/index.md`](../index.md) saying what superseded it). Before archiving, the
 two things in them that were **not** already covered were extracted — the
 host-trust sections became
-[RFC-04 §8](../rfcs/04-portable-guardrails-outside-sandbox.md), and the
+[RFC-04 §8](../_archive/04-portable-guardrails-outside-sandbox.md), and the
 shared-package-cache question became a watch item in
 [the dependency-guardrails handoff](../dependency-guardrails-handoff.md) §6.
 

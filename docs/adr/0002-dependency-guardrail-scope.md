@@ -17,7 +17,7 @@ to disagree about a threshold, not before.
 
 ## Context
 
-Three imported design documents ([`docs/rfcs/`](../rfcs/)) propose a dependency-guardrail
+Three imported design documents ([`docs/rfcs/`, closed 2026-08-25, kept in `docs/_archive/`](../_archive/)) propose a dependency-guardrail
 system: a posture scanner (`depaudit`), a five-gate enforcement layer (`depgate`), and a
 portable host-side subset. They were written for an organisation with a fleet of repos and
 no containment.
@@ -66,7 +66,7 @@ tree including transitives from lockfiles, and `enrich` runs over every unique
 remaining timing gap by diffing the lockfile *inside* the install window. Adopting `sfw`
 would place a third-party binary that proxies every install inside the security boundary,
 requiring egress to a vendor service. It is the correct answer for a host with no window —
-see [plan 04](../rfcs/04-portable-guardrails-outside-sandbox.md) §6 — and the wrong one
+see [plan 04](../_archive/04-portable-guardrails-outside-sandbox.md) §6 — and the wrong one
 here.
 
 **Socket `batchPackageFetch`** (behavioural analysis, ~1k scans/month free). Genuinely

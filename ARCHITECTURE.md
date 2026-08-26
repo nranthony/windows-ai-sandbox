@@ -138,9 +138,8 @@ Deliberately NOT installed in the image: `bubblewrap`, `socat`,
 │   └── depaudit.test.sh          #   its regression suite — 27 offline / 28 --online
 ├── docs/                         # Design notes, permissions model, portability, debug recipes (index.md)
 │   ├── adr/                      #   Decisions — append-only, superseded not deleted (ADR-0001)
-│   ├── rfcs/                     #   Proposals: Draft → In review → Accepted → ADR-NNNN | Rejected
 │   └── incoming/                 #   Raw unprocessed input — triage out, don't accumulate
-├── work/                         # In-flight implementation plans — DELETED or archived on merge
+├── work/                         # In-flight implementation plans + proposals (spec.md) — ARCHIVED on merge (ADR-0010)
 ├── host_setup/                   # Rootless-Docker host setup (WSL2 or bare Linux; run once)
 ├── dashboard/                    # Host-side Streamlit control console (own AGENTS.md)
 ├── container_testing/            # CUDA/PyTorch smoke-test uv project (own AGENTS.md)

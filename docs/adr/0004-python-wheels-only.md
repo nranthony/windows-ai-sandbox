@@ -183,7 +183,7 @@ Gate 3 now has the same three layers:
   same standing as G10: the workspace is the user's own repo and may have a considered
   reason.
 - `depaudit` — **P01**, previously reserved and unimplemented in
-  [`docs/rfcs/01-posture-scanner-plan.md`](../rfcs/01-posture-scanner-plan.md) §4.2. FAIL for
+  [`docs/rfcs/01-posture-scanner-plan.md`](../_archive/01-posture-scanner-plan.md) §4.2. FAIL for
   an unexplained wholesale opt-out, WARN when a comment above it states the reason (N11's
   logic), WARN for pip's per-package `no-binary`.
 

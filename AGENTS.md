@@ -377,8 +377,8 @@ Before starting work, check `docs/adr/` for decisions constraining the area, and
 |---|---|
 | System map & boundaries | [ARCHITECTURE.md](ARCHITECTURE.md) |
 | Why a decision was made | [docs/adr/](docs/adr/) — append-only; supersede, never delete |
-| Proposals under discussion | [docs/rfcs/](docs/rfcs/) — `Draft → In review → Accepted → ADR-NNNN \| Rejected` |
-| What is in flight right now | [work/](work/) — `NNNN-slug/`, **deleted or archived on merge** |
+| Proposals under discussion | [work/](work/) — `NNNN-slug/spec.md`, `Draft → Accepted → ADR-NNNN \| Rejected` (`docs/rfcs/` closed 2026-08-25, [ADR-0010](docs/adr/0010-one-proposal-home-close-the-rfc-tier.md)) |
+| What is in flight right now | [work/](work/) — `NNNN-slug/`, **archived to `docs/_archive/` on merge** |
 | Raw unprocessed input | [docs/incoming/](docs/incoming/) — unverified; triage out, don't accumulate |
 | Superseded / completed docs | [docs/_archive/](docs/_archive/) |
 

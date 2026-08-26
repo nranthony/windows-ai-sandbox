@@ -3,6 +3,10 @@
 - Status: Accepted
 - Date: 2026-07-31
 - Deciders: nranthony + agent
+- Supersession note: [ADR-0010](0010-one-proposal-home-close-the-rfc-tier.md)
+  (2026-08-25) supersedes this ADR's `docs/rfcs/` bullet only — that tier is
+  closed. The ADR and `work/` tiers below stand as written; this ADR's Context
+  and Decision are otherwise unedited (append-only).
 
 ## Context
 

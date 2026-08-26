@@ -1,6 +1,8 @@
 # RFC: `--repo` filter for `profile.sh deps`
 
-- Status: Draft — **not implemented.** Written 2026-08-06 at the operator's request,
+- Status: Rejected — closed with the RFC tier 2026-08-25 (ADR-0010); revive as a
+  work/ item if wanted.
+- (Original) Draft — **not implemented.** Written 2026-08-06 at the operator's request,
   parked for a later session.
 - Author: agent, from a request by nranthony
 

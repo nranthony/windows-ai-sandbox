@@ -187,7 +187,7 @@ connection. Split deliberately:
 
 | ADR | Decision |
 |---|---|
-| **0001** | Adopt provenance tiers: `docs/adr/` (decisions, append-only), `docs/rfcs/` (proposals with a status lifecycle), `work/NNNN-slug/` (in-flight, **deleted or archived on merge**) |
+| **0001** | Adopt provenance tiers: `docs/adr/` (decisions, append-only), `docs/rfcs/` (proposals with a status lifecycle — closed 2026-08-25, see ADR-0010), `work/NNNN-slug/` (in-flight, **archived on merge**) |
 | **0002** | **What we deliberately do not build**: no Verdaccio/devpi inside the boundary, no Gate-1 HTTP service, no SARIF, no fleet mode, no Socket Firewall, no Socket API, no `osv-scanner` binary, no local OSV mirror. Each with a re-open condition |
 | **0003** | Registries unreachable by default; installs open a bounded window via `with-egress.sh` |
 | **0004** | Python installs are wheels-only; source builds opted into per project |
