@@ -73,6 +73,12 @@ reports `engine_force_asks_deletion` FAIL in tier 2 — rebuild first).
 Record the `agy` version (`agy --version`) with the result; a later `agy`
 release can change the answer.
 
+**Version now in the image, as of the 2026-08-26 `build --refresh-ai`:** `agy`
+**1.1.21**, `claude` **2.1.246**. The refresh happened while this item was open
+and moved the CLI the probe measures, so a result recorded against an earlier
+`agy` would not answer for what the profiles now run. Nothing else about the
+premise changed: rules 18/19 and both static allow entries are untouched.
+
 ## 3. If it HOLDS
 
 Nothing changes in the trees. Write the resolution note (§5) and archive this

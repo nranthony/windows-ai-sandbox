@@ -194,8 +194,12 @@ scripts/with-egress.sh <p> --with pypi,npm -- '<cmd>'
 ## Reviewed allow-list decision: `myclickup` reads yes, most writes prompt
 
 The image bakes `myclickup`, a CLI over the ClickUp REST API. **Surface as of
-0.6.0: 28 commands, 17 read and 11 write** — derived from the CLI's own parser
-on 2026-08-15, never transcribed. The paragraph that stood here until 2026-08-24
+0.7.0: 29 commands, 18 read and 11 write** — derived from the CLI's own parser
+by the channel's `bin/gen_allow.py` at publish time and read out of the channel
+`manifest.toml`, never transcribed. 0.7.0 added exactly one command, `docs`
+(a read-only ClickUp Docs surface, myclickup ADR-0016): every form of it is a
+read and writes to Docs are a permanent upstream non-goal, so it lands in
+`allow` with no `ask` twin. The paragraph that stood here until 2026-08-24
 said "19 commands: 13 reads and 6 writes … so every write hits the
 `defaultMode: auto` prompt", and it was stale twice over: the count had been
 copied across a repo boundary in prose and was nine commands out of date, and
@@ -207,7 +211,7 @@ being named in `permissions.ask`, which is why the writes are listed there as an
 explicit rule rather than left to a gap. Derive the count from the tool; state
 the mechanism you tested.
 
-The template allows the 17 reads plus **three writes promoted on 2026-08-24 by
+The template allows the 18 reads plus **three writes promoted on 2026-08-24 by
 explicit owner sign-off**: `comment`, `set-status`, `update` (work/0011 T00).
 The other **eight** — `create`, `claim`, `tag`, `untag`, `depend`, `undepend`,
 `move`, `append-description` — stay in `ask` and prompt every time.
@@ -224,20 +228,21 @@ additive or reversible against a shared workspace; none destroys an object, and
 template in the same commit — the offline suite diffs the two lists exactly, so
 a one-sided promotion cannot ship.
 
-The blanket `Bash(myclickup:*)` was rejected: it would cover all 28 including
+The blanket `Bash(myclickup:*)` was rejected: it would cover all 29 including
 the eight that still prompt and the two denied delete verbs, and `--dry-run`
 being available does not make it a gate, because opting into it is the agent's
 choice.
 
 Two details make the split hold rather than merely look tidy:
 
-- **No allowed entry is a prefix of a still-asked write.** Re-verified after
-  the 2026-08-24 promotion: `Bash(myclickup status:*)` over-matches `statuses …`
+- **No allowed entry is a prefix of a still-asked write.** Re-verified against
+  0.7.0's surface after the 2026-08-26 `docs` addition: `Bash(myclickup status:*)` over-matches `statuses …`
   but not `set-status`, a different prefix that now carries its own allow entry;
   `Bash(myclickup comment:*)` over-matches `comments …`, and both are permitted
   either way; `Bash(myclickup task:*)` also matching `tasks …` is harmless, both
   are reads. None of the three promoted entries is a prefix of any of the eight
-  that still prompt.
+  that still prompt. `Bash(myclickup docs:*)` matches no other command
+  and is a prefix of nothing on `ask` or `deny`.
 - **`Bash(myclickup --dry-run:*)` is what makes reads-only workable.** The
   permission prompt shows argv, not what argv resolves to: `--list
   "Team/Build/Action Items"` becomes a list ID and `--due 2026-09-01` becomes

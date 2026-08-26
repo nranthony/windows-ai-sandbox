@@ -25,6 +25,21 @@ scripts/profile.sh list                         # all profiles + up/down status
 scripts/profile.sh <profile> exec <cmd...>      # one-off command in the container
 ```
 
+`exec` runs `docker exec -it`, so it **needs a terminal on stdin**. From a
+script, a CI step, or an agent's non-interactive shell it fails with
+`cannot attach stdin to a TTY-enabled container because stdin is not a
+terminal` — which reads like a container fault and is not one. For a
+non-interactive read, go straight to the daemon:
+
+```bash
+DOCKER_HOST=unix:///run/user/1000/docker.sock \
+  docker exec ai-sandbox-<profile> <cmd...>      # no -it
+```
+
+That is a read against an already-running container, not a lifecycle
+operation, so it does not conflict with golden rule 1 — never use it to
+create, recreate or remove anything.
+
 GPU: `up`/`recreate`/`rebuild` auto-layer `docker-compose.wsl-gpu.yml` when
 `/dev/dxg` exists (WSL2). `SANDBOX_GPU=0` suppresses, `SANDBOX_GPU=1` forces.
 Bare-Linux hosts need nothing — the base compose comes up GPU-less.

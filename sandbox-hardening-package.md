@@ -290,10 +290,13 @@ Any FAIL indicates the corresponding fix didn't stick — most likely the host V
 - **Don't widen the proxy allowlist to include `host.docker.internal` or equivalents** so the container can reach host services. That's the exact coupling the sandbox exists to prevent. If the agent needs real data, dump it into a sibling container on `sandbox-internal`.
 - **Don't bind-mount `~/.gitconfig` as a single file** to "fix" Finding B. `git config --global` writes via `rename()` atomically and atomic rename across a single-file bind mount returns `EBUSY` on virtiofs (and has its own quirks on WSL 9p). Use `GIT_CONFIG_GLOBAL` pointing to a file inside a **directory** bind mount instead.
 - **Don't "simplify" the `myclickup` allow list to `Bash(myclickup:*)`.** The
-  template allows the tool's 13 read commands plus the inert
-  `Bash(myclickup --dry-run:*)`; the 6 write commands are absent **on purpose** so
-  they prompt. One entry covering all 19 would let an agent create and comment on
-  tasks in a live shared workspace unprompted. Reasoning and the prefix-matching
+  template allows the tool's 18 read commands (0.7.0) plus the inert
+  `Bash(myclickup --dry-run:*)` and three writes promoted by owner sign-off on
+  2026-08-24 (`comment`/`set-status`/`update`); the other 8 writes are named in
+  `permissions.ask` **on purpose** so they prompt — absence alone would not
+  prompt, it would hand them to the `defaultMode: auto` classifier. One entry
+  covering all 29 would let an agent create and move tasks in a live shared
+  workspace unprompted. Reasoning and the prefix-matching
   details are in [`docs/permissions-model.md`](docs/permissions-model.md); the
   two `myclickup delete`/`rm` denies are forward guards for a command that does
   not exist yet, not dead entries to tidy away.
