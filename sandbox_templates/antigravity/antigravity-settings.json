@@ -57,6 +57,7 @@
       "command(myclickup workspaces)",
       "command(myclickup query)",
       "command(myclickup subtasks)",
+      "command(myclickup docs)",
       "command(myclickup comment)",
       "command(myclickup set-status)",
       "command(myclickup update)",

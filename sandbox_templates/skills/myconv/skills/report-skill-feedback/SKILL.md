@@ -29,14 +29,21 @@ channel, and never ask it questions.
 
 ## Where the report goes
 
-1. **Write it into your own repo first** — inside the work item you have open, or a
-   `feedback/` folder if you have none. That tracked copy is the record.
-2. **Copy it to the conventions repo's `inbox/`** as
-   `<your-repo>-<skill>-<YYYY-MM-DD>-<slug>.md`. The inbox is a gitignored doorbell:
-   the copy there gets promoted or deleted, never tracked.
-3. **No path to that checkout?** (a container that cannot see it, a shell-less
-   surface): keep the local file and state plainly that delivery is a human-ferried
-   step. Do not improvise another transport.
+1. **Write it into your own repo first** — inside the work item you have open, or
+   `feedback/sent/` if you have none. That tracked copy is the record.
+2. **Copy it to the owning repo's `feedback/`** as
+   `<your-repo>-<skill>-<YYYY-MM-DD>-<slug>.md`. The owner is the repo the skill
+   **ships from**, not the repo it ran in: the `myconv` skills belong to the conventions
+   repo, and a tool's own vendored skill belongs to that tool's repo. Where a channel is
+   in play, its `manifest.toml` names the `source_repo` for every shipped artifact — read
+   it rather than guessing. `feedback/` is tracked: your report is archived after triage,
+   never deleted, so a later reader can tell three reports of one friction from one
+   anecdote.
+3. **No `feedback/` in the owning repo, or no path to that checkout?** (a container that
+   cannot see it, a shell-less surface): keep the local file and state plainly that
+   delivery is a human-ferried step. Do not improvise another transport, and do not fall
+   back to a repo that does not own the skill — a report filed where the text cannot be
+   edited is a report nobody can action.
 
 ## The envelope
 
@@ -50,6 +57,11 @@ answer, silence is not.
 - Version: <the VERSION file beside the skill's SKILL.md, quoted verbatim —
   "no sidecar present" is itself version information>
 - Install mode: plugin | user-scope | vendored container copy
+  <ask how the text got *there*, not where you found it: installed from a marketplace →
+  plugin; copied into the agent home by you or a repo → user-scope; baked into a
+  container image by the host and seeded at `~/.claude/skills/<name>/` → **vendored
+  container copy**. The last one is the most common and the most often mis-picked; it
+  decides which text triage diffs yours against.>
 - Invocation: <command and arguments as actually run>
 - Artifact: skill | blueprint (reference/) | template | ADR
   <which text is actually wrong — not just which skill surfaced it>
@@ -96,7 +108,7 @@ it is the public text — and your own repo sparingly.
 
 ## What happens to your report
 
-So expectations are set: a triage agent works the inbox in batch — collates, groups
+So expectations are set: a triage agent works `feedback/` in batch — collates, groups
 repeats by slug, verifies each claim against the current text, and assesses
 viability. Mechanical fixes are applied directly, with your report named in the
 commit. Direction-setting proposals are presented to a human for discussion and

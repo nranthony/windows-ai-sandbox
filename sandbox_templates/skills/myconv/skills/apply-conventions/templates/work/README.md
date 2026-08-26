@@ -39,6 +39,10 @@ Archived items are historical records: never treat an archived `proposal.md` or
 
 ## Proposal template
 
+The `- Key: value` front-matter block sits **under the `#` title**, never above it — it is
+the part read by machine later, so the placement is pinned rather than left to taste. Any
+tracker pointer a pull adds joins the same block.
+
 ```markdown
 # Proposal: <title>
 

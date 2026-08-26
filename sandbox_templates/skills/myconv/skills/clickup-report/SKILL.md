@@ -34,6 +34,23 @@ low-cognitive-load; pasting markdown into it destroys the one thing it is better
 the repo. If the detail matters, it belongs in the work item — link the item, don't quote
 it.
 
+**If this repo restricts what may enter tracked files, that rule binds here too — harder.**
+A committed file is private to the repo; a tracker is third-party, shared with whoever else
+is in the workspace, and a comment cannot be unpublished. So:
+
+- **a status transition is always safe** — it carries no content, only a role name resolved
+  through `[statuses]`. In a restricted repo this is the whole safe surface;
+- **an exception comment names the *shape* of the hurdle, not its content** — "blocked on a
+  dependency in another matter", never which matter, whose, or what it says;
+- "link the item, don't quote it" still holds, but for a second reason: in a restricted repo
+  the work item is not merely the better home for detail, it is the only permitted one.
+
+Nothing enforces this — `comment` and `set-status` prompt, and every write is dry-run first,
+so a human reads the exact text before it sends. That gate is the enforcement; this is what
+to look for at it. The decision is **ADR-0014** in the conventions repo
+(`docs/adr/0014-repo-content-policy-overrides-skill-writes.md`) — deliberately not a link,
+since this file ships inside a plugin.
+
 ## Preflight — stop, don't improvise
 
 1. **`myclickup` on PATH?** If not, stop — this is a human step. `myclickup` is a personal
