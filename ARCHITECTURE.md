@@ -126,7 +126,7 @@ Deliberately NOT installed in the image: `bubblewrap`, `socat`,
 ├── .agents/skills/               # Host-agent operational guides
 ├── sandbox_templates/            # Assets injected into sandboxes
 │   ├── common/                   #   dotfiles, db.env.template, secrets.env.template, pdf-styles/
-│   ├── bin/                      #   webfetch (web-read broker; baked to /usr/local/bin)
+│   ├── bin/                      #   webfetch (web-read broker; peer backends, no default; baked to /usr/local/bin)
 │   ├── claude/                   #   claude-settings.json, hooks/ (deny-destructive — shared engine)
 │   ├── antigravity/              #   hooks.json + antigravity-settings.json (agy policy; ADR-0006)
 │   ├── skills/                   #   sandbox-side skills (audit-sandbox tier-3); some vendored — UPSTREAM.md
@@ -135,7 +135,8 @@ Deliberately NOT installed in the image: `bubblewrap`, `socat`,
 ├── scripts/                      # profile.sh (lifecycle driver), verify/audit, with-egress, ephemeral
 │   ├── vendor-tools.sh          #   consumes the depot channel into the build context (wheel, skills, plugins)
 │   ├── depaudit.py               #   dependency posture scanner + OSV MAL- check (host-side, stdlib-only)
-│   └── depaudit.test.sh          #   its regression suite — 27 offline / 28 --online
+│   ├── depaudit.test.sh          #   its regression suite — 43 offline, --online adds the OSV corpus
+│   └── webfetch.test.sh          #   broker suite — 90 offline; hosts↔allowlist, keys never in URLs, no default backend
 ├── docs/                         # Design notes, permissions model, portability, debug recipes (index.md)
 │   ├── adr/                      #   Decisions — append-only, superseded not deleted (ADR-0001)
 │   └── incoming/                 #   Raw unprocessed input — triage out, don't accumulate

@@ -126,18 +126,15 @@ live_hosts() { grep -vE '^[[:space:]]*(#|$)' "$ALLOW" | sed 's/[[:space:]]*$//; 
 LIVE=$(live_hosts)
 live_count() { printf '%s\n' "$LIVE" | grep -cxF -- "$1"; }
 
+# Every one of them, Jina included (live since 2026-08-26 by owner decision —
+# before that the pair was locked COMMENTED, and the docs, skill table and
+# secrets template all said "add first"; if a backend is ever gated again,
+# put its hosts back in a case arm here expecting 0 and re-word all three).
 for h in "${HOSTS[@]}"; do
-  case "$h" in
-    r.jina.ai|s.jina.ai)
-      # Documented as NOT allowlisted ("add first"). If one appears live, the
-      # docs, the skill table and the secrets template all become wrong at once.
-      check "jina host $h stays OFF the allowlist (documented as add-first)" \
-            "$(live_count "$h")" "0" ;;
-    *)
-      check "broker host $h is an EXACT live allowlist line" \
-            "$(live_count "$h")" "1" ;;
-  esac
+  check "broker host $h is an EXACT live allowlist line" "$(live_count "$h")" "1"
 done
+check "no vendor wildcard for any broker host" \
+      "$(for h in "${HOSTS[@]}"; do live_count ".${h#*.}"; done | grep -cv '^0$')" "0"
 
 check "the TinyFish pair is exactly search + fetch" \
       "$(printf '%s\n' "${HOSTS[@]}" | grep -c 'tinyfish')" "2"
@@ -241,10 +238,34 @@ printf -- "\n-- tavily: Bearer header, unchanged shape (regression lock) --\n"
 cat > "$TMP/tavily.json" <<'JSON'
 {"results":[{"url":"https://t.test/x","raw_content":"tavily body"}],"failed_results":[]}
 JSON
-run "file:$TMP/tavily.json" TAVILY_API_KEY extract https://t.test/x
-check "default --via is tavily" "$(req_field 0 "['url']")" "https://api.tavily.com/extract"
+run "file:$TMP/tavily.json" TAVILY_API_KEY extract https://t.test/x --via tavily
+check "tavily extract host" "$(req_field 0 "['url']")" "https://api.tavily.com/extract"
 check "Bearer header" "$(req_field 0 "['headers'].get('Authorization')")" "Bearer sk-test-SECRET-0000"
 contains "raw_content emitted" "$OUT" "tavily body"
+
+# ===========================================================================
+printf -- "\n-- no default backend: --via is required; `backends` lists peers --\n"
+run "file:$TMP/tavily.json" TAVILY_API_KEY extract https://t.test/x
+check "extract without --via -> 2, no request" "$RC:$(requests)" "2:0"
+contains "usage names the flag" "$ERR" "--via"
+run "file:$TMP/tavily.json" TAVILY_API_KEY search "q"
+check "search without --via -> 2, no request" "$RC:$(requests)" "2:0"
+check "no 'default=' on any --via" "$(grep -cE 'add_argument\("--via".*default=' "$WF")" "0"
+
+run "file:/dev/null" TINYFISH_API_KEY backends
+check "backends exits 0 with no request" "$RC:$(requests)" "0:0"
+for b in "${BACKENDS[@]}"; do contains "backends lists $b" "$OUT" "$b"; done
+contains "keyed backend with key -> ready" "$OUT" "tinyfish   extract+search  ready"
+contains "keyed backend without key -> says which var and to pick another" "$OUT" "NO KEY (TAVILY_API_KEY unset) — pick another"
+contains "optional-key backend without key -> ready keyless" "$OUT" "jina       extract+search  ready keyless"
+contains "extract-only backend shows extract only" "$OUT" "firecrawl  extract "
+lacks "backends never prints a key value" "$OUT" "SECRET"
+check "KEYS table covers every backend" \
+      "$(python3 -c "
+import importlib.machinery, importlib.util, sys
+spec = importlib.util.spec_from_loader('wf', importlib.machinery.SourceFileLoader('wf', sys.argv[1]))
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+print(set(m.KEYS) == set(m.EXTRACT) | set(m.SEARCH))" "$WF")" "True"
 
 # ===========================================================================
 printf -- "\n-- failure classes map to the documented exit codes --\n"

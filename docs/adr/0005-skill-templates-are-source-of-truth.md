@@ -1,6 +1,11 @@
 # ADR-0005 — Skill templates are the source of truth; profile copies are a derived cache
 
-- **Status:** Accepted
+- **Status:** Accepted — **superseded in scope by
+  [ADR-0007](0007-policy-templates-are-source-of-truth-for-every-agent.md)**
+  (2026-08-24), which extends the same principle from skills to every agent's
+  policy file and adds the per-agent write-mode rule. Everything below about
+  the skills tree still holds; this note added 2026-08-26 so the supersession
+  is visible from this side too (ADR-0001: superseded ADRs are marked).
 - **Date:** 2026-08-10
 - **Supersedes:** nothing. Changes the seeding semantics introduced with
   `sandbox_templates/skills/` (2026-07-04).

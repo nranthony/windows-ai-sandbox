@@ -155,16 +155,21 @@ t90141509251.p.clickup-attachments.com
 # i.e. one more exfil channel — which is why every entry is the EXACT API host
 # and never a vendor wildcard (M3), and why a vendor whose key also unlocks a
 # write surface (a cloud browser, an "agent" API) gets its read hosts only.
+# ADR-0012 states the five properties a backend must have to be admitted.
 #
 # ADDING A BACKEND: wire it in the broker first, then add its exact host(s)
 # here with a `Host confirmed against …` line, then a key block in
 # sandbox_templates/common/secrets.env.template. scripts/webfetch.test.sh
 # extracts every https:// host from the broker and requires each to be an
-# exact LIVE line in this file (and the Jina pair to stay commented), so a
-# host added in one place and not the other fails offline, before a
-# TCP_DENIED that reads like a bad key.
+# exact LIVE line in this file, so a host added in one place and not the
+# other fails offline, before a TCP_DENIED that reads like a bad key. (To
+# gate a backend again, re-lock its hosts in the suite as expected-absent.)
 #
-# Tavily — default backend (`--via tavily`, TAVILY_API_KEY). Search + extract.
+# The backends are PEERS — the broker has no default; `--via` is required and
+# the agent cycles to another on failure (`webfetch backends` says which are
+# ready). Order below is arrival order, not preference. ADR-0011.
+#
+# Tavily — `--via tavily`, TAVILY_API_KEY. Search + extract.
 # Also used directly by the citation-tooling workload; ONE entry serves both.
 # Host confirmed: POST https://api.tavily.com/{search,extract}.
 api.tavily.com
@@ -182,11 +187,11 @@ api.firecrawl.dev
 api.search.tinyfish.ai
 api.fetch.tinyfish.ai
 # Jina Reader — `--via jina`, JINA_API_KEY optional (keyless is rate-limited).
-# Deliberately NOT live: the broker, skill and secrets template all say "add
-# first", and the suite locks the pair commented. Uncomment both to enable
-# (r. = extract, s. = search), then reload the proxy.
-# r.jina.ai
-# s.jina.ai
+# Live since 2026-08-26 (owner decision). r. = extract, s. = search — two
+# hosts because the vendor splits them; never `.jina.ai`. Hosts confirmed:
+# GET https://r.jina.ai/<url> and GET https://s.jina.ai/<query>.
+r.jina.ai
+s.jina.ai
 
 # --- OpenRouter [openrouter] ---
 # claude, fill in here

@@ -215,7 +215,7 @@ prefix over-match counts as covered** in `--permissions` (`statuses` riding
 gets ignored.
 Edits to `sandbox_templates/bin/webfetch`, to any broker host in
 `proxy/allowed_domains.txt`, or to `sandbox_templates/common/secrets.env.template`
-require `bash scripts/webfetch.test.sh` (74/74, offline — no docker, no
+require `bash scripts/webfetch.test.sh` (90/90, offline — no docker, no
 network, no key). It runs the broker as a real subprocess with `urlopen`
 shimmed, so its locks are measured: **no request leaves when a key is
 missing**; **keys travel in headers, never in URLs** (Squid logs URLs, so a

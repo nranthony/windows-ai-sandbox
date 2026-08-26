@@ -25,13 +25,14 @@ Backends (pluggable):
 
 | `--via`     | Host                         | Allowlisted?          | Key |
 |-------------|------------------------------|-----------------------|-----|
-| `tavily` (default) | `api.tavily.com`      | **yes** (already)     | `TAVILY_API_KEY` (required) |
-| `jina`      | `r.jina.ai` / `s.jina.ai`    | no — add first        | `JINA_API_KEY` (optional; keyless = rate-limited) |
+| `tavily`    | `api.tavily.com`             | **yes** (already)     | `TAVILY_API_KEY` (required) |
+| `jina`      | `r.jina.ai` / `s.jina.ai`    | **yes** (since 08-26) | `JINA_API_KEY` (optional; keyless = rate-limited) |
 | `firecrawl` | `api.firecrawl.dev`          | **yes** (since 08-08) | `FIRECRAWL_API_KEY` (required) |
 | `tinyfish`  | `api.search.tinyfish.ai` + `api.fetch.tinyfish.ai` | **yes** (since 08-25) | `TINYFISH_API_KEY` (required) |
 
 TinyFish is wired for its **Search and Fetch APIs only** (both free tier, no
-wallet). The same key also unlocks the vendor's Agent and Browser APIs and an
+wallet) — the rule is
+[ADR-0012](adr/0012-web-read-backends-get-read-hosts-only.md). The same key also unlocks the vendor's Agent and Browser APIs and an
 MCP server (`agent.tinyfish.ai`) — a cloud browser the model steers, i.e. a
 write surface (logins, form-fills, arbitrary POSTs). Those hosts are not
 allowlisted, the broker never calls them, and `scripts/webfetch.test.sh` locks
@@ -45,11 +46,18 @@ broker calls, and allowlisting it yields a TCP_DENIED that reads like a bad key.
 ## Usage (from inside the agent)
 
 ```bash
-webfetch extract <url> [<url> ...]        # clean text/markdown of specific pages
-webfetch search  "<query>" [--n 5]        # ranked, synthesized results
-webfetch extract <url> --via jina         # once r.jina.ai is allowlisted
-webfetch extract <url> --max 40000        # raise the per-source char cap
+webfetch backends                                 # which backends are usable in this profile
+webfetch extract <url> [<url> ...] --via <b>      # clean text/markdown of specific pages
+webfetch search  "<query>" --via <b> [--n 5]      # ranked results
+webfetch extract <url> --via <b> --max 40000      # raise the per-source char cap
 ```
+
+`--via` is required and there is no default
+([ADR-0011](adr/0011-web-read-backends-are-peers-with-no-default.md)). The
+backends are peers: the agent lists them, picks one that is ready, and on any
+failure exit code moves to another. A baked-in default would make one vendor's
+quota wall or outage read as "the web is unreachable" — Tavily's HTTP 432 did
+exactly that in a live profile before this change.
 
 `Bash(webfetch:*)` is on the agent's allow-list, so it runs unattended with no
 permission prompt (unlike the real `WebFetch` tool). Output goes to stdout and
@@ -59,9 +67,10 @@ ever removed.
 
 ## Security properties
 
-- **No new egress.** The backends resolve to four allowlisted hosts
-  (`api.tavily.com`, `api.firecrawl.dev`, `api.search.tinyfish.ai`,
-  `api.fetch.tinyfish.ai`) — arbitrary-URL fetching happens on
+- **No new egress.** The backends resolve to six allowlisted hosts in the
+  `[web-read]` block (`api.tavily.com`, `api.firecrawl.dev`,
+  `api.search.tinyfish.ai`, `api.fetch.tinyfish.ai`, `r.jina.ai`,
+  `s.jina.ai`) — arbitrary-URL fetching happens on
   *their* infrastructure, so the sandbox's own surface does not grow with the
   pages read. Each backend is, however, one more host the agent can POST to;
   enabling Jina requires an explicit allowlist edit (+ reload) first.
@@ -124,11 +133,17 @@ env var it reads is named in `secrets.env.template`, and that the untrusted
 banner is the first thing on stdout with hostile text passing through verbatim
 after it. Part of `just test-offline`.
 
-## Adding Jina later
+## Enabling Jina
 
-1. Uncomment `r.jina.ai` (+ `s.jina.ai` for search) in the `[web-read]` block
-   of `proxy/allowed_domains.txt` — they are already there, commented — and
-   reload the proxy (`docker restart egress-proxy-<profile>`, or
-   `squid -k reconfigure` — both apply since the directory mount).
-2. Add the key to `secrets.env` (Jina's is optional) and recreate the agent.
-3. The agent selects it with `--via jina`.
+Both hosts are allowlisted (block `[web-read]`, live since 2026-08-26) and
+keyless use works, so `--via jina` runs with no setup. To lift the keyless
+rate limit, set `JINA_API_KEY=jina_...` in `secrets.env` and recreate the
+agent.
+
+## Gating a backend again
+
+Comment its hosts in `[web-read]` and reload the proxy — then move the hosts
+into a case arm in `scripts/webfetch.test.sh` expecting `0` (the suite
+requires every host the broker names to be live), and re-word the skill
+table, this file's table, and `secrets.env.template`, all of which say
+"allowlisted". Jina was gated exactly this way until 2026-08-26.

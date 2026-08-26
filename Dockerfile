@@ -268,7 +268,8 @@ RUN mkdir -p /usr/local/lib/sandbox-hooks \
 
 # webfetch — web-read broker for the restricted agent. curl/wget are denied and
 # the real WebFetch tool is not allow-listed, so the agent reads the web ONLY
-# through a hosted reader API (default Tavily, already in allowed_domains.txt).
+# through a hosted reader API (peer backends, no default — the [web-read]
+# block in allowed_domains.txt; the agent picks one and cycles on failure).
 # The remote service performs the arbitrary-URL egress from its own infra; the
 # sandbox's egress surface never grows. stdlib-only, so it needs no pip layer;
 # urllib routes through the Squid proxy via HTTPS_PROXY. Keys come from the

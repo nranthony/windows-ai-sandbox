@@ -1,6 +1,18 @@
 # ADR-0009 — In a public repo the standard is SEARCHABLE, not "present at all"
 
 - **Status:** Accepted (2026-08-25)
+- **Note (2026-08-26):** the Decision below names `docs/rfcs/` among the kept
+  surfaces. That tier closed the same day this ADR was accepted
+  ([ADR-0010](0010-one-proposal-home-close-the-rfc-tier.md)); its files now
+  sit in `docs/_archive/`, which is already in the kept set, so the scope is
+  unchanged. Text left as written (append-only).
+  Also resolves the first `[unverified]` below: re-audited 2026-08-26 with the
+  configured name list, count-only. Every scanned surface is clean
+  (`private-names-check.sh` OK, 121 files); outside the scanned surfaces the
+  only tracked non-archive hits are 4 lines across
+  `docs/dependency-guardrails-handoff.md` and `docs/permissions-model.md` —
+  both in the deliberately-kept `docs/*.md` narrative category. Nothing left
+  to clear.
 - **Date:** 2026-08-25
 - **Relates to:** [ADR-0001](0001-provenance-tiers.md) — an ADR is required for
   anything affecting **public contracts**; what this repo publishes under a real

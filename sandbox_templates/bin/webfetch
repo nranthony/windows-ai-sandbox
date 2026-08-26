@@ -18,7 +18,7 @@
 #                                         are deliberately NOT wired: a remote
 #                                         browser under agent control is a write
 #                                         surface, not a read one)
-#     jina      -> r.jina.ai / s.jina.ai (add host to allowlist to enable)
+#     jina      -> r.jina.ai / s.jina.ai (allowlisted; extract + search; key optional)
 #     firecrawl -> api.firecrawl.dev     (add host to allowlist to enable)
 #
 #   Every backend host the broker calls must be pinned as an EXACT host in
@@ -38,8 +38,11 @@
 #     input — but it marks the boundary so the reader treats it as data.
 #
 # USAGE
-#   webfetch extract <url> [<url> ...] [--via tavily|tinyfish|jina|firecrawl] [--max N]
-#   webfetch search  "<query>"        [--n K] [--via tavily|tinyfish|jina]
+#   webfetch backends                                  # which backends are usable here
+#   webfetch extract <url> [<url> ...] --via tavily|tinyfish|jina|firecrawl [--max N]
+#   webfetch search  "<query>"         --via tavily|tinyfish|jina [--n K]
+#   --via is required: the backends are peers with NO default (ADR-0011). Pick
+#   one, and on exit 3/4/5/6 pick another before treating the read as blocked.
 #
 # EXIT CODES
 #   0 ok | 2 usage error | 3 missing/invalid API key | 4 network/proxy error
@@ -74,8 +77,10 @@ def _key(env_name, backend):
         _die(
             3,
             f"{env_name} not set — the '{backend}' backend needs it. "
-            f"Add it to ~/.ai-sandbox/profiles/<profile>/secrets.env and "
-            f"recreate the agent (env_file is read at container create).",
+            f"Try another backend (`webfetch backends` lists which are ready); "
+            f"to enable this one, add the key to "
+            f"~/.ai-sandbox/profiles/<profile>/secrets.env and recreate the "
+            f"agent (env_file is read at container create).",
         )
     return key
 
@@ -229,7 +234,7 @@ def tinyfish_search(query, n, max_chars):
 
 
 # ----------------------------------------------------------------------------
-# Jina Reader backend (host r.jina.ai / s.jina.ai must be allowlisted first)
+# Jina Reader backend (r.jina.ai = extract, s.jina.ai = search; both allowlisted)
 # ----------------------------------------------------------------------------
 def _jina_get(url, max_chars):
     # JINA_API_KEY is OPTIONAL (keyless works, rate-limited). Bearer if present.
@@ -248,8 +253,8 @@ def _jina_get(url, max_chars):
     except urllib.error.URLError as e:
         _die(
             4,
-            f"could not reach {url} ({e.reason}). Is r.jina.ai/s.jina.ai in "
-            f"proxy/allowed_domains.txt?",
+            f"could not reach {url} ({e.reason}). If this is a TCP_DENIED, "
+            f"r.jina.ai/s.jina.ai have been dropped from proxy/allowed_domains.txt.",
         )
 
 
@@ -286,6 +291,34 @@ def firecrawl_extract(urls, max_chars):
     return n
 
 
+# backend -> (key env var, key required?). Read by `webfetch backends` only;
+# the backends themselves still read their key at call time via _key().
+KEYS = {
+    "tavily": ("TAVILY_API_KEY", True),
+    "tinyfish": ("TINYFISH_API_KEY", True),
+    "jina": ("JINA_API_KEY", False),
+    "firecrawl": ("FIRECRAWL_API_KEY", True),
+}
+
+
+def list_backends():
+    """One line per backend: what it can do here and whether its key is set.
+    Reports presence only — never the value, never a prefix. Exit 0 always; the
+    caller reads the table and picks."""
+    for name in sorted(KEYS):
+        var, required = KEYS[name]
+        ops = [op for op, table in (("extract", EXTRACT), ("search", SEARCH))
+               if name in table]
+        present = bool(os.environ.get(var, "").strip())
+        if present:
+            status = "ready"
+        elif required:
+            status = f"NO KEY ({var} unset) — pick another"
+        else:
+            status = "ready keyless (rate-limited; " + var + " optional)"
+        print(f"{name:<10} {'+'.join(ops):<15} {status}")
+
+
 EXTRACT = {
     "tavily": tavily_extract,
     "tinyfish": tinyfish_extract,
@@ -306,20 +339,31 @@ def main():
     )
     sub = ap.add_subparsers(dest="cmd", required=True)
 
+    # --via is REQUIRED on purpose: the backends are peers, not a primary plus
+    # spares. The caller picks one from `webfetch backends` and, when it fails
+    # (exit 3/4/5/6), picks another — a baked-in default would make one vendor's
+    # outage or quota wall look like "the web is unreachable".
     pe = sub.add_parser("extract", help="clean text/markdown of specific URL(s)")
     pe.add_argument("urls", nargs="+")
-    pe.add_argument("--via", default="tavily", choices=sorted(EXTRACT))
+    pe.add_argument("--via", required=True, choices=sorted(EXTRACT),
+                    help="backend (see `webfetch backends`)")
     pe.add_argument("--max", type=int, default=DEFAULT_MAX_CHARS,
                     help="per-source char cap (default %(default)s)")
 
     ps = sub.add_parser("search", help="ranked web results for a query")
     ps.add_argument("query")
-    ps.add_argument("--via", default="tavily", choices=sorted(SEARCH))
+    ps.add_argument("--via", required=True, choices=sorted(SEARCH),
+                    help="backend (see `webfetch backends`)")
     ps.add_argument("--n", type=int, default=5, help="max results (default 5)")
     ps.add_argument("--max", type=int, default=DEFAULT_MAX_CHARS)
 
+    sub.add_parser("backends", help="list backends and whether each is usable here")
+
     args = ap.parse_args()
 
+    if args.cmd == "backends":
+        list_backends()
+        return
     if args.cmd == "extract":
         count = EXTRACT[args.via](args.urls, args.max)
     else:

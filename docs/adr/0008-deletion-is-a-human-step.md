@@ -1,6 +1,12 @@
 # ADR-0008 — Deletion is a human step: the shared hook engine has three tiers, and the ask tier is dialect-branched
 
 - **Status:** Accepted (2026-08-25)
+- **Open item (2026-08-26):** the one `[unverified]` below that is a security
+  question — whether `agy` honours `force_ask` over its static
+  `command(git checkout)` allow — is tracked in
+  [work/0015](../../work/0015-verify-agy-force-ask-outranks-static-allow/spec.md):
+  the interactive probe, both outcomes, the fallback, and the note to add here
+  when measured.
 - **Date:** 2026-08-25
 - **Relates to:** [ADR-0006](0006-antigravity-is-two-layer-like-claude.md) — this
   adopts the `force_ask` mechanism ADR-0006's Consequences deliberately deferred
