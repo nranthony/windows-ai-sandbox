@@ -1,12 +1,14 @@
 ---
 name: web-read
-description: Read or search the web from inside the sandbox using the `webfetch` broker. Use whenever you need the contents of a web page or a web search and find that `curl`, `wget`, or the WebFetch tool are denied. Covers extract vs search, the `--via` backends (Tavily/Jina/Firecrawl), output limits, and the untrusted-content discipline.
+description: Read or search the web from inside the sandbox using the `webfetch` broker. Use whenever you need the contents of a web page or a web search and find that `curl`/`wget` are denied or the WebFetch tool prompts for an unscoped domain. Covers extract vs search, the `--via` backends (Tavily/Jina/Firecrawl), output limits, and the untrusted-content discipline.
 ---
 
 # web-read — fetch the web through the `webfetch` broker
 
-Inside this sandbox `curl`/`wget` and the `WebFetch` tool are denied, and the
-egress proxy only allows a fixed set of hosts. You still read the web — through
+Inside this sandbox `curl`/`wget` are denied, the `WebFetch` tool is only
+allowed on domains the current repo scoped in its local Claude settings
+(it prompts elsewhere — it fetches from Anthropic's side, bypassing the proxy),
+and the egress proxy only allows a fixed set of hosts. You still read the web — through
 `webfetch`, a broker CLI on your allow-list that routes requests through an
 allowlisted reader API. The reader does the arbitrary-URL egress from its own
 infrastructure and returns clean text.
@@ -48,8 +50,10 @@ error — that's a human step, not something to work around.
 - **Exit codes:** `3` = missing/invalid API key, `4` = host unreachable /
   not allowlisted, `5` = upstream API error, `6` = nothing fetched. Codes 3
   and 4 are human steps — report them, don't retry blindly.
-- **Don't fall back to `curl`/`wget`/`WebFetch`** — they're denied; `webfetch`
-  is the sanctioned path.
+- **Don't fall back to `curl`/`wget`** — they're denied; `webfetch` is the
+  sanctioned path. `WebFetch` is fine on a domain this repo has scoped; on any
+  other domain accept the prompt or use `webfetch` — never ask for a bare
+  `WebFetch` allow (it bypasses the egress proxy).
 
 ## Full reference
 

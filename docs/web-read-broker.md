@@ -1,7 +1,9 @@
 # Web-read broker (`webfetch`)
 
 The restricted agent cannot read arbitrary web pages: `curl`/`wget` are denied
-in `claude-settings.json`, the real `WebFetch` tool is not on the allow-list,
+in `claude-settings.json`, the real `WebFetch` tool is not on the template's
+allow-list (repos scope it per domain with `WebFetch(domain:<host>)` in their
+own `.claude/settings.local.json` — see `docs/permissions-model.md`),
 and Squid only permits the handful of hosts in `proxy/allowed_domains.txt`.
 That is deliberate — every domain added to the allowlist is also a place the
 agent could POST to (an exfil channel), so we do **not** widen it to the dozens
