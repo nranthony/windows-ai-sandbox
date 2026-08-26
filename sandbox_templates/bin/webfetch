@@ -12,8 +12,18 @@
 #
 #   Backends (pluggable):
 #     tavily    -> api.tavily.com        (already allowlisted; search + extract)
+#     tinyfish  -> api.search.tinyfish.ai / api.fetch.tinyfish.ai
+#                                        (allowlisted; search + extract; free tier,
+#                                         no wallet — the paid Agent/Browser APIs
+#                                         are deliberately NOT wired: a remote
+#                                         browser under agent control is a write
+#                                         surface, not a read one)
 #     jina      -> r.jina.ai / s.jina.ai (add host to allowlist to enable)
 #     firecrawl -> api.firecrawl.dev     (add host to allowlist to enable)
+#
+#   Every backend host the broker calls must be pinned as an EXACT host in
+#   proxy/allowed_domains.txt (never a wildcard); scripts/webfetch.test.sh
+#   extracts the hosts from this file and diffs them against the allowlist.
 #
 # SECURITY PROPERTIES (deliberate)
 #   * stdlib only (urllib) — no pip deps; urllib honors HTTPS_PROXY from the
@@ -28,8 +38,8 @@
 #     input — but it marks the boundary so the reader treats it as data.
 #
 # USAGE
-#   webfetch extract <url> [<url> ...] [--via tavily|jina|firecrawl] [--max N]
-#   webfetch search  "<query>"        [--n K] [--via tavily|jina]
+#   webfetch extract <url> [<url> ...] [--via tavily|tinyfish|jina|firecrawl] [--max N]
+#   webfetch search  "<query>"        [--n K] [--via tavily|tinyfish|jina]
 #
 # EXIT CODES
 #   0 ok | 2 usage error | 3 missing/invalid API key | 4 network/proxy error
@@ -70,12 +80,15 @@ def _key(env_name, backend):
     return key
 
 
-def _post(url, payload, headers):
-    """POST JSON through the proxy (urllib reads HTTPS_PROXY from env). Returns
-    parsed JSON dict. Raises SystemExit on network / upstream error."""
-    data = json.dumps(payload).encode()
-    req = urllib.request.Request(url, data=data, method="POST")
-    req.add_header("Content-Type", "application/json")
+def _json_request(method, url, payload, headers):
+    """One JSON request through the proxy (urllib reads HTTPS_PROXY from env).
+    POST sends `payload` as a JSON body; GET sends none (the caller puts the
+    query in the URL). Returns the parsed JSON dict. Raises SystemExit on
+    network / upstream error, with the exit code the header documents."""
+    data = json.dumps(payload).encode() if method == "POST" else None
+    req = urllib.request.Request(url, data=data, method=method)
+    if data is not None:
+        req.add_header("Content-Type", "application/json")
     for k, v in headers.items():
         req.add_header(k, v)
     try:
@@ -96,6 +109,14 @@ def _post(url, payload, headers):
         )
     except (ValueError, json.JSONDecodeError) as e:
         _die(5, f"unparseable response from {url}: {e}")
+
+
+def _post(url, payload, headers):
+    return _json_request("POST", url, payload, headers)
+
+
+def _get_json(url, headers):
+    return _json_request("GET", url, None, headers)
 
 
 def _emit(source, text, max_chars):
@@ -158,6 +179,56 @@ def tavily_search(query, n, max_chars):
 
 
 # ----------------------------------------------------------------------------
+# TinyFish backend — Search + Fetch APIs ONLY (docs.tinyfish.ai). Both are the
+# free tier; neither draws from the wallet. The Agent and Browser APIs on the
+# same key are a cloud browser the caller drives (form-fills, logins, POSTs) —
+# a write surface — and are deliberately not reachable from here. Auth is an
+# X-API-Key header on every call; the key is never placed in the URL, so it
+# stays out of Squid's URL log like the Bearer backends.
+# ----------------------------------------------------------------------------
+TINYFISH_FETCH_BATCH = 10  # documented per-request cap on `urls`
+
+
+def tinyfish_extract(urls, max_chars):
+    key = _key("TINYFISH_API_KEY", "tinyfish")
+    n = 0
+    for i in range(0, len(urls), TINYFISH_FETCH_BATCH):
+        batch = urls[i:i + TINYFISH_FETCH_BATCH]
+        data = _post(
+            "https://api.fetch.tinyfish.ai",
+            {"urls": batch, "format": "markdown"},
+            {"X-API-Key": key},
+        )
+        results = data.get("results", [])
+        for item in results:
+            _emit(item.get("final_url") or item.get("url", "?"),
+                  item.get("text", ""), max_chars)
+        for fail in data.get("errors", []):
+            if isinstance(fail, dict):
+                print(
+                    f"# FAILED: {fail.get('url', '?')} — "
+                    f"{fail.get('error') or fail.get('message') or 'unknown'}",
+                    file=sys.stderr,
+                )
+            else:
+                print(f"# FAILED: {fail}", file=sys.stderr)
+        n += len(results)
+    return n
+
+
+def tinyfish_search(query, n, max_chars):
+    key = _key("TINYFISH_API_KEY", "tinyfish")
+    qs = urllib.parse.urlencode({"query": query})
+    data = _get_json(f"https://api.search.tinyfish.ai?{qs}", {"X-API-Key": key})
+    results = data.get("results", [])[:n]
+    for item in results:
+        title = item.get("title", "?")
+        url = item.get("url", "?")
+        _emit(f"{title} — {url}", item.get("snippet", ""), max_chars)
+    return len(results)
+
+
+# ----------------------------------------------------------------------------
 # Jina Reader backend (host r.jina.ai / s.jina.ai must be allowlisted first)
 # ----------------------------------------------------------------------------
 def _jina_get(url, max_chars):
@@ -217,11 +288,13 @@ def firecrawl_extract(urls, max_chars):
 
 EXTRACT = {
     "tavily": tavily_extract,
+    "tinyfish": tinyfish_extract,
     "jina": jina_extract,
     "firecrawl": firecrawl_extract,
 }
 SEARCH = {
     "tavily": tavily_search,
+    "tinyfish": tinyfish_search,
     "jina": jina_search,
 }
 

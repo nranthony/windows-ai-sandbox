@@ -1,6 +1,6 @@
 ---
 name: web-read
-description: Read or search the web from inside the sandbox using the `webfetch` broker. Use whenever you need the contents of a web page or a web search and find that `curl`/`wget` are denied or the WebFetch tool prompts for an unscoped domain. Covers extract vs search, the `--via` backends (Tavily/Jina/Firecrawl), output limits, and the untrusted-content discipline.
+description: Read or search the web from inside the sandbox using the `webfetch` broker. Use whenever you need the contents of a web page or a web search and find that `curl`/`wget` are denied or the WebFetch tool prompts for an unscoped domain. Covers extract vs search, the `--via` backends (Tavily/TinyFish/Jina/Firecrawl), output limits, and the untrusted-content discipline.
 ---
 
 # web-read — fetch the web through the `webfetch` broker
@@ -36,6 +36,7 @@ It runs without a permission prompt (`Bash(webfetch:*)` is allow-listed).
 | `--via`     | Best at                         | Availability |
 |-------------|---------------------------------|--------------|
 | `tavily` (default) | search + clean extract   | ready (`api.tavily.com` allowlisted, needs `TAVILY_API_KEY`) |
+| `tinyfish`  | search (snippets) + markdown extract, PDFs; free tier, no quota wall | ready (`api.search`/`api.fetch.tinyfish.ai` allowlisted, needs `TINYFISH_API_KEY`) |
 | `jina`      | single-URL clean-markdown read  | only if `r.jina.ai`/`s.jina.ai` were allowlisted |
 | `firecrawl` | JS-heavy pages, PDFs, crawl     | only if `api.firecrawl.dev` was allowlisted |
 

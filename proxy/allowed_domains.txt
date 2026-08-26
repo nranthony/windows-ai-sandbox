@@ -141,6 +141,53 @@ t90141509251.p.clickup-attachments.com
 # My Quantum Journey 90171003671 is visible to the nranthony token but gets NO
 # attachment host on purpose: it has no profile.
 
+# --- Web-read brokers: crawl / scrape / search [web-read] ---
+# Every backend of the `webfetch` broker (sandbox_templates/bin/webfetch,
+# docs/web-read-broker.md) lives HERE and nowhere else. Until 2026-08-25 they
+# were scattered — Tavily inside [citation-tools], Firecrawl and TinyFish as
+# separate blocks — and a scattered list is one a reviewer cannot see whole.
+#
+# The class: `curl`/`wget` are denied and the real WebFetch tool is scoped per
+# repo, so the agent reads arbitrary pages THROUGH a hosted reader API. The
+# vendor does the arbitrary-URL egress from ITS infrastructure and returns
+# clean text; this block therefore adds a handful of API hosts, not the open
+# web. The cost is the same for each: one more host the agent can POST to,
+# i.e. one more exfil channel — which is why every entry is the EXACT API host
+# and never a vendor wildcard (M3), and why a vendor whose key also unlocks a
+# write surface (a cloud browser, an "agent" API) gets its read hosts only.
+#
+# ADDING A BACKEND: wire it in the broker first, then add its exact host(s)
+# here with a `Host confirmed against …` line, then a key block in
+# sandbox_templates/common/secrets.env.template. scripts/webfetch.test.sh
+# extracts every https:// host from the broker and requires each to be an
+# exact LIVE line in this file (and the Jina pair to stay commented), so a
+# host added in one place and not the other fails offline, before a
+# TCP_DENIED that reads like a bad key.
+#
+# Tavily — default backend (`--via tavily`, TAVILY_API_KEY). Search + extract.
+# Also used directly by the citation-tooling workload; ONE entry serves both.
+# Host confirmed: POST https://api.tavily.com/{search,extract}.
+api.tavily.com
+# Firecrawl — `--via firecrawl`, FIRECRAWL_API_KEY. JS-heavy pages, PDFs.
+# Note .dev, not .com — allowlisting the wrong one yields a TCP_DENIED that
+# reads like a bad key. Host confirmed: POST https://api.firecrawl.dev/v1/scrape.
+api.firecrawl.dev
+# TinyFish — `--via tinyfish`, TINYFISH_API_KEY. Search (snippets) + Fetch
+# (markdown, PDFs); both free tier. TWO hosts because the vendor splits the
+# APIs. NOT `.tinyfish.ai`: the same key drives agent.tinyfish.ai (paid Agent
+# API + MCP) and api.browser.tinyfish.ai (a cloud browser the caller steers —
+# logins, form-fills, arbitrary POSTs). Those are write surfaces, the broker
+# never calls them, and the suite asserts they are not live. Hosts confirmed:
+# GET https://api.search.tinyfish.ai?query=… / POST https://api.fetch.tinyfish.ai.
+api.search.tinyfish.ai
+api.fetch.tinyfish.ai
+# Jina Reader — `--via jina`, JINA_API_KEY optional (keyless is rate-limited).
+# Deliberately NOT live: the broker, skill and secrets template all say "add
+# first", and the suite locks the pair commented. Uncomment both to enable
+# (r. = extract, s. = search), then reload the proxy.
+# r.jina.ai
+# s.jina.ai
+
 # --- OpenRouter [openrouter] ---
 # claude, fill in here
 openrouter.ai
@@ -317,14 +364,11 @@ numerai-public-datasets.s3-us-west-2.amazonaws.com
 # citation-client endpoint is listed, since any client may be exercised.
 # Overlaps already covered elsewhere and NOT repeated here: api.anthropic.com
 # [claude], api.openai.com [openai], github.com/codeload.github.com [git],
-# pypi/pythonhosted [pypi].
+# pypi/pythonhosted [pypi], api.tavily.com [web-read] (the citation clients'
+# Tavily search shares the broker's entry — moved there 2026-08-25).
 #
-# LLM / search / tracing:
+# LLM / tracing:
 generativelanguage.googleapis.com
-# api.tavily.com is dual-purpose: citation-tooling search AND the `webfetch`
-# web-read broker (docs/web-read-broker.md). Keep it — the broker lets the
-# agent read arbitrary pages WITHOUT adding their domains here.
-api.tavily.com
 api.smith.langchain.com
 # Citation & literature services:
 eutils.ncbi.nlm.nih.gov
@@ -342,21 +386,6 @@ api.biorxiv.org
 www.biorxiv.org
 www.medrxiv.org
 chemrxiv.org
-
-# --- Firecrawl web-read broker [firecrawl] ---
-# Second backend for the `webfetch` broker (`--via firecrawl`, key
-# FIRECRAWL_API_KEY in the profile's secrets.env). Same class as api.tavily.com
-# above: the arbitrary-URL fetch happens on Firecrawl's infrastructure and only
-# clean text comes back, so this adds ONE host, not the open web
-# (docs/web-read-broker.md).
-#
-# It is also one more host the agent can POST to, i.e. one more exfil channel —
-# that is the cost of every broker backend and the reason they are pinned to
-# the exact API host, never a `.firecrawl.dev` wildcard (M3).
-#
-# Host confirmed against the broker's own call site: it posts to
-# https://api.firecrawl.dev/v1/scrape (sandbox_templates/bin/webfetch).
-api.firecrawl.dev
 
 # --- Grants.gov REST APIs [grants-gov] ---
 # Federal grants search/opportunity APIs for a grant-admin research

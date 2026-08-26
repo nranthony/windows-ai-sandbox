@@ -69,7 +69,7 @@ this one proposal home; its five files are kept, unrenumbered, in `docs/_archive
 
 - [Squid internals](squid-internals.md) — cap model, tmpfs ownership, port restrictions, hot reload
 - [Compose network IPAM](compose-network-ipam.md) — why `down` is needed for IPAM changes, DNS lockdown explained
-- [Web-read broker (`webfetch`)](web-read-broker.md) — how the agent reads arbitrary pages through an allowlisted reader API (Tavily/Jina/Firecrawl) without widening egress
+- [Web-read broker (`webfetch`)](web-read-broker.md) — how the agent reads arbitrary pages through an allowlisted reader API (Tavily/TinyFish/Jina/Firecrawl) without widening egress; `scripts/webfetch.test.sh` locks it
 
 ## GPU & Docker
 

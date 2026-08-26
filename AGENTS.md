@@ -82,6 +82,12 @@ These files carry the sandbox's guarantees:
   through the door meant to check it. It verifies every hash **before copying
   anything**, asserts manifest paths stay inside the channel root, and invokes
   the channel's own `bin/dirhash.py` rather than reimplementing a tree hash.
+- `sandbox_templates/bin/webfetch` — the **only** sanctioned route by which the
+  agent reads the open web (`docs/web-read-broker.md`): every backend is a
+  hosted reader whose exact API host is allowlisted, so the arbitrary-URL egress
+  happens on the vendor's side. A bug here is quiet — a backend that returns
+  nothing reads as "empty page", and a key placed in a URL is visible only in
+  Squid's access log. Keys come from the environment ONLY, never argv.
 
 Any change to them requires:
 1. The commit message states the security impact.
@@ -207,6 +213,21 @@ member's HEAD — otherwise the check reddens on an ordinary state); and **a
 prefix over-match counts as covered** in `--permissions` (`statuses` riding
 `status:*`), because a check that cries wolf on its first run is a check that
 gets ignored.
+Edits to `sandbox_templates/bin/webfetch`, to any broker host in
+`proxy/allowed_domains.txt`, or to `sandbox_templates/common/secrets.env.template`
+require `bash scripts/webfetch.test.sh` (74/74, offline — no docker, no
+network, no key). It runs the broker as a real subprocess with `urlopen`
+shimmed, so its locks are measured: **no request leaves when a key is
+missing**; **keys travel in headers, never in URLs** (Squid logs URLs, so a
+key in a query string is a leak the agent cannot see); **every host the broker
+calls is an exact live allowlist line, and the hosts it must never reach are
+not** (TinyFish's Agent/Browser APIs share the key with its free Search/Fetch —
+a cloud browser the model steers is a write surface, and `.tinyfish.ai` as a
+wildcard would open it); **every env var it reads is named in the secrets
+template** (a plausible synonym reads as unset); and **the untrusted banner is
+the first line on stdout with hostile text passing through verbatim after it**
+— the banner marks the boundary, it does not filter, and a "fix" that filtered
+would hide the injection from the reader rather than from the model.
 Edits to `sandbox_templates/common/agent-notice.md` require
 `bash scripts/agent-notice.test.sh` (13/13, offline). The notice is the one file
 here whose text is read from filesystems where this repo does not exist —
@@ -231,7 +252,7 @@ Edits to the scanned surfaces in the public-repo check below require
 when `.private-names.local` is unconfigured, so a green run there is not
 proof of coverage — see "Public-repo constraints".
 
-`just test-offline` runs all nine suites, then `just check-upstreams`. Verify
+`just test-offline` runs all ten suites, then `just check-upstreams`. Verify
 additionally asserts no `*.bak*` sits beside the seeded skills: `converge_skills`
 prunes only `*.bak.*`, so the unstamped form survives it.
 

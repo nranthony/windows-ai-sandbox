@@ -28,6 +28,16 @@ Backends (pluggable):
 | `tavily` (default) | `api.tavily.com`      | **yes** (already)     | `TAVILY_API_KEY` (required) |
 | `jina`      | `r.jina.ai` / `s.jina.ai`    | no — add first        | `JINA_API_KEY` (optional; keyless = rate-limited) |
 | `firecrawl` | `api.firecrawl.dev`          | **yes** (since 08-08) | `FIRECRAWL_API_KEY` (required) |
+| `tinyfish`  | `api.search.tinyfish.ai` + `api.fetch.tinyfish.ai` | **yes** (since 08-25) | `TINYFISH_API_KEY` (required) |
+
+TinyFish is wired for its **Search and Fetch APIs only** (both free tier, no
+wallet). The same key also unlocks the vendor's Agent and Browser APIs and an
+MCP server (`agent.tinyfish.ai`) — a cloud browser the model steers, i.e. a
+write surface (logins, form-fills, arbitrary POSTs). Those hosts are not
+allowlisted, the broker never calls them, and `scripts/webfetch.test.sh` locks
+both facts. Do not "connect" the TinyFish MCP inside a profile to get them; the
+vendor's `npx -y @tiny-fish/cli connect --all` onboarding is a fetch-and-run
+form the sandbox denies by name, and it also puts the key on argv.
 
 Note the host is `api.firecrawl.**dev**` — `api.firecrawl.com` is not what the
 broker calls, and allowlisting it yields a TCP_DENIED that reads like a bad key.
@@ -49,8 +59,9 @@ ever removed.
 
 ## Security properties
 
-- **No new egress.** The backends resolve to two allowlisted hosts
-  (`api.tavily.com`, `api.firecrawl.dev`) — arbitrary-URL fetching happens on
+- **No new egress.** The backends resolve to four allowlisted hosts
+  (`api.tavily.com`, `api.firecrawl.dev`, `api.search.tinyfish.ai`,
+  `api.fetch.tinyfish.ai`) — arbitrary-URL fetching happens on
   *their* infrastructure, so the sandbox's own surface does not grow with the
   pages read. Each backend is, however, one more host the agent can POST to;
   enabling Jina requires an explicit allowlist edit (+ reload) first.
@@ -83,7 +94,7 @@ template into the profile dir.
 
 ## Enabling Firecrawl
 
-`api.firecrawl.dev` is allowlisted (block `[firecrawl]`), so only the key is
+`api.firecrawl.dev` is allowlisted (block `[web-read]`), so only the key is
 left:
 
 1. Set `FIRECRAWL_API_KEY=fc-...` in `~/.ai-sandbox/profiles/<p>/secrets.env`.
@@ -91,10 +102,33 @@ left:
    and a plain `up` will not re-read it for an already-running agent.
 3. `webfetch extract <url> --via firecrawl`.
 
+## Enabling TinyFish
+
+Both API hosts are allowlisted (block `[web-read]`), so only the key is left:
+
+1. Set `TINYFISH_API_KEY=sk-tinyfish-...` in `~/.ai-sandbox/profiles/<p>/secrets.env`.
+2. `scripts/profile.sh <p> recreate` (env_file is read at container CREATE).
+3. `webfetch search "<query>" --via tinyfish` / `webfetch extract <url> --via tinyfish`.
+
+Fetch takes up to 10 URLs per request; the broker batches longer lists.
+Search returns snippets, not a synthesized answer — `extract` the hits you want.
+
+## Testing
+
+`bash scripts/webfetch.test.sh` — offline, no key. It runs the broker as a
+real subprocess with `urllib.request.urlopen` shimmed, so it measures (not
+infers) that no request leaves when a key is missing, that keys travel in
+headers and never in URLs (Squid logs URLs), that every host the broker calls
+is an exact live allowlist line and the write-surface hosts are not, that every
+env var it reads is named in `secrets.env.template`, and that the untrusted
+banner is the first thing on stdout with hostile text passing through verbatim
+after it. Part of `just test-offline`.
+
 ## Adding Jina later
 
-1. Add `r.jina.ai` (+ `s.jina.ai` for search) to `proxy/allowed_domains.txt`
-   and reload the proxy (`docker restart egress-proxy-<profile>`, or
+1. Uncomment `r.jina.ai` (+ `s.jina.ai` for search) in the `[web-read]` block
+   of `proxy/allowed_domains.txt` — they are already there, commented — and
+   reload the proxy (`docker restart egress-proxy-<profile>`, or
    `squid -k reconfigure` — both apply since the directory mount).
 2. Add the key to `secrets.env` (Jina's is optional) and recreate the agent.
 3. The agent selects it with `--via jina`.

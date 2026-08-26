@@ -146,6 +146,7 @@ test-offline:
     bash {{justfile_directory()}}/scripts/vendor-tools.test.sh
     bash {{justfile_directory()}}/scripts/agent-notice.test.sh
     bash {{justfile_directory()}}/scripts/agent-policy.test.sh
+    bash {{justfile_directory()}}/scripts/webfetch.test.sh
     bash {{justfile_directory()}}/scripts/private-names-check.sh
     @just --justfile {{justfile()}} check-upstreams
 
