@@ -417,6 +417,33 @@ This item **widens egress** — that is its main risk. Three things bound it:
    genuine posture *regression* in the item and should be stated in the commit
    message rather than glossed. Mitigation to consider under D1: keep node
    installation on the gated tag too, so it is a deliberate act.
+4. **The web UI has its own egress path, and the sandbox does not cover it.**
+   Added 2026-08-28, after sign-off, because it corrects a mental model the rest
+   of this item rests on. Points 1-3 all reason about what the *container* can
+   reach. ComfyUI's frontend runs in the operator's BROWSER, on the host, so any
+   request its JavaScript makes leaves via the host's network — never through
+   `egress-proxy-<profile>`, never subject to `allowed_domains.txt`, and never
+   recorded in `access.log`. Squid cannot see it and `verify`/`audit` cannot
+   reach it.
+
+   This is not hypothetical. ComfyUI-Manager ships share integrations whose JS
+   targets `openart.ai`, `contest.openart.ai`, `copus.io`,
+   `api.client.prod.copus.io`, `comfyworkflows.com` and `app.element.io` (the
+   Matrix client that `matrix-nio` in Manager's own requirements pairs with).
+   A workflow uploaded through one of those buttons goes to a third party with
+   nothing in this repo's controls in the path, and no evidence left behind on
+   the sandbox side.
+
+   Bounding it, and why this is a note rather than an action: every one of those
+   is behind a user-initiated Share control, so nothing transmits unattended —
+   unlike points 1-3, which fire on ordinary use. The exposure is what the
+   operator chooses to click, not what the software does on its own.
+
+   The rule to carry forward: **the container boundary ends at the container.**
+   For any browser-delivered UI served out of a profile, the allowlist is not
+   the control, and reasoning that starts "Squid would block it" is wrong before
+   it begins. Worth remembering for any future service in a profile that serves
+   a web frontend, not just ComfyUI.
 
 ## 8. Execution log (2026-08-28)
 
