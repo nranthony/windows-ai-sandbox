@@ -1,34 +1,15 @@
 # 0016 — Move ComfyUI into the sandbox, retire `my_comfyui/.devcontainer/`
 
-**Status:** All four decisions closed 2026-08-28. The devcontainer is gone and
-ComfyUI runs in the sandbox on GPU. **One owner action outstanding before this
-can be archived: an image rebuild + per-profile recreate, so D4's `libgl1`
-actually lands.** Everything else is done.
+**Status: COMPLETE — signed off 2026-08-28.** All four decisions closed, the
+devcontainer is gone, ComfyUI runs in the sandbox on GPU with ComfyUI-Manager
+loading cleanly, and the image rebuild + profile recreate are done. Ready to
+archive. §11 records what the execution taught that the decisions did not
+anticipate — read it before trusting D1's original wording.
 
-**Landed ahead of sign-off (2026-08-27), because both are inert:** the three
-gated allowlist blocks in `proxy/allowed_domains.txt` and their `GATED_TAGS`
-entries in `scripts/audit/probes/proxy.py`. They are CLOSED — live domain count
-is unchanged at 69 — so they widen nothing until someone runs `with-egress.sh`.
-D1 is now a choice of which tags to open, not a file edit. See §3.
-
-**D4 DECIDED 2026-08-28 — `libgl1` goes in the shared image.** Landed in the
-`Dockerfile` as its own layer above the ordering chain. **Needs an image
-rebuild + per-profile recreate to take effect.**
-
-**Manager `security_level` SETTLED 2026-08-28 — stays `normal`.** There is no
-`medium`; the values are `strong | normal | normal- | weak`
-(`manager_core.py:1775`). `normal` is already the tightest level that still
-permits UI node installs, and it blocks the two `high`-gated routes —
-`/customnode/install/git_url` (arbitrary git URL) and `/customnode/install/pip`
-(arbitrary pip package), `manager_server.py:1356`/`:1376`. `normal-` would open
-both whenever ComfyUI is bound to loopback (`is_local_mode`, `:113`) — which is
-now always, since `just run` drops `--listen`. So `normal-` is strictly worse
-here than it looks. No change made.
-
-**D1 DECIDED 2026-08-28 — offline.** The owner chose Manager's own
-`network_mode = offline` over opening `[comfyui]`. No egress is opened; the
-three blocks stay closed and remain available if that changes. Executed, along
-with the rest of §5.4 — see §8.
+**D1's protection is NARROWER than §8 claims — see §11.1.** `network_mode =
+offline` gates Manager's catalogue fetches ONLY. It does not gate Manager's
+dependency self-install, and it does not gate model downloads. Both were
+measured, not inferred.
 
 **Exit rule:** delete this folder, or move to [`docs/_archive/`](../../docs/_archive/),
 when the work merges.
@@ -574,3 +555,155 @@ path and costs nothing here.
 comes back first (decide Xet *before* the §5.1 observation run, since it changes
 which hosts appear), and D2 becomes worth re-asking only if the local tree is
 still growing.
+
+## 11. What execution taught — corrections to the decisions (2026-08-28)
+
+Everything below was measured during the actual migration, after §3's decisions
+were closed. Where it contradicts an earlier section, this section is right.
+
+### 11.1 D1 CORRECTION — `network_mode = offline` is narrower than §8 claims
+
+§8 records D1 as "offline, zero egress opened", with the implication that
+offline closes Manager's network behaviour. It does not. Manager has exactly
+**two** `network_mode` checks, and neither is on the paths that matter most:
+
+| Location | What it actually gates |
+|---|---|
+| `manager_server.py:2075` | the five startup catalogue fetches |
+| `manager_core.py:2435` | `get_data_by_mode` falling back to cache |
+
+Two things it does **NOT** gate, both measured live:
+
+1. **Manager's dependency self-install.** At startup Manager runs its own
+   `uv pip install` for `requirements.txt` (GitPython, PyGithub, matrix-nio,
+   transformers, huggingface-hub, typer, rich, typing-extensions, toml, uv,
+   chardet). This reaches PyPI directly and offline does not stop it. See §11.3.
+2. **Model downloads.** `install_model` (`manager_server.py:1721`) checks
+   `is_allowed_security_level('middle')` and a URL whitelist — there is no
+   `network_mode` check on the route. Models download normally with offline set.
+
+So offline suppresses catalogue *refreshes* and the startup tracebacks. It is
+not a network kill switch, and it must not be described as one. The real control
+on model fetches is `security_level` plus the model-list whitelist, which is the
+§3 Manager decision doing its job.
+
+### 11.2 `[pytorch]` needed THREE hosts, found one at a time
+
+D1 opened no egress, and the always-on set is still 69 domains — that half of §8
+stands. But installing torch cu130 grew the **gated** `[pytorch]` tag from one
+host to three:
+
+```
+download.pytorch.org      the simple index + .metadata probes
+download-r2.pytorch.org   the wheel BYTES (Cloudflare R2) — index 302s here
+pypi.nvidia.com           NVIDIA's index, which the cu130 index links out to
+```
+
+Each surfaced only once the previous one was allowed, and each failed as
+`tunnel error: unsuccessful` — a message that reads as a network fault, not an
+allowlist gap. Evidence at the time: 52x `TCP_TUNNEL/200 download.pytorch.org`,
+12x `TCP_DENIED/403 download-r2.pytorch.org`, then 13x `TCP_DENIED/403
+pypi.nvidia.com`. This is §2.6's CDN rule holding twice over: **observe the host
+in Squid's log, never predict it.** Expect the same for `huggingface.co`, which
+now serves bytes through Xet (`hf-xet` is installed in the venv).
+
+### 11.3 A ComfyUI startup installed 63 packages OUTSIDE `with-egress.sh`
+
+With `[pypi]` left open after an install window, starting ComfyUI let Manager
+self-install 63 packages: no OSV pre-flight, no age gate, no `depgate.jsonl`
+record. **8 of the 64 were younger than the 7-day quarantine**, including
+`gitpython 3.1.61` published ~11 hours earlier, `uv 0.12.7`, and
+`cryptography 50.0.1`. OSV was clean on all of them, which for a package that
+age means very little.
+
+Mitigating: they landed in `/root/.venv` (the wrong venv — §11.4), which nothing
+loads, and which the recreate discarded. So it was a **control bypass, not a
+compromise**. But it is a concrete demonstration that ADR-0003's "with-egress is
+the only route by which a dependency can enter a profile" holds only while the
+tags are closed — an application that self-installs will use any open tag.
+
+The lesson for operating ComfyUI: close `[pypi]` before starting it, or accept
+that Manager's dependency resolution is ungated.
+
+### 11.4 Manager installed into the WRONG venv, and why
+
+`ModuleNotFoundError: No module named 'git'` — Manager installed GitPython into
+`/root/.venv` (Python 3.12.3, the image's build venv) while ComfyUI ran under
+`/workspace/my_comfyui/.venv` (3.13.15), so Manager failed to import entirely.
+
+`manager_util.py:49-79` picks its package manager in three steps:
+
+| | Attempt | Result |
+|---|---|---|
+| 1 | `sys.executable -m pip` | failed — uv-created venvs ship no pip |
+| 2 | `sys.executable -m uv` | failed — uv not in the venv |
+| 3 | `shutil.which('uv')` → `['uv','pip']` | taken — **no `--python`**, target is ambient |
+
+Only 1 and 2 bind to the running interpreter. **Fix: install `pip` AND `uv` into
+the workspace venv**, which makes step 2 win and pins every later install to the
+right interpreter. Because `.venv` is on the host bind mount, this survives
+`docker rm` and Manager never self-installs again — verified: a clean start now
+logs `Using Python 3.13.15 environment at: /workspace/my_comfyui/.venv` and
+installs nothing.
+
+### 11.5 The cu130 install needs `--allow-fresh`; requirements.txt needed it too
+
+Neither was anticipated. torch pins CUDA wheels (`cuda-toolkit`,
+`cuda-bindings`, `nvidia-cudnn-cu13`) published inside the 7-day window, so the
+age gate makes resolution unsatisfiable until suppressed. Separately,
+`comfyui-workflow-templates 0.11.48` and its four exact-pinned siblings plus
+`comfy-aimdo 0.4.15` are one upstream release published 2026-08-25 — five
+packages, one decision.
+
+Recording the shape because it recurs on every ComfyUI upgrade: **ComfyUI's
+release train moves faster than a 7-day quarantine**, so a `--allow-fresh` window
+with a real reason is the normal path here, not an exception.
+
+### 11.6 Image changes this work added beyond D4
+
+D4 was `libgl1`. Execution added, in the same shared image:
+
+- **Python 3.12.14 + 3.13.15 baked** (`uv python install`, ~207 MB) — ComfyUI
+  moved to 3.13 and the interpreter download needs GitHub release-asset hosts
+  that live only in closed gated blocks. The build bypasses Squid; a running
+  container does not.
+- **`UV_PYTHON_INSTALL_DIR=/opt/uv/python`** — uv's default is the 256 MB noexec
+  ephemeral `/root/.local` tmpfs, where an interpreter installs and then cannot
+  execute, and vanishes on recreate taking `.venv/bin/python`'s symlink with it.
+  `/root/.cache` looks right and is wrong: it IS a bind mount, so anything baked
+  there is shadowed at container start.
+- **`UV_PYTHON_BIN_DIR=/usr/local/bin`** — same trap one level down; uv's
+  convenience symlinks default into the noexec tmpfs.
+- **`UV_LINK_MODE=copy`** — the cache and every workspace venv are separate bind
+  mounts, and Linux returns `EXDEV` across mount points even on one device, so uv
+  can never hardlink here and warned on every install.
+
+### 11.7 Dependency risk scan — point-in-time, 2026-08-28
+
+Against the full 70-package resolved set of `comfyui/requirements.txt`: **zero
+OSV advisories**; **every pinned version has a wheel**, so Gate 3's
+`no-build = true` needs no exception and no `setup.py` runs at install;
+`comfy-aimdo` and `comfy-angle` carry PEP 740 attestations binding them to
+`Comfy-Org/*` via Trusted Publishing. The `comfyui-workflow-templates` family is
+vouched for structurally — the parent declares its four siblings as exact pins
+and all were published within 29 seconds.
+
+**This scan had to be run by hand.** `scripts/profile.sh <p> deps` does not cover
+`my_comfyui` at all: it scans the workspace root plus each immediate child that
+has a manifest AT ITS ROOT, and ComfyUI's is at `comfyui/requirements.txt`. The
+summary printed 11 repos and said nothing about the omission. Filed as
+**work/0018**.
+
+### 11.8 Final verified state
+
+```
+libGL.so.1 present · python3.13 → 3.13.15 · python3.12 → 3.12.14
+UV_LINK_MODE=copy · UV_PYTHON_INSTALL_DIR=/opt/uv/python · UV_PYTHON_BIN_DIR=/usr/local/bin
+torch 2.13.0+cu130 · cuda True · RTX 3080 Ti · 12288 MB VRAM
+ComfyUI 0.34.1 · Manager V3.41 loaded, network_mode: offline, installs nothing
+allowlist: 69 live domains (baseline); every ComfyUI tag closed
+verify: 52 passed | 0 failed | 1 pre-existing ADR-0004 warning
+```
+
+`therapod` and `fluidmomenta` remain on the previous image. Out of scope for
+this item — they need a routine `up` whenever convenient.
