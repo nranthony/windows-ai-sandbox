@@ -503,6 +503,68 @@ blender.org
 # drive.google.com
 # sheets.googleapis.com
 
+# # --- ComfyUI app control plane [comfyui] ---
+# # ComfyUI-Manager's node/model DATABASE and the Comfy Registry — not model
+# # weights (those are [comfyui-models]). Without raw.githubusercontent.com the
+# # Manager UI cannot populate at all: glob/manager_core.py pins DEFAULT_CHANNEL
+# # to raw.githubusercontent.com/ltdrdata/ComfyUI-Manager/main. api.comfy.org is
+# # glob/cnr_utils.py's base_url; registry.comfy.org serves node reference links.
+# # MEASURED 2026-08-28, first real run inside a profile: with this block closed
+# # Manager fails five startup fetches (custom-node-list, alter-list,
+# # extension-node-map, model-list, github-stats) with `403 Forbidden` from
+# # egress-proxy:3128, plus `Cannot connect to comfyregistry`, then falls back to
+# # its bundled copies and logs "switching to local mode". Read-only browsing of
+# # the catalogue still works offline; it is updates that stop. Manager's own
+# # `network_mode: offline` setting suppresses the attempts (and the traceback
+# # noise) if you never intend to open this — prefer that over opening the block.
+# # Node INSTALLS clone from github.com, which is always-on under [git] — so
+# # opening this tag is what turns "browse the catalogue" into a working UI,
+# # while node install itself is already reachable. Keep gated: a workflow run
+# # should not be able to reach the catalogue unattended. raw.githubusercontent
+# # also appears under [beads-install]; duplicate dstdomain lines are harmless.
+# raw.githubusercontent.com
+# api.comfy.org
+# registry.comfy.org
+
+# # --- ComfyUI model weights — main path [comfyui-models] ---
+# # 91% of ComfyUI-Manager's curated model-list.json (479 of 527 URL entries)
+# # resolves to huggingface.co, as do the seven installed custom nodes that fetch
+# # at node-execution time via hf_hub_download / from_pretrained.
+# # THIS BLOCK IS INCOMPLETE BY CONSTRUCTION. huggingface.co only serves the
+# # metadata request; the bytes come from a CDN host chosen by the server at
+# # request time — an X-Xet-Cas-Url response header under Xet (huggingface_hub
+# # constants.py:274), or a 302 to a server-picked CDN without it. Neither host
+# # appears in any source file, and requests follows the redirect silently, so a
+# # denial presents as "download failed" with no host named. Do NOT guess the
+# # CDN names into this block: open it, pull one small model, read the actual
+# # TCP_DENIED lines out of Squid's access.log, and add the exact hosts seen —
+# # the same procedure the [numerai] block documents for its dynamic S3 buckets.
+# # Capture that log live; cache.log is tmpfs and docker logs is blind for squid.
+# # Setting HF_HUB_DISABLE_XET=1 forces the classic CDN path and narrows the host
+# # set (constants.py:283 -> utils/_runtime.py:159) at a cost in download speed.
+# # Pinned hosts only, no parent wildcards — same stance as [git].
+# # SECURITY: huggingface.co hosts arbitrary user-uploaded repos, so this is a
+# # general fetch capability, not a narrow vendor API. It is also the container
+# # an agent runs in. That is why this is gated and not always-on. Weights are
+# # executable-adjacent (.ckpt is pickle); nothing in this repo inspects them.
+# huggingface.co
+
+# # --- ComfyUI model weights — long tail [comfyui-models-extra] ---
+# # The remaining ~9% of the curated list: dl.fbaipublicfiles.com is Meta (SAM,
+# # detectron, 19 entries across the main and node_db/new lists), civitai.com is
+# # 6 entries, heibox.uni-heidelberg.de is the original LDM/VAE weights, and
+# # openaipublic.azureedge.net is CLIP. Split from [comfyui-models] so the
+# # narrow choice (huggingface only) and the wide one are a one-word difference
+# # at the command line rather than an edit to this file. storage.googleapis.com
+# # accounts for one further entry and already exists gated under [kaggle] and
+# # [antigravity-install] — open one of those instead of duplicating it here.
+# # civitai.com redirects downloads to an R2 bucket host; same observation rule
+# # as [comfyui-models] applies — read the denial out of access.log, do not guess.
+# dl.fbaipublicfiles.com
+# civitai.com
+# heibox.uni-heidelberg.de
+# openaipublic.azureedge.net
+
 
 # =============================================================================
 # === DROPPED — explicitly NOT in the list ===================================
