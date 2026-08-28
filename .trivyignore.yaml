@@ -13,13 +13,17 @@
 # =============================================================================
 
 vulnerabilities:
-  # --- Ubuntu base (digest-pinned) — fix exists, needs a deliberate pin bump
-  # openssl/libssl3 3.0.13-0ubuntu3.4 -> 3.0.13-0ubuntu3.11. The FROM digest
-  # freezes the base by design; clearing this means bumping the pin (see the
-  # base-image note in the 2026-08-24 scan review), not rebuilding.
-  - id: CVE-2026-45447
-    statement: "openssl in the digest-pinned CUDA base; fixed in ubuntu3.11 — clears at the next deliberate base-digest bump."
-    expired_at: 2026-08-31
+  # --- Ubuntu base openssl: RESOLVED 2026-08-28, entry deleted.
+  # CVE-2026-45447 (openssl/libssl3t64) was accepted here while the pinned base
+  # shipped 3.0.13-0ubuntu3.4. The 2026-08-28 rebuild scans with
+  # libssl3t64@3.0.13-0ubuntu3.15 — past the ubuntu3.11 fix — so the finding no
+  # longer fires with or without this file, and per the workflow above the entry
+  # was deleted rather than extended.
+  #
+  # NOTE: the base digest is UNCHANGED. What fixed it is the targeted
+  # `apt-get install --only-upgrade openssl libssl3t64` layer in the Dockerfile,
+  # not a fresher base. Remove that line and the CVE returns with no ignore
+  # entry left to explain it — which is why the Dockerfile comment there says so.
 
   # --- npm-installed CLI bundled deps — arrive with upstream CLI releases,
   # behind the 7-day build-time quarantine (min-release-age). ReDoS-class /

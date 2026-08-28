@@ -63,8 +63,11 @@ RUN apt-get update \
  # been rebuilt upstream, so re-pulling it fetches identical bytes and
  # cannot clear the finding. This upgrades exactly the two flagged packages
  # while leaving the base digest — and its reproducibility — untouched.
- # Drop the matching .trivyignore.yaml entry (expires 2026-08-31) once a
- # rebuilt base image scans clean on its own.
+ # The .trivyignore.yaml entry for CVE-2026-45447 was DELETED on 2026-08-28:
+ # that rebuild scans with libssl3t64@3.0.13-0ubuntu3.15, past the ubuntu3.11
+ # fix, so the finding no longer fires. This upgrade line is now the ONLY thing
+ # holding it clear — the base digest still ships ubuntu3.4. Remove this line
+ # and the CVE comes back with no ignore entry left to explain it.
  && apt-get install -y --only-upgrade openssl libssl3t64 \
  && apt-get purge -y openssh-client \
  && if dpkg -l openssh-client 2>/dev/null | awk '/^ii/{found=1} END{exit !found}'; then \
