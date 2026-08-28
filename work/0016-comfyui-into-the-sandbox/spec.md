@@ -1,15 +1,19 @@
 # 0016 — Move ComfyUI into the sandbox, retire `my_comfyui/.devcontainer/`
 
-**Status:** Draft — captured 2026-08-27, not started. **The four decisions in §3
-are gates: present them to the owner for sign-off BEFORE implementing anything.**
-D1 (model-weight egress) is a security-boundary decision and the only one that
-must be settled first — everything else is mechanical.
+**Status:** In flight — D1 decided and executed 2026-08-28 (§8); D2/D3/D4 still
+open gates for the owner. The devcontainer is gone and ComfyUI runs in the
+sandbox, so the item's goal is met; what remains is cleanup, not feasibility.
 
 **Landed ahead of sign-off (2026-08-27), because both are inert:** the three
 gated allowlist blocks in `proxy/allowed_domains.txt` and their `GATED_TAGS`
 entries in `scripts/audit/probes/proxy.py`. They are CLOSED — live domain count
-is unchanged at 73 — so they widen nothing until someone runs `with-egress.sh`.
+is unchanged at 69 — so they widen nothing until someone runs `with-egress.sh`.
 D1 is now a choice of which tags to open, not a file edit. See §3.
+
+**D1 DECIDED 2026-08-28 — offline.** The owner chose Manager's own
+`network_mode = offline` over opening `[comfyui]`. No egress is opened; the
+three blocks stay closed and remain available if that changes. Executed, along
+with the rest of §5.4 — see §8.
 
 **Exit rule:** delete this folder, or move to [`docs/_archive/`](../../docs/_archive/),
 when the work merges.
@@ -417,3 +421,71 @@ This item **widens egress** — that is its main risk. Three things bound it:
    genuine posture *regression* in the item and should be stated in the commit
    message rather than glossed. Mitigation to consider under D1: keep node
    installation on the gated tag too, so it is a deliberate act.
+
+## 8. Execution log (2026-08-28)
+
+**D1 = offline.** Zero egress opened. The three gated blocks stay closed and
+committed, available if the decision is ever revisited.
+
+Done, in `~/repo/nranthony/my_comfyui` (uncommitted there — the owner commits):
+
+- **`network_mode = public` → `offline`** in
+  `comfyui/user/__manager/config.ini`. Verified against Manager's source, not
+  guessed: valid values are `public | private | offline` (`manager_core.py:1774`,
+  lowercased at `:1745`), and `manager_server.py:1844` gates all five startup
+  fetches *and* the comfyregistry reload behind `!= 'offline'`, with
+  `manager_core.py:2297` falling back to the bundled file. Read at startup only.
+- **New `justfile`** carrying the toggle (`net-offline` / `net-public` /
+  `net-status`) plus `run` / `run-listen`. The toggle needed a home: the config
+  file lives under the gitignored `comfyui/` tree, so a hand `sed` is not
+  reproducible and does not survive a re-clone.
+- **`run` drops `--listen`** — binds loopback only. VS Code's tunnel forwards
+  8188 from an attached container regardless, so the `0.0.0.0` bind bought
+  nothing and is exactly what `remote.autoForwardPorts: false` exists to catch.
+  `run-listen` keeps the old behaviour for when something outside must reach it.
+- **`impact-pack.ini`** `custom_wildcards` repointed from `/workspaces/…` to
+  `/workspace/…`. The target directory exists, so this clears the startup
+  WARNING and the silent fallback.
+- **`.devcontainer/` and `.env.example` deleted.**
+  `ROOTLESS-DOCKER-NOTES.md` and `GPU-FIX-MIGRATION.md` were NOT deleted with
+  them — they are host-setup narrative, not container plumbing, so they moved to
+  `docs/_archive/` under this repo's own "archived, not deleted" ethic. Both are
+  superseded here (the `/dev/dxg` vs `--gpus all` decision is the header comment
+  of `docker-compose.wsl-gpu.yml`; the container-root rationale is in
+  ARCHITECTURE.md) but they are that repo's history.
+- **`README.md` rewritten** — attach flow, the `with-egress.sh --with
+  pypi,pytorch` install recipe, the offline-Manager step, ComfyUI pin corrected
+  `v0.18.5`/`7782171a` → `v0.34.1`/`7597a5a0`, `.env` references removed, and the
+  tracked-vs-not table updated. The cu130-on-12.6-base result is stated there so
+  the next person does not re-derive it.
+- **`.gitignore`** — `.env` stays ignored, with a note saying nothing consumes
+  it any more.
+
+### Not done, deliberately
+
+- **The opencv variant collision (D4).** All three of `opencv-python`,
+  `opencv-contrib-python` and `opencv-python-headless` are installed; headless
+  currently wins the `cv2` import by install order alone. **Uninstalling the
+  other two is not safe right now:** `opencv-python-headless` lacks the contrib
+  modules (`cv2.ximgproc` and friends) that `comfyui_controlnet_aux`
+  preprocessors use, and the correct single package —
+  `opencv-contrib-python-headless` — is not installed and cannot be fetched with
+  `[pypi]` closed. Doing the uninstall now would break nodes with no way back.
+  Fold it into the next `with-egress.sh --with pypi` window, or settle D4 in
+  favour of `libgl1` in the shared image, which makes the variant irrelevant.
+- **The venv rebuild.** It works as-is; the `urllib3`/`chardet` mismatch warning
+  is cosmetic. Batch it with the opencv fix rather than opening egress twice.
+- **D2 (71 GB model relocation), D3 (Xet), D4 (libgl1)** — still open, all
+  unblocked by the offline decision.
+- **`docker network rm ai-sandbox`** — the 172.20.0.0/16 orphan with zero
+  containers attached. Owner's call, unrelated to the repo change.
+
+### Worth knowing
+
+`security_level = normal` in the same Manager config. Per
+`manager_server.py:109-121` that **permits** `middle`-gated actions — which is
+custom-node install/uninstall/update — and blocks only `high`. Setting it to
+`strong` would close Manager's install path entirely and directly addresses the
+§7 residual (arbitrary Python from GitHub executed in-process, now beside agent
+credentials). Left at `normal` because it would stop the owner installing nodes
+and was not part of D1, but it is the natural companion decision.
