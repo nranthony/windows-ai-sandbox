@@ -505,6 +505,51 @@ RUN mkdir -p /etc/uv \
     > /etc/pip.conf \
  && uv --version
 
+# ---------- managed CPython interpreters (3.12 + 3.13) -----------------------
+# uv's THIRD directory, and the one the UV_TOOL_DIR pin above missed.
+# `uv venv --python 3.13` fetches a MANAGED interpreter, and by default that
+# lands in /root/.local/share/uv/python — the 256m noexec tmpfs from
+# docker-compose.yml, where it installs and then cannot execute (measured:
+# exit 126, EPERM) and is wiped on every recreate. That last part is the quiet
+# failure: .venv/bin/python is a SYMLINK into this directory, never a copy, so a
+# workspace venv outlives the interpreter it points at and the repo reads as
+# broken rather than the interpreter as missing.
+#
+# /opt for the same reason UV_TOOL_DIR uses it: exec-allowed, and — the part
+# that decides it — NOT shadowed by a bind mount. /root/.cache is the
+# obvious-looking choice and is wrong: it IS a mount (docker-compose.yml,
+# ~/.ai-sandbox/profiles/<p>/cache), so anything baked there at build time is
+# invisible the instant the container starts.
+#
+# BAKED rather than left to first use because the download needs the GitHub
+# release-asset hosts, which exist only in CLOSED gated blocks in
+# proxy/allowed_domains.txt. The build bypasses Squid; a running container does
+# not. Leaving it to runtime means an egress window on every recreate.
+#
+# TWO versions so a workspace pinning either needs no egress: 3.13 for new work,
+# 3.12 to match the system /usr/bin/python3.12 (3.12.3) at a current patch
+# level. ~130 MB each. Add a version here rather than reaching for egress later.
+#
+# An ad-hoc `uv python install 3.11` at runtime still works, but lands in the
+# container's writable layer and dies on recreate — bake it here if it matters.
+#
+# UV_PYTHON_BIN_DIR is the SAME trap one level down, and the reason `python3.13`
+# would otherwise not be a command at runtime. `uv python install` also drops
+# convenience symlinks into a bin dir, defaulting to /root/.local/bin — which is
+# the noexec tmpfs again, so they are baked at build time and then wiped by the
+# mount at container start, leaving working interpreters that nothing on PATH
+# points at. Pinned to /usr/local/bin, exactly as UV_TOOL_BIN_DIR is, and for the
+# same reason. Measured, not assumed: with it set the symlink lands in
+# /usr/local/bin and /root/.local/bin/python3.13 does not exist.
+#
+# ABOVE the myclickup wheel deliberately: that payload is the most frequently
+# re-vendored artifact in the tree, and below it every bump would re-download
+# both interpreters.
+ENV UV_PYTHON_INSTALL_DIR=/opt/uv/python \
+    UV_PYTHON_BIN_DIR=/usr/local/bin
+RUN uv python install 3.12 3.13 \
+ && uv python list --only-installed
+
 # ---------- myclickup — vendored ClickUp CLI (OPTIONAL payload) --------------
 # Zero-dependency pure-Python wheel from the PRIVATE nranthony/myclickup repo
 # (its ADR-0002). `docker-compose.yml` sets `build.context: .`, so a sibling
@@ -582,8 +627,22 @@ RUN set -eu; \
 # sandbox_templates/common/agent-notice.md. LAST on PATH so a read-only,
 # host-controlled mount can never shadow an image binary. Inert on bare Linux,
 # where the overlay is not layered and the directory does not exist.
+#
+# UV_LINK_MODE=copy: uv populates a venv by hardlinking out of its cache, and
+# here that can NEVER work. The cache (/root/.cache) and every workspace venv
+# (/workspace) are separate BIND MOUNTS, and Linux returns EXDEV across mount
+# points even when both sit on the same device — measured: `stat -c %d` gives
+# 2096 for both, a same-mount link succeeds, and the cross-mount one fails with
+# `Invalid cross-device link`. So uv's default emits a "Failed to hardlink
+# files; falling back to full copy" warning on EVERY install in EVERY profile,
+# and its suggested causes ("different filesystems") send the reader looking for
+# a storage problem that does not exist. The copy is what happens regardless;
+# this only stops uv attempting the link first and warning about it. Runtime
+# only — the build has no bind mounts, so hardlinking works there and this is
+# deliberately not set above.
 ENV HOME=/root \
     SHELL=/usr/bin/zsh \
+    UV_LINK_MODE=copy \
     DISABLE_AUTOUPDATER=1 \
     DISABLE_UPDATES=1 \
     PATH="/root/.local/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/usr/lib/wsl/lib"
