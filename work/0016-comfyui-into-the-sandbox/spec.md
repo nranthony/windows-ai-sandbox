@@ -1,9 +1,9 @@
 # 0016 — Move ComfyUI into the sandbox, retire `my_comfyui/.devcontainer/`
 
-**Status:** In flight — D1 and D4 decided and executed 2026-08-28 (§8); **D2
-(model relocation) and D3 (Xet) remain open gates for the owner.** The
-devcontainer is gone and ComfyUI runs in the sandbox, so the item's goal is met;
-what remains is cleanup, not feasibility.
+**Status:** All four decisions closed 2026-08-28. The devcontainer is gone and
+ComfyUI runs in the sandbox on GPU. **One owner action outstanding before this
+can be archived: an image rebuild + per-profile recreate, so D4's `libgl1`
+actually lands.** Everything else is done.
 
 **Landed ahead of sign-off (2026-08-27), because both are inert:** the three
 gated allowlist blocks in `proxy/allowed_domains.txt` and their `GATED_TAGS`
@@ -490,8 +490,7 @@ Done, in `~/repo/nranthony/my_comfyui` (uncommitted there — the owner commits)
   favour of `libgl1` in the shared image, which makes the variant irrelevant.
 - **The venv rebuild.** It works as-is; the `urllib3`/`chardet` mismatch warning
   is cosmetic. Batch it with the opencv fix rather than opening egress twice.
-- **D2 (71 GB model relocation) and D3 (Xet)** — still open, both unblocked by
-  the offline decision. D4 is now decided and landed (see §9).
+- **D2 and D3** — CLOSED 2026-08-28, see §10. D4 landed, see §9.
 - **`docker network rm ai-sandbox`** — the 172.20.0.0/16 orphan with zero
   containers attached. Owner's call, unrelated to the repo change.
 
@@ -542,3 +541,36 @@ variant collision stops being a correctness problem — any of the three works. 
 is still untidy, and `opencv-contrib-python-headless` alone remains the intended
 end state, but it is no longer urgent and no longer needs its own egress window:
 fold it into the next venv rebuild whenever that happens for other reasons.
+
+## 10. D2 and D3 closed — no action (2026-08-28)
+
+**D2 — models stay where they are.** `comfyui/models/` remains at
+`~/repo/nranthony/my_comfyui/comfyui/models/` (71 GB: 39 G checkpoints, 15 G
+controlnet, 5.1 G ipadapter, 5.0 G depthanything, 4.6 G diffusers). No compose
+change, no new bind mount.
+
+Owner's reasoning, recorded because it is what makes this the right call rather
+than a deferral: much of the tree is **testing weights that do not need to
+survive**, and anything actually in use is re-downloadable. The tidiness
+argument for relocating (a 71 GB blob inside a git working tree) does not earn a
+`docker-compose.yml` edit against that. It is also time-boxed — the plan is to
+move heavier GPU work to hosted ComfyUI services once the workflows and
+pipelines are settled here, which would make a carefully-mounted local model
+directory short-lived infrastructure.
+
+The existing placement already satisfies the state-placement rule (host bind
+mount, survives `docker rm`) and disk is not a constraint (627 GB free on WSL
+ext4), so nothing is at risk. If it is ever revisited, the mechanism is
+`comfyui/extra_model_paths.yaml` plus one substrate-neutral bind mount.
+
+**D3 — Xet: moot, no setting changed.** `HF_HUB_DISABLE_XET` only matters when
+weights are pulled *through the proxy*, because its point was narrowing which
+CDN hosts have to be allowlisted. D1 chose `network_mode = offline` and opened
+no egress, so nothing routes through Squid and there is no host set to narrow.
+Left at the default (Xet active, `hf_xet` 1.4.2 installed) — it is the faster
+path and costs nothing here.
+
+**Revisit both only if `[comfyui-models]` is ever opened.** At that point D3
+comes back first (decide Xet *before* the §5.1 observation run, since it changes
+which hosts appear), and D2 becomes worth re-asking only if the local tree is
+still growing.
