@@ -317,12 +317,36 @@ codeload.github.com
 # gitlab.com
 
 # --- Python package ecosystem [pypi] ---
-# .pypi.org
-# .files.pythonhosted.org
-# .astral.sh
+.pypi.org
+.files.pythonhosted.org
+.astral.sh
 
 # --- PyTorch / NVIDIA CUDA wheels [pytorch] ---
-# download.pytorch.org
+# THREE hosts, and only the first is guessable. A cu130 install walks all three:
+#   download.pytorch.org      the simple index + .metadata probes
+#   download-r2.pytorch.org   the wheel BYTES (Cloudflare R2) — the index host
+#                             302s here, so with only the first, RESOLUTION
+#                             succeeds and the DOWNLOAD fails
+#   pypi.nvidia.com           NVIDIA's own index, which the cu130 index links
+#                             out to for nvidia-*/cuda-* dependencies
+# Each missing host fails as `tunnel error: unsuccessful`, which reads as a
+# network fault rather than an allowlist gap — so the failure never points at
+# this file. This tag is deliberately self-sufficient: pypi.nvidia.com sits here
+# rather than in [nvidia] below (different hosts, different purpose) so that
+# `--with pytorch` alone is enough.
+# OBSERVED, not guessed — the rule work/0016 §2.6 sets for CDN hosts, and it
+# took two rounds here because each host only appears once the one before it is
+# open. Measured 2026-08-28 in egress-proxy-<p> access.log during a cu130
+# install: 52x TCP_TUNNEL/200 download.pytorch.org, 12x TCP_DENIED/403
+# download-r2.pytorch.org, then 13x TCP_DENIED/403 pypi.nvidia.com once r2 was
+# allowed. with-egress.sh named each one on its DENIED line as it surfaced.
+# NOTE: torch's pinned CUDA deps (cuda-toolkit, cuda-bindings, nvidia-cudnn-cu13)
+# are often days old, so a cu130 install also needs
+# `--allow-fresh "<reason>"` to clear the 7-day age gate. That is a SEPARATE
+# control from this allowlist — opening egress does not lift it.
+download.pytorch.org
+download-r2.pytorch.org
+pypi.nvidia.com
 
 # --- Node.js / npm (Claude Code updates + per-repo npm) [npm] ---
 # registry.npmjs.org
@@ -330,8 +354,8 @@ codeload.github.com
 # deb.nodesource.com
 
 # --- NVIDIA container + compute stack [nvidia] ---
-# developer.download.nvidia.com
-# developer.nvidia.com
+developer.download.nvidia.com
+developer.nvidia.com
 
 # --- Numerai tournament + MCP [numerai] ---
 # GraphQL API (all ops: data listing, submissions, staking, diagnostics, MCP)
@@ -522,9 +546,9 @@ blender.org
 # # while node install itself is already reachable. Keep gated: a workflow run
 # # should not be able to reach the catalogue unattended. raw.githubusercontent
 # # also appears under [beads-install]; duplicate dstdomain lines are harmless.
-# raw.githubusercontent.com
-# api.comfy.org
-# registry.comfy.org
+raw.githubusercontent.com
+api.comfy.org
+registry.comfy.org
 
 # # --- ComfyUI model weights — main path [comfyui-models] ---
 # # 91% of ComfyUI-Manager's curated model-list.json (479 of 527 URL entries)
@@ -547,7 +571,7 @@ blender.org
 # # general fetch capability, not a narrow vendor API. It is also the container
 # # an agent runs in. That is why this is gated and not always-on. Weights are
 # # executable-adjacent (.ckpt is pickle); nothing in this repo inspects them.
-# huggingface.co
+huggingface.co
 
 # # --- ComfyUI model weights — long tail [comfyui-models-extra] ---
 # # The remaining ~9% of the curated list: dl.fbaipublicfiles.com is Meta (SAM,
@@ -560,10 +584,10 @@ blender.org
 # # [antigravity-install] — open one of those instead of duplicating it here.
 # # civitai.com redirects downloads to an R2 bucket host; same observation rule
 # # as [comfyui-models] applies — read the denial out of access.log, do not guess.
-# dl.fbaipublicfiles.com
-# civitai.com
-# heibox.uni-heidelberg.de
-# openaipublic.azureedge.net
+dl.fbaipublicfiles.com
+civitai.com
+heibox.uni-heidelberg.de
+openaipublic.azureedge.net
 
 
 # =============================================================================
