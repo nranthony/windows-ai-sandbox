@@ -1,14 +1,29 @@
 # 0016 — Move ComfyUI into the sandbox, retire `my_comfyui/.devcontainer/`
 
-**Status:** In flight — D1 decided and executed 2026-08-28 (§8); D2/D3/D4 still
-open gates for the owner. The devcontainer is gone and ComfyUI runs in the
-sandbox, so the item's goal is met; what remains is cleanup, not feasibility.
+**Status:** In flight — D1 and D4 decided and executed 2026-08-28 (§8); **D2
+(model relocation) and D3 (Xet) remain open gates for the owner.** The
+devcontainer is gone and ComfyUI runs in the sandbox, so the item's goal is met;
+what remains is cleanup, not feasibility.
 
 **Landed ahead of sign-off (2026-08-27), because both are inert:** the three
 gated allowlist blocks in `proxy/allowed_domains.txt` and their `GATED_TAGS`
 entries in `scripts/audit/probes/proxy.py`. They are CLOSED — live domain count
 is unchanged at 69 — so they widen nothing until someone runs `with-egress.sh`.
 D1 is now a choice of which tags to open, not a file edit. See §3.
+
+**D4 DECIDED 2026-08-28 — `libgl1` goes in the shared image.** Landed in the
+`Dockerfile` as its own layer above the ordering chain. **Needs an image
+rebuild + per-profile recreate to take effect.**
+
+**Manager `security_level` SETTLED 2026-08-28 — stays `normal`.** There is no
+`medium`; the values are `strong | normal | normal- | weak`
+(`manager_core.py:1775`). `normal` is already the tightest level that still
+permits UI node installs, and it blocks the two `high`-gated routes —
+`/customnode/install/git_url` (arbitrary git URL) and `/customnode/install/pip`
+(arbitrary pip package), `manager_server.py:1356`/`:1376`. `normal-` would open
+both whenever ComfyUI is bound to loopback (`is_local_mode`, `:113`) — which is
+now always, since `just run` drops `--listen`. So `normal-` is strictly worse
+here than it looks. No change made.
 
 **D1 DECIDED 2026-08-28 — offline.** The owner chose Manager's own
 `network_mode = offline` over opening `[comfyui]`. No egress is opened; the
@@ -475,8 +490,8 @@ Done, in `~/repo/nranthony/my_comfyui` (uncommitted there — the owner commits)
   favour of `libgl1` in the shared image, which makes the variant irrelevant.
 - **The venv rebuild.** It works as-is; the `urllib3`/`chardet` mismatch warning
   is cosmetic. Batch it with the opencv fix rather than opening egress twice.
-- **D2 (71 GB model relocation), D3 (Xet), D4 (libgl1)** — still open, all
-  unblocked by the offline decision.
+- **D2 (71 GB model relocation) and D3 (Xet)** — still open, both unblocked by
+  the offline decision. D4 is now decided and landed (see §9).
 - **`docker network rm ai-sandbox`** — the 172.20.0.0/16 orphan with zero
   containers attached. Owner's call, unrelated to the repo change.
 
@@ -489,3 +504,41 @@ custom-node install/uninstall/update — and blocks only `high`. Setting it to
 §7 residual (arbitrary Python from GitHub executed in-process, now beside agent
 credentials). Left at `normal` because it would stop the owner installing nodes
 and was not part of D1, but it is the natural companion decision.
+
+## 9. D4 landed — `libgl1` in the shared image (2026-08-28)
+
+Added as its own `RUN` layer in the `Dockerfile`, immediately after the
+Chromium/Playwright library block and well above the ordering chain that
+`dockerfile-order.test.sh` guards (the chain starts at the beads install; the
+new layer sits ~300 lines earlier, so nothing in it can reorder).
+
+**Why baked rather than left to the workspace** — two independent reasons, both
+worth keeping because either alone invites "just pin headless in the project":
+
+1. `apt-get` cannot run at container runtime here. `cap_drop: ALL` +
+   `no_new_privs` stop it acquiring locks, so the alternative is a
+   `with-egress.sh --with apt` window on **every container recreate**, not once.
+2. A workspace does not reliably get to choose its opencv variant. pip installs
+   whichever one a transitive dependency asks for, and several ComfyUI custom
+   nodes pull the non-headless build. Pinning `opencv-python-headless` in one
+   project does not stop a sibling dragging in the other. Providing `libGL.so.1`
+   makes every variant work and deletes the failure mode rather than dodging it.
+
+`libglib2.0-0t64` — opencv's other common runtime need — is already installed by
+the Chromium block, so this is genuinely one package, ~1 MB.
+
+`dockerfile-order.test.sh` 8/8, `just test-offline` all ten suites green.
+
+**Owner action required:** this does nothing until the image is rebuilt and each
+profile recreated.
+
+```
+scripts/profile.sh build
+scripts/profile.sh <profile> up      # per profile, to recreate onto the new image
+```
+
+**Consequence for the deferred opencv cleanup (§8).** With `libgl1` present the
+variant collision stops being a correctness problem — any of the three works. It
+is still untidy, and `opencv-contrib-python-headless` alone remains the intended
+end state, but it is no longer urgent and no longer needs its own egress window:
+fold it into the next venv rebuild whenever that happens for other reasons.

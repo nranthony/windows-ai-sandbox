@@ -92,6 +92,30 @@ RUN apt-get update \
  && apt-get clean \
  && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
+# ---------- OpenCV runtime library ------------------------------------------
+# libgl1 provides libGL.so.1, which the NON-headless opencv wheels
+# (opencv-python, opencv-contrib-python) link against at import. Without it
+# `import cv2` dies with "ImportError: libGL.so.1: cannot open shared object
+# file" — and the failure is confusing, because it depends on WHICH opencv
+# variant a workspace resolved rather than on anything in the code.
+#
+# Baked in rather than left to the workspace for two reasons. First, apt-get
+# cannot run at container runtime here: cap_drop ALL + no_new_privs stops it
+# acquiring locks, so the alternative is a with-egress.sh --with apt window on
+# every container recreate. Second, a workspace does not get to choose reliably:
+# pip's resolver installs whichever opencv variant a transitive dependency asks
+# for, and several ComfyUI custom nodes pull the non-headless one. Pinning
+# opencv-python-headless in one project does not stop a sibling dragging in the
+# other; providing the library makes every variant work and removes a whole
+# class of "works on my profile" failure.
+#
+# libglib2.0-0t64 — opencv's other common runtime need — is already installed
+# by the Chromium block above, so this is genuinely one package (~1 MB).
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends libgl1 \
+ && apt-get clean \
+ && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+
 # ---------- Node.js 24 + global npm tooling ---------------------------------
 # The AI CLIs (Claude Code + Antigravity `agy`) are installed LAST, in the
 # refresh layer near the end of this file — so bumping them rebuilds only that
