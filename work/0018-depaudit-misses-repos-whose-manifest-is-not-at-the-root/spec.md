@@ -1,7 +1,8 @@
 # 0018 — `deps` silently skips any repo whose manifest is not at its root
 
-**Status:** Draft. Root-caused and measured; the fix needs one design decision
-(§4) before it is written.
+**Status: IMPLEMENTED 2026-08-28** — §4 decided **B + C**, both shipped, with a
+third finding (§7) fixed alongside. `my_comfyui` now appears in the report, and
+so do four other repos nobody knew were missing.
 
 **Touches:** `scripts/profile.sh` (the `deps` enumerator) and possibly
 `scripts/depaudit.py`. Not a security boundary file, but it is a **detector**,
@@ -141,3 +142,90 @@ the next gap of this kind announce itself.
   supply-chain surface but a different question, and answering it needs a
   decision about whether the sandbox treats installed nodes as the user's
   dependencies or as third-party vendored code. See work/0016 §7.
+
+---
+
+## 7. A second silence, found while fixing the first
+
+Repairing the enumeration would have surfaced `my_comfyui/comfyui` and then
+reported this:
+
+```
+**Checked:** 5 package(s)
+```
+
+Its `requirements.txt` carries **35** requirement lines. `enumerate_locked`
+matches only `([A-Za-z0-9._-]+)\s*==\s*([^\s;]+)`, because OSV is queried by
+name AND version and only `==` supplies one — so `torch`, `torchsde`,
+`torchvision` and 27 others are dropped without a word. "Checked 5 package(s)"
+is a **true sentence that reads as coverage of the file**, which is the same
+defect as §3 one level down: not a wrong answer, an unstated scope.
+
+Fixed by reporting, not by resolving. Resolving a range means building an
+environment to enumerate it — the act this tool exists to avoid (`depaudit.py`
+header, D1). Naming what was not checked costs nothing and is honest.
+
+## 8. What shipped (2026-08-28)
+
+**`scripts/depaudit.py`**
+
+- `enumerate_roots(ws, max_depth=2)` → `(verdict, path, reason)` per repo, where
+  verdict is SCAN **or SKIP** and both are returned. Depth is bounded AND
+  conditional: a repo's subdirs are examined only when its own root has no
+  manifest, and `_descend` stops at the FIRST level that carries one — otherwise
+  finding `<repo>/comfyui` would go on to collect
+  `comfyui/tests-unit/requirements.txt`, which is that checkout's own test
+  fixture, not the repo's declared dependencies. This cannot change the result
+  for any repo that already scanned correctly.
+- `_tree_skipped()` **composes** `skipped()` rather than re-implementing it, and
+  adds only `PLUGIN_DIRS` (`custom_nodes`, `extensions`, `plugins`). Two
+  predicates that must agree will drift — this repo has paid for that twice with
+  its two hand-edited policy lists. `custom_nodes` deliberately did NOT go into
+  `skipped()` itself: that would also stop `_child_rc_files` from noticing an
+  `.npmrc` a node drops, which is a real detection this has no reason to lose.
+- `roots` subcommand (offline, tsv or json) so the enumeration is callable and
+  testable on its own.
+- `unpinned_requirements()` plus reporting in `deps` (§7), in md and json alike,
+  and in the "no lockfile-pinned packages found" early exit — the path where an
+  all-unpinned file would otherwise have exited 0 in silence.
+
+**`scripts/profile.sh`** — the depth-1 loop replaced by a `depaudit roots` call.
+The enumeration moved rather than being patched in place for two reasons: the
+exclusion predicate is now depaudit's own, and bash in `profile.sh` has no test
+suite while `depaudit.test.sh` does. The summary now closes with
+`scanned N repo root(s), skipped M.` and lists every skipped repo with its
+reason under `NOT SCANNED — a skip is not a pass`.
+
+**`scripts/depaudit.test.sh`** — 43 → **56** offline. Ten assertions on
+enumeration, three on unpinned lines. The enumeration ones lock **both**
+directions, because the failure modes are opposite: a manifest one level down
+must be SCANNED, and a manifest under `venv/`, `.venv/`, `site-packages/` or
+`custom_nodes/` must NOT be. Two more lock the C half — every child appears as
+SCAN or SKIP, and an out-of-bounds depth is reported rather than dropped.
+Mutation-checked: `--max-depth 1` turns the deep-repo assertion red, so it is
+measuring the fix and not the fixture.
+
+### Measured, after the change
+
+`scripts/profile.sh nranthony deps` — **16 repo roots scanned, 9 skipped and
+named**, against 11 before. `my_comfyui/comfyui` is there, and so are four
+others that were equally invisible: `biogentic/Biomni`, `depot/myclickup`,
+`depot/paperbridge`, `protein_models/alphafold`. The four are the same shape —
+a repo one level inside a container directory — and none of them had ever been
+scanned either. Nothing said so, which is §3 in one line.
+
+`depaudit deps my_comfyui/comfyui` now prints `Checked: 5` beside
+`Not checked: 30 requirement line(s) with no ==pin`.
+
+`just test-offline`: ten suites green (207 / 56 / 82 / 8 / 24 / 65 / 13 / 53 / 90),
+then `check-upstreams` clean.
+
+### Deliberately not done
+
+- **Resolving unpinned requirements** (§7): out of scope by design constraint.
+- **Custom-node dependencies** (§6): still excluded, still a real surface, still
+  a different question. The exclusion is now explicit and tested rather than
+  incidental.
+- **A `--max-depth` flag on `profile.sh deps`.** The default is the measured
+  shape; a knob invites someone to widen it past what the skip predicate can
+  keep honest.

@@ -275,6 +275,100 @@ else
   PASS=$((PASS+1)); printf "  ok   no purl contains a peer-dependency suffix\n"
 fi
 
+printf "\n-- workspace root enumeration (offline) --\n"
+# work/0018. `deps` scanned a profile's workspace by asking one question per
+# immediate child: "is there a manifest at ITS root?" my_comfyui keeps its
+# manifest at comfyui/requirements.txt, so it was never scanned — the repo with
+# the largest dependency surface in the workspace, omitted for the whole life of
+# the subcommand, with nothing on the report saying so.
+#
+# The two failure directions are OPPOSITE and both are locked below: miss a real
+# repo, or invent a dozen fake ones out of a venv and a plugin dir.
+WSFIX="$(mktemp -d "${TMPDIR:-/tmp}/roots.XXXXXX")"
+mkdir -p "$WSFIX/plain-repo" \
+         "$WSFIX/deep-repo/upstream/custom_nodes/somenode" \
+         "$WSFIX/deep-repo/venv/lib/python3.13/site-packages/foo" \
+         "$WSFIX/deep-repo/.venv/lib/python3.13/site-packages/bar" \
+         "$WSFIX/vendor-only/node_modules/pkg" \
+         "$WSFIX/no-manifest/docs" \
+         "$WSFIX/too-deep/a/b"
+printf '[project]\nname = "plain"\n'  > "$WSFIX/plain-repo/pyproject.toml"
+printf 'torch==2.9.1\n'                > "$WSFIX/deep-repo/upstream/requirements.txt"
+printf 'evil==6.6.6\n'                 > "$WSFIX/deep-repo/upstream/custom_nodes/somenode/requirements.txt"
+printf '[project]\nname = "foo"\n'    > "$WSFIX/deep-repo/venv/lib/python3.13/site-packages/foo/pyproject.toml"
+printf '[project]\nname = "bar"\n'    > "$WSFIX/deep-repo/.venv/lib/python3.13/site-packages/bar/pyproject.toml"
+printf '{"name":"vendored"}\n'         > "$WSFIX/vendor-only/node_modules/pkg/package.json"
+printf 'notes\n'                       > "$WSFIX/no-manifest/docs/notes.md"
+printf 'requests==2.31.0\n'            > "$WSFIX/too-deep/a/b/requirements.txt"
+ROOTS=$(python3 "$DA" roots "$WSFIX" 2>/dev/null)
+
+check_root() {  # <SCAN|SKIP> <relative path> <why this is locked>
+  if printf '%s\n' "$ROOTS" | grep -qE "^$1	$WSFIX/$2	"; then
+    PASS=$((PASS+1)); printf "  ok   %-4s %-28s %s\n" "$1" "$2" "$3"
+  else
+    FAIL=$((FAIL+1)); printf "  FAIL expected %s for %s (%s)\n     got: %s\n" \
+      "$1" "$2" "$3" "$(printf '%s' "$ROOTS" | tr '\n' ' ')"
+  fi
+}
+check_root SCAN plain-repo        "manifest at the repo root, unchanged behaviour"
+check_root SCAN deep-repo/upstream "THE regression: manifest one level down"
+check_root SKIP vendor-only       "reported, not silently dropped"
+check_root SKIP no-manifest       "reported, not silently dropped"
+check_root SKIP too-deep          "depth 3 is out of bounds — and SAID so"
+
+# A manifest inside an installed tree belongs to a third party. depaudit's own
+# skipped() documents the live case: `pip install babel` read out of a vendored
+# jupyter_server README and reported as the user's own.
+for bad in "venv/lib" ".venv/lib" "site-packages" "custom_nodes"; do
+  if printf '%s\n' "$ROOTS" | grep -q "$bad"; then
+    FAIL=$((FAIL+1)); printf "  FAIL '%s' entered the scan list (third-party manifests)\n" "$bad"
+  else
+    PASS=$((PASS+1)); printf "  ok   '%s' excluded from the scan list\n" "$bad"
+  fi
+done
+
+# C half of work/0018 §4: every child is ACCOUNTED FOR, one way or the other.
+# Total failure was already loud; partial coverage was what said nothing.
+missing=""
+for c in plain-repo deep-repo vendor-only no-manifest too-deep; do
+  printf '%s\n' "$ROOTS" | grep -q "$WSFIX/$c" || missing="$missing $c"
+done
+if [[ -z "$missing" ]]; then
+  PASS=$((PASS+1)); printf "  ok   every child appears as SCAN or SKIP\n"
+else
+  FAIL=$((FAIL+1)); printf "  FAIL children absent from the report entirely:%s\n" "$missing"
+fi
+rm -rf "$WSFIX"
+
+printf "\n-- unpinned requirement lines (offline) --\n"
+# Same failure shape one level down: OSV is queried by name AND version, so only
+# `==` lines are enumerable. ComfyUI's requirements.txt pins 5 of 35 that way,
+# and "Checked 5 package(s)" is a true sentence that reads as coverage.
+UPFIX="$(mktemp -d "${TMPDIR:-/tmp}/unpinned.XXXXXX")"
+printf 'torch==2.9.1\nnumpy>=1.26\npillow\nsafetensors\n# comment\n-r other.txt\n' \
+  > "$UPFIX/requirements.txt"
+upj=$(python3 "$DA" deps "$UPFIX" --offline --format json 2>/dev/null)
+n_checked=$(printf '%s' "$upj" | python3 -c "import sys,json;print(json.load(sys.stdin)['checked'])")
+n_unpin=$(printf '%s' "$upj"   | python3 -c "import sys,json;print(len(json.load(sys.stdin)['unpinned']))")
+if [[ "$n_checked" == "1" && "$n_unpin" == "3" ]]; then
+  PASS=$((PASS+1)); printf "  ok   1 pinned checked, 3 unpinned lines reported as NOT checked\n"
+else
+  FAIL=$((FAIL+1)); printf "  FAIL checked=%s unpinned=%s (want 1 and 3)\n" "$n_checked" "$n_unpin"
+fi
+if python3 "$DA" deps "$UPFIX" --offline --format md 2>/dev/null | grep -q '\*\*Not checked:\*\* 3'; then
+  PASS=$((PASS+1)); printf "  ok   md report states the uncovered count alongside the checked one\n"
+else
+  FAIL=$((FAIL+1)); printf "  FAIL md report does not state what it could not check\n"
+fi
+# Zero pins must not exit down the "nothing to see here" path in silence.
+printf 'numpy>=1.26\npillow\n' > "$UPFIX/requirements.txt"
+if python3 "$DA" deps "$UPFIX" --offline --format md 2>&1 >/dev/null | grep -q 'no `==` pin'; then
+  PASS=$((PASS+1)); printf "  ok   an all-unpinned file says so instead of reading as clean\n"
+else
+  FAIL=$((FAIL+1)); printf "  FAIL an all-unpinned file reported nothing at all\n"
+fi
+rm -rf "$UPFIX"
+
 printf "\n-- offline degradation --\n"
 v=$(python3 "$DA" pkg npm unused-imports --offline --format json 2>/dev/null \
     | python3 -c "import sys,json;print(json.load(sys.stdin)['results'][0]['verdict'])")
