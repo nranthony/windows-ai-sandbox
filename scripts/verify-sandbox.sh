@@ -75,6 +75,25 @@ NNP=$(grep '^NoNewPrivs:' /proc/self/status | awk '{print $2}')
 SM=$(grep '^Seccomp:' /proc/self/status | awk '{print $2}')
 [[ "$SM" == "2" ]] && pass "seccomp mode 2 (filtered)" || fail "seccomp not active (mode=$SM)"
 
+# seccomp.json is an allowlist with no test suite, so a syscall dropped from it
+# is invisible until something breaks at the point of use. GNU tar creates its
+# archive with creat(2) — denied by OMISSION until 2026-08-28, which made
+# `tar -cf <file>` fail EPERM in every profile with a message that reads as a
+# capability problem (work/0017). Behavioural, not a grep of the JSON: the file
+# on the host says nothing about the profile a RUNNING container was started
+# with. `tar -cf - > file` deliberately is not used here — it is the workaround,
+# and it passes either way.
+if command -v tar >/dev/null; then
+  TT=$(mktemp -d)
+  : > "$TT/probe"
+  if tar -cf "$TT/probe.tar" -C "$TT" probe 2>/dev/null; then
+    pass "tar -cf <file> writes an archive (creat allowed)"
+  else
+    fail "tar -cf <file> EPERM — creat missing from seccomp.json? (work/0017)"
+  fi
+  rm -rf "$TT"
+fi
+
 # --- pids limit -------------------------------------------------------------
 PM=$(cat /sys/fs/cgroup/pids.max 2>/dev/null || echo unknown)
 [[ "$PM" != "max" && "$PM" != "unknown" ]] && pass "pids.max=$PM" || warn "pids.max=$PM"

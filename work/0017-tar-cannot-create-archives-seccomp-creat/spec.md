@@ -1,7 +1,10 @@
 # 0017 — `tar -cf <file>` fails in every container: `creat` is not in `seccomp.json`
 
-**Status:** Draft. **Diagnosed to the exact syscall, measured, with a working
-fix** — what remains is the decision to allow it, not the investigation.
+**Status: IMPLEMENTED 2026-08-28** — allowed, documented, and locked by a
+behavioural probe in `verify`. **The running containers are still on the old
+profile**: seccomp is applied at container START, so this takes effect at each
+profile's next `up`, and `verify` FAILS the new probe until then (see §9). That
+failure is the change working, not a regression.
 
 **Touches a security-sensitive surface:** `seccomp.json`. Per AGENTS.md any change
 needs the security impact stated in the commit message, `verify` (tier 1) passing,
@@ -148,3 +151,49 @@ audited as a set is not.
   a hardened image is its own decision.
 - Anything about `chown`/`CAP_CHOWN`. That failure is real, is correct, and is
   already documented where it bites.
+
+---
+
+## 9. What shipped (2026-08-28)
+
+**`seccomp.json`** — `creat` added to the `open`/`openat`/`openat2` line of the
+same `SCMP_ACT_ALLOW` group, placed there rather than alphabetically so the
+equivalence that justifies it is visible at the point of edit. The block's
+`_comment` records why, per the editing rule in `docs/seccomp-notes.md`. Allowed
+syscalls: 238 → 239.
+
+**`scripts/verify-sandbox.sh`** — a behavioural probe beside the existing
+`seccomp mode 2` check: create a real archive with `tar -cf <file>`, fail loudly
+naming this work item if it EPERMs. Three deliberate choices:
+
+- **Behavioural, not a grep of the JSON.** The host file says nothing about the
+  profile a *running* container was started with, and this change is exactly the
+  case where those two disagree until a recreate. A static check would have gone
+  green immediately and proved nothing.
+- **`tar -cf <file>`, never `tar -cf - > file`.** The pipe form is the
+  workaround; it passes either way, so a probe using it would be decorative.
+- **It sits with the seccomp check**, not with the tool-presence checks, because
+  what it is really asserting is the syscall filter — tar is only the witness.
+
+This is the first regression lock of any kind on `seccomp.json`, which has no
+test suite (§7's "never audited as a set" is the wider version of the same gap).
+
+**`docs/seccomp-notes.md`** — `creat` added to the must-stay table with the
+symptom, and a new section on why the lock is behavioural.
+
+### Measured, after the change
+
+- `depaudit`-unrelated suites unaffected; `just test-offline` green (ten suites).
+- `scripts/profile.sh nranthony verify` on the **still-running** container:
+  `52 passed | 1 failed`, the one failure being the new probe —
+  `tar -cf <file> EPERM — creat missing from seccomp.json? (work/0017)`.
+  That is the pre-change profile being detected, which is the proof the probe
+  is load-bearing rather than self-satisfying. It goes green on the next `up`.
+
+### Remaining owner steps
+
+1. `scripts/profile.sh <profile> up` for each of `nranthony`, `therapod`,
+   `fluidmomenta` — no rebuild needed, seccomp is a runtime option.
+2. Re-run `verify` after that: the probe should pass.
+3. Tier-2 `audit` deliberately NOT run yet — run it once the containers are on
+   the new profile, since an audit of the old one says nothing about this change.
