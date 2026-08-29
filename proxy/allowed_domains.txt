@@ -546,9 +546,9 @@ blender.org
 # # while node install itself is already reachable. Keep gated: a workflow run
 # # should not be able to reach the catalogue unattended. raw.githubusercontent
 # # also appears under [beads-install]; duplicate dstdomain lines are harmless.
-raw.githubusercontent.com
-api.comfy.org
-registry.comfy.org
+# raw.githubusercontent.com
+# api.comfy.org
+# registry.comfy.org
 
 # # --- ComfyUI model weights — main path [comfyui-models] ---
 # # 91% of ComfyUI-Manager's curated model-list.json (479 of 527 URL entries)
@@ -571,7 +571,17 @@ registry.comfy.org
 # # general fetch capability, not a narrow vendor API. It is also the container
 # # an agent runs in. That is why this is gated and not always-on. Weights are
 # # executable-adjacent (.ckpt is pickle); nothing in this repo inspects them.
-huggingface.co
+# # us.aws.cdn.hf.co is the CDN host the metadata request redirects to, OBSERVED
+# # 2026-08-28 pulling a model into my_comfyui, not guessed: huggingface.co
+# # tunnelled clean (4x TCP_TUNNEL/200) while the bytes died on
+# # `TCP_DENIED/403 CONNECT us.aws.cdn.hf.co:443`. It is the CLASSIC (non-Xet)
+# # path — a Xet-backed repo redirects to a xethub CAS host instead, which has
+# # NOT been seen here and is therefore NOT listed. The name is region- and
+# # provider-shaped (<region>.<provider>.cdn.hf.co), so a model served from
+# # another region will deny under a sibling name: read that denial out of
+# # access.log too rather than pre-emptively widening to a parent wildcard.
+# huggingface.co
+# us.aws.cdn.hf.co
 
 # # --- ComfyUI model weights — long tail [comfyui-models-extra] ---
 # # The remaining ~9% of the curated list: dl.fbaipublicfiles.com is Meta (SAM,
@@ -584,10 +594,10 @@ huggingface.co
 # # [antigravity-install] — open one of those instead of duplicating it here.
 # # civitai.com redirects downloads to an R2 bucket host; same observation rule
 # # as [comfyui-models] applies — read the denial out of access.log, do not guess.
-dl.fbaipublicfiles.com
-civitai.com
-heibox.uni-heidelberg.de
-openaipublic.azureedge.net
+# dl.fbaipublicfiles.com
+# civitai.com
+# heibox.uni-heidelberg.de
+# openaipublic.azureedge.net
 
 
 # =============================================================================
