@@ -599,6 +599,50 @@ blender.org
 # heibox.uni-heidelberg.de
 # openaipublic.azureedge.net
 
+# # --- fal.ai hosted inference + its MCP endpoint [fal] ---
+# # The tag is `fal`, NOT `fal.ai`. with-egress.sh matches section tags with
+# # `\[[a-z-]+\]`, so a dot in the tag makes the block unopenable: it would sit
+# # here looking gated and silently ignore `--with fal.ai` forever.
+# #
+# # WHAT THIS OPENS, stated plainly because it is not a read-only API. fal runs
+# # arbitrary models on ITS GPUs and hands back generated media, so an open tag
+# # here is a compute-and-fetch capability the agent drives on its own. Three
+# # consequences: whatever it submits leaves the boundary (prompts, and any
+# # image or video passed as INPUT); the media hosts return bytes nothing in
+# # this repo inspects; and it is metered against a key, so an unattended loop
+# # costs money as well as egress. The key belongs in the environment and never
+# # in a URL — Squid logs URLs, so a key in a query string is a leak the agent
+# # cannot see (same rule as the webfetch broker).
+# #
+# # OBSERVED denied 2026-08-29, egress-proxy-fluidmomenta access.log, four
+# # TCP_DENIED/403 CONNECTs inside 64ms — a reachability probe, not a working
+# # run, so these are hosts the client ATTEMPTS, not yet hosts a completed
+# # inference needs:
+# #   mcp.fal.ai      the MCP endpoint itself
+# #   api.fal.ai      NOT in the hand-written list this block came from; the log
+# #                   had it. Evidence beats a list every time.
+# #   fal.run         synchronous inference
+# #   queue.fal.run   queued inference
+# #
+# # NOT observed. Named by the operator's agent and included so the first real
+# # run does not die three hosts deep, one round trip at a time. If any of them
+# # never appears in access.log after a working run, DELETE it rather than leave
+# # a line nobody can justify:
+# #   rest.alpha.fal.ai   queue status / result polling
+# #   fal.media           generated image + video delivery
+# #   v3.fal.media        ditto, current generation
+# #
+# # Pinned hosts only, no `.fal.ai` or `.fal.run` parent — same stance as [git]
+# # and [comfyui-models]. A new host that denies is read out of access.log and
+# # added by name; it is never guessed and never widened to the parent.
+# mcp.fal.ai
+# api.fal.ai
+# fal.run
+# queue.fal.run
+# rest.alpha.fal.ai
+# fal.media
+# v3.fal.media
+
 
 # =============================================================================
 # === DROPPED — explicitly NOT in the list ===================================

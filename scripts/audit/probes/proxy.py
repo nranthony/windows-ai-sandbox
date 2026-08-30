@@ -45,7 +45,7 @@ REQUIRED_DOMAINS = [
 # closed. Tags without brackets — matched against the `[tag]` block header.
 GATED_TAGS = {"git", "pypi", "pytorch", "npm", "nvidia", "numerai",
               "apt", "playwright-install", "quarto-install",
-              "comfyui", "comfyui-models", "comfyui-models-extra"}
+              "comfyui", "comfyui-models", "comfyui-models-extra", "fal"}
 
 # Gated blocks that are DELIBERATELY open in the committed baseline. Each entry
 # is an accepted residual whose reasoning lives in proxy/allowed_domains.txt,
