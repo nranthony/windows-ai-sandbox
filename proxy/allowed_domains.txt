@@ -624,11 +624,24 @@ blender.org
 # #   fal.run         synchronous inference
 # #   queue.fal.run   queued inference
 # #
-# # NOT observed. Named by the operator's agent and included so the first real
-# # run does not die three hosts deep, one round trip at a time. If any of them
-# # never appears in access.log after a working run, DELETE it rather than leave
-# # a line nobody can justify:
-# #   rest.alpha.fal.ai   queue status / result polling
+# # NOT observed, but READ OUT OF THE CLIENT SOURCE, which is the same kind of
+# # evidence as the log and better than a hand-written list:
+# #   rest.fal.ai     file storage — where an image or video passed as INPUT is
+# #                   uploaded — plus queue status / result polling. Hardcoded in
+# #                   BOTH clients: fal_client/client.py `REST_URL`, and
+# #                   @fal-ai/client config.ts `getRestApiUrl()`. Checked
+# #                   2026-08-30 against fal-ai/fal and fal-ai/fal-js main.
+# #                   It REPLACES `rest.alpha.fal.ai`, which was in the
+# #                   hand-written list this block came from and appears in
+# #                   neither client and in no access.log line: the list denied
+# #                   the host that is actually called and permitted one nothing
+# #                   calls. Same lesson as api.fal.ai above, found from the
+# #                   other direction.
+# #
+# # NOT observed in a log, and the only entry here kept WIDER than what the
+# # source names — the source names one version of it (fal_client/client.py
+# # `CDN_URL = "https://v3.fal.media"`), and versioning is exactly why the entry
+# # is not pinned to it:
 # #   .fal.media          generated image + video delivery. WILDCARD, and the
 # #                       only one in this block: fal serves media from
 # #                       VERSIONED hosts (v3.fal.media today), so a pinned
@@ -653,7 +666,7 @@ blender.org
 # api.fal.ai
 # fal.run
 # queue.fal.run
-# rest.alpha.fal.ai
+# rest.fal.ai
 # .fal.media
 
 
