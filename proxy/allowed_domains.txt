@@ -629,19 +629,32 @@ blender.org
 # # never appears in access.log after a working run, DELETE it rather than leave
 # # a line nobody can justify:
 # #   rest.alpha.fal.ai   queue status / result polling
-# #   fal.media           generated image + video delivery
-# #   v3.fal.media        ditto, current generation
+# #   .fal.media          generated image + video delivery. WILDCARD, and the
+# #                       only one in this block: fal serves media from
+# #                       VERSIONED hosts (v3.fal.media today), so a pinned
+# #                       entry leaves the next version denying on a URL the
+# #                       API itself just handed back. Squid reads a LEADING
+# #                       DOT as "this domain and every subdomain" — measured
+# #                       against the existing .astral.sh line, whose apex
+# #                       tunnels 200 — so this replaces fal.media and
+# #                       v3.fal.media both. `*.fal.media` is NOT squid
+# #                       dstdomain syntax: it matches literally, matches
+# #                       nothing, and reads as present while denying.
 # #
-# # Pinned hosts only, no `.fal.ai` or `.fal.run` parent — same stance as [git]
-# # and [comfyui-models]. A new host that denies is read out of access.log and
-# # added by name; it is never guessed and never widened to the parent.
+# # Pinned hosts everywhere EXCEPT media delivery, and the split is deliberate.
+# # The API and MCP hosts are the CONTROL surface — where prompts, inputs and a
+# # key go — so they stay exact; `.fal.ai` or `.fal.run` as a parent would hand
+# # over every future subdomain fal creates, including any write API. .fal.media
+# # is the return path, bytes coming back, and its hostnames version. The audit
+# # probe reports it as an INFO wildcard for periodic review. A new host outside
+# # that pattern is still read out of access.log and added by name, never
+# # guessed and never widened.
 # mcp.fal.ai
 # api.fal.ai
 # fal.run
 # queue.fal.run
 # rest.alpha.fal.ai
-# fal.media
-# v3.fal.media
+# .fal.media
 
 
 # =============================================================================
