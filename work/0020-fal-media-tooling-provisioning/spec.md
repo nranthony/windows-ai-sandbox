@@ -1,278 +1,384 @@
-# 0020 — fal.ai media tooling: 17 of the 43 questions are already answered here
+# 0020 — `genmedia` CLI: fal.ai media tooling inside the sandbox
 
-**Status: Draft** — five decision gates (§6) go to the owner before implementing.
+**Status: Draft** — four decisions taken 2026-08-30 (§6), three still open (§7).
 
-**Touches, if implemented:** `proxy/allowed_domains.txt` (the `[fal]` block),
-`sandbox_templates/common/secrets.env.template`, and — depending on D5 — the
-`Dockerfile` and `sandbox_templates/skills/`. Per AGENTS.md that means the commit
-message states the security impact, tier-1 `verify` passes, tier-2 `audit` runs,
-and the suites behind whichever surface is touched run
-(`with-egress.test.sh` for allowlist parsing, `webfetch.test.sh` for the secrets
-template, `dockerfile-order.test.sh` for a baked payload).
+**Touches:** `Dockerfile` (the binary), `proxy/allowed_domains.txt` (the `[fal]`
+block), `sandbox_templates/common/secrets.env.template` (done), and
+`sandbox_templates/claude/hooks/deny-destructive.sh` (the ask rule). Per AGENTS.md
+that means the commit message states the security impact, tier-1 `verify` passes,
+tier-2 `audit` runs, and `dockerfile-order.test.sh` (8/8),
+`deny-destructive.test.sh` (207/207) and `with-egress.test.sh` (82/82) run.
 
-**Follows 0016 and sits beside 0019.** 0016 put ComfyUI *inside* the sandbox with
-zero always-on egress. 0019 asks whether the agent gets tools against it. This one
-asks whether the agent gets tools against a **paid, off-boundary GPU** instead —
-which is a different question, because every other key in `secrets.env` buys a
-*read* and this one buys *compute*.
+**Supersedes this spec's first revision.** That version triaged
+`work/plans/fal-ai-related-host-tasks.md`, a derived 43-item checklist that names
+the CLI exactly once — "the CLI", item 1.1, no antecedent. The source it derives
+from is `~/repo/fluidmomenta/website/work/plans/fal-ai-genmedia-collated-misc.md`
+(22KB, a **different repo's workspace**), and that one names `genmedia` as the
+execution path everything else hangs off. The first revision was a sound triage
+aimed one level too low. The triage tables (§4, §5) survive; the findings and
+decisions are rewritten.
 
-**Triaged 2026-08-30** from repo config, the two fal client sources, and the live
-containers. Measurements are marked; the rest is attributed.
+**Measured 2026-08-30** from `fal-ai-community/genmedia-cli` at v0.7.0 and the
+live containers. Nothing was installed; no container was modified.
 
 ---
 
-## 1. Where this came from
+## 1. What `genmedia` is
 
-`work/plans/fal-ai-related-host-tasks.md` — 43 checkboxes across 8 headings,
-written by an agent that **did not have this repo's context**. That directory is
-gitignored (`.gitignore:67`), so the note is not in history and this spec restates
-what it needs rather than citing it.
+The agent-first CLI for fal.ai — discover endpoints, inspect schemas, submit,
+poll, upload inputs, download outputs, check pricing, search docs. Distinct from
+the `fal` CLI, which deploys fal *applications*. Command surface at v0.7.0
+(`src/commands/`): `models`, `schema`, `run`, `status`, `upload`, `pricing`,
+`docs`, `init`, `skills/`, `setup`, `gallery/`, `assets/`, `update`, `version`.
 
-The note is good, and its blind spot is consistent: it assumes a *fleet* of
-sandboxes provisioned for *tenants* by *separate parties* — an image owner, an
-allowlist owner, a secret-store owner. Here those are one operator, three profiles
-(`fluidmomenta`, `nranthony`, `therapod`), and one host-side config file per
-concern, all in git. That single mismatch accounts for most of what falls away.
+The fal community skills repo (`fal-ai-community/skills`, ~18 skills) is a
+knowledge layer on top: every skill executes through `genmedia` rather than
+wrapping fal's HTTP API. So the CLI is the thing to provision; the skills are a
+separate, lighter decision (§6.2).
 
-It is also stale in one specific place, and the correction matters:
+### 1.1 Measured facts about the artifact
 
-> "Known: `mcp.fal.ai` 200, `*.fal.media` reachable, `fal.ai` 403."
-
-Three errors. The `[fal]` block is **gated and commented out in HEAD** — every one
-of its hosts is 403 in the committed baseline, `mcp.fal.ai` included. (It is
-uncommented in the current working tree, which is a transient state, not the
-posture.) `*.fal.media` is **not squid `dstdomain` syntax** — it matches literally,
-matches nothing, and reads as present while denying; the real entry is
-`.fal.media`, leading dot. And the apex `fal.ai` is 403 because it was never in the
-list and deliberately is not — see §5.1.
-
-## 2. Triage
-
-| | Count | Meaning |
+| Fact | Value | Why it matters |
 |---|---|---|
-| **Answered** | 17 | An existing ADR, script or test already decides it. §3. |
-| **Not applicable** | 4 | Presumes an architecture this is not. §4. |
-| **Open** | 22 | Real here. Collapse into five findings (§5) and five gates (§6). |
+| Language / build | TypeScript, `bun build --compile --minify --bytecode` | A **Bun single-file executable**. Bun is embedded, so it does NOT need `bun` on `PATH` and does not reopen work/0009's parked runtime question — but the bytes are a Bun runtime and should be described as such, not as "a Node CLI". |
+| Linux x64 asset | 106,777,922 bytes | ~107MB added to the image. Not free, and worth stating before a rebuild. |
+| Licence | MIT | No vendoring-licence question (source item 5.4). |
+| Latest release | **v0.7.0, 2026-05-29** | 15 releases in six weeks (2026-04-16 → 05-29), then **three months of silence**. `pushed_at` equals the release date. The opposite risk from 0019's comfyui-mcp (454 releases/6mo): not churn, possible abandonment. |
+| Checksums | `checksums.txt` per release; linux-x64 `72a39bd3…d760fd34` | Pinning is trivial and the upstream publishes the hash itself. |
+| npm | `@fal-ai/genmedia-cli`, `bin` → `./dist/genmedia` | An npm route exists and would fall under Gate 2. Whether the tarball ships the prebuilt binary is **unverified** (§8). |
+| Runtime dependency | `@fal-ai/client ^1.10.0` | Independent confirmation that `rest.fal.ai` is the storage/polling host — the same constant that justified commit `7d85f51`, reached from a second direction. |
+| Telemetry | `posthog-node`, `__POSTHOG_KEY__` baked at build; `src/lib/analytics.ts:10` → `https://us.i.posthog.com` | The CLI phones home by construction. That host is **not allowlisted** and will 403. §5.4. |
+| Platform API | `src/lib/api.ts:5` → `https://api.fal.ai/v1` | Why the 2026-08-29 probe saw `api.fal.ai`. |
+| Key page | `src/lib/api.ts:15` → `https://fal.ai/dashboard/keys` | The exact URL for creating the key the secrets template asks for. |
+| `skills install` target | `src/lib/skills-install.ts:29` → `.claude/skills` under `cwd` | **Workspace-level, not `~/.claude/skills`.** This is what makes §6.2 safe — see there. |
 
-## 3. Answered — 17 items, with the thing that answers them
+## 2. Goal
 
-| Source item | Answer |
+Give a media workspace a working, gated, cost-aware fal.ai path:
+
+1. `genmedia` **in the image** at a pinned version, verified by upstream hash.
+2. `FAL_KEY` from `secrets.env` — **environment only, never argv**.
+3. `[fal]` staying gated; egress opened per command by `with-egress.sh --with fal`.
+4. A paid submit reaching the **ask tier**, so spending money is a human step.
+5. `ffmpeg` present, because the pipeline this serves cannot complete without it.
+
+## 3. Where this collides with the sandbox
+
+Four collisions, none of which either source note could see.
+
+### 3.1 The documented install is pipe-to-shell, and is blocked here by design
+
+```
+curl https://genmedia.sh/install -fsS | bash
+```
+
+That is the exact fetch-and-run form `sandbox_templates/common/agent-notice.md`
+names and `permissions.deny` blocks — `agent-notice.test.sh` asserts every form
+named in the notice has a real deny entry behind it. `genmedia.sh` is also not in
+the allowlist. So the vendor's install path is unusable inside a profile, and that
+is correct behaviour, not a defect to work around.
+
+`install.sh` is better than it looks, though, and its two good properties transfer:
+it honours **`GENMEDIA_VERSION`** (so the upstream itself supports pinning) and it
+verifies `checksums.txt` before installing. §6.1 keeps both and drops the pipe.
+
+### 3.2 `genmedia setup --api-key "$FAL_KEY"` puts the key on argv — RESOLVED
+
+The collated note's non-interactive bootstrap passes the key as an argument. That
+breaks the rule written into the secrets template in `7d85f51` and locked for the
+web-read broker by `webfetch.test.sh` (90/90): keys travel in the environment and
+in headers, never argv, because argv is visible in `ps` and lands verbatim in the
+Bash-tool transcript.
+
+**Closed from source, no measurement needed.** `getApiKey()` (`src/lib/api.ts:7`)
+is `process.env.FAL_KEY ?? loadConfig().apiKey` — the environment is read FIRST,
+ahead of the stored config. So `genmedia setup` never needs running and
+`--api-key` is never typed. It also fixes the keyless boundary: everything routed
+through `platformHeaders()` or `configureSDK()` — `models`, `schema`, `pricing`,
+`run`, `status`, `upload` — hard-errors without the key, while `version`,
+`--help` and the skills commands do not.
+
+### 3.3 genmedia self-updates in the BACKGROUND — worse than a manual command
+
+Not just `src/commands/update.ts`. `src/index.ts:47` carries an internal
+`__update-check` entrypoint "used by the background auto-update subprocess", and
+`maybeTriggerBackgroundUpdate()` (`src/lib/updater.ts:120`) `Bun.spawn`s a
+detached child — `stdio` all ignored, `unref()`ed — which reads
+`api.github.com/repos/fal-ai-community/genmedia-cli/releases/latest` and stages a
+binary swap (`preSwapPendingUpdate`, `updater.ts:84`).
+
+**`api.github.com` is allowlisted**, as an accepted-open residual of the `[git]`
+block. So without intervention a baked, hash-verified, version-pinned binary is
+pinned in name only, and the drift would be invisible to `check-upstreams`. The
+binary download would then fail at the redirect — `objects.githubusercontent.com`
+and `release-assets.githubusercontent.com` are commented out — leaving an hourly
+retry loop rather than a successful swap, which is a worse failure than either
+outcome because it is quiet.
+
+Two early returns reduce but do not remove the exposure: it skips when stdout is
+not a TTY and when `--json` is present (`updater.ts:123-124`), so an agent using
+the documented `--json` mode would rarely trigger it. `profile.sh <p> attach` is
+a TTY, and "rarely" is not a control. Resolved by §6.5.
+
+### 3.4 The skills bundle is 0019 §2.3 again
+
+`genmedia init` installs a default bundle; the community repo carries ~18 skills.
+0019 met the same shape as "42 skills, 4 agents and 3 hooks nobody asked for".
+Resolved by §6.2, differently from how 0019 resolves it.
+
+## 4. Still answered by existing machinery — 15 items
+
+The first revision's table holds, with two entries moved out by the measurements
+above. Unchanged and still answered by an existing ADR, script or test:
+
+`1.4` allowlist model ([ADR-0003](../../docs/adr/0003-strict-egress-default.md): one
+host-side file, directory-mounted, shared by every profile; the dashboard rewrites
+it wholesale so check `git diff` after using it) · `2.1` injection point (optional
+`env_file`, `chmod 600`, outside the repo tree, never baked) · `2.4` rotation
+mechanics (`env_file` is read only at container CREATE, so rotation costs
+`profile.sh <p> recreate`) · `2.6` visibility (both — §5.3) · `4.2` pinning and
+rebuild cadence · `4.4` install-location survival (the state-placement table;
+`/tmp` is `noexec`) · `4.6` discovery (`verify` prints presence lines) · `5.2`
+no symlinks, convergence mirrors by copy, `profile-skills.test.sh` 24/24 · `5.4`
+licensing (MIT, §1.1) · `5.5` corrected-skill update path · `5.6` portable vs
+repo-specific (`sandbox_templates/skills/web-read/SKILL.md` is the pattern) ·
+`6.2` write once, swap invocation ([ADR-0011](../../docs/adr/0011-web-read-backends-are-peers-with-no-default.md))
+· `6.4` unreachable is the resting state under default-deny · `7.5` clean
+degradation · `8.1` one operator owns image, allowlist and secret store.
+
+**Moved OUT of "answered" by the genmedia measurements:**
+
+- **`1.6` update/telemetry endpoints.** Was "blocked by construction, no decision
+  needed". There is now a named host (`us.i.posthog.com`) and a real question about
+  what a blocked CONNECT does to the CLI. → §5.4.
+- **`4.3` self-update disabled?** Was "repo posture is already no-self-update".
+  `genmedia update` exists and must be actively neutralised. → §3.3, §7.2.
+
+## 5. Not applicable — 4 items
+
+`2.2` per-session / per-tenant key scoping (the unit is the profile; three
+profiles, one operator) · `5.4`'s vendoring-licence half (MIT, and §6.2 vendors
+nothing) · `6.3` fallback provisioned per-fleet · `8.1`'s separate-parties premise.
+
+## 6. DECISIONS TAKEN — 2026-08-30
+
+### 6.1 Install: measure the artifact, then bake a pinned release into the image
+
+Not `curl | bash`, not npm. The `Dockerfile` fetches
+`https://github.com/fal-ai-community/genmedia-cli/releases/download/v<pin>/genmedia-linux-x64`,
+verifies it against the published `checksums.txt` hash **before** it is made
+executable, and installs it to a durable path. Rationale: the upstream publishes
+per-release hashes, so this repo's normal posture (pin + verify + a detector in
+`just check-upstreams`) applies with no new machinery. Build-time fetch does not
+traverse Squid, so no allowlist entry is needed for the download host — the
+`[git]` block's `objects.githubusercontent.com` and
+`release-assets.githubusercontent.com` lines stay commented.
+
+**Implemented 2026-08-30**, modelled line-for-line on the existing `just` block
+(`Dockerfile:331-357`), which already does exactly this: `ARG` for the version,
+fetch the asset and the checksum file from the release, `awk` the expected hash,
+hard-fail when the checksum file has no line for this asset, `sha256sum -c -`,
+then install. genmedia's `checksums.txt` is the same two-column format, so the
+only differences are `install -m 0755` instead of a tar extract and an arch case
+mapping `amd64→genmedia-linux-x64` / `arm64→genmedia-linux-arm64`.
+
+The hash is verified **before** the file is made executable, and an absent
+checksum entry fails the build rather than reading as a pass.
+
+Layer placement: above the AI-CLI refresh cache-buster, so `build --refresh-ai`
+does not re-download 107MB. It is a single static binary depending on neither
+Gate 2 nor Gate 3, so it sits with the other pinned tool installs rather than in
+the quarantined tail. `dockerfile-order.test.sh` passes 8/8 — note that its
+anchors are grepped over the whole file including comments, so prose in a new
+block must not repeat an anchor string verbatim (this was caught, not theorised).
+
+### 6.2 Skills: per-workspace `genmedia init`, not central convergence
+
+Rejected: vendoring a subset into `sandbox_templates/skills/`. Chosen: each media
+workspace runs `genmedia init` / `genmedia skills install <name>` and commits the
+result to **its own** repo.
+
+This is safe here for a specific measured reason: `skills-install.ts:29` targets
+`.claude/skills` **relative to `cwd`**, i.e. the workspace. It never touches
+`claude-home/skills/`, so [ADR-0005](../../docs/adr/0005-skill-templates-are-source-of-truth.md)'s
+mirror semantics are not engaged and nothing is at risk of being pruned.
+
+**The accepted residual, stated plainly:** source item 5.3 asked whether a
+registry-installed bundle is reviewed before it lands. Under this decision the
+answer is **no** — `genmedia skills install` writes agent-executable instruction
+files into a workspace without passing `vendor-tools.sh`. That is a deliberate
+trade for keeping non-media profiles clean and matching the vendor's model, and it
+should be recorded as a residual, not quietly enjoyed as a simplification.
+
+### 6.3 A paid submit is an `ask`
+
+`genmedia run` (and any submit form D1 observes) gets a rule in
+`deny-destructive.sh` landing on the **ask** tier. Both dialects, because the
+postures are deliberately opposite: claude emits `permissionDecision:"ask"`,
+`agy` emits `decision:"force_ask"` — a plain `ask` under `agy` caches as a
+permanent Always-Allow grant, which here would mean "approve one image, then spend
+freely forever". Suite grows past 207/207.
+
+This is the enforcement half of the collated note's contract ("ask for approval
+before executing any paid batch"). The note's other controls — ≤4 concurrent jobs,
+budget-threshold stop, never blind-retry a paid request — stay documentation, and
+§7.3 is where that line gets drawn.
+
+### 6.4 `ffmpeg` is required, not optional
+
+The pipeline this serves normalises each clip, concatenates from an explicit
+ordered edit list, and validates duration/resolution/fps/codec with `ffprobe`
+before promoting an edit to final. **Measured: no `ffmpeg` in the `Dockerfile` and
+none on `PATH` in `ai-sandbox-nranthony`.** Without it, generated video arrives as
+bytes nothing in the container can transcode, inspect or thumbnail. **Implemented 2026-08-30**: its own apt
+layer beside genmedia, for the same reason `libgl1` is baked — `apt-get` cannot
+run at container runtime here, since `cap_drop ALL` + `no_new_privs` stops it
+acquiring its locks, so the alternative is a `with-egress.sh --with apt` window on
+every recreate. Both `ffmpeg` and `ffprobe` are smoke-checked in-layer, so a base
+image that drops either fails the build rather than a video job months later.
+
+### 6.5 `GENMEDIA_NO_UPDATE=1` — baked into the image
+
+Promoted from an open question once the opt-out was found in source. The
+background updater checks this variable at `updater.ts:122`, **before** any
+network call, so nothing is spawned and nothing is staged. Set as a `Dockerfile`
+`ENV` beside the binary rather than in `secrets.env`: it is not a secret, and it
+must hold for every profile, not only the ones with a key.
+
+Chosen over a `deny-destructive.sh` rule on `genmedia update`, which was the
+first revision's plan: a hook rule catches the command the operator types and
+misses the detached subprocess entirely — it would have looked like a control
+while the real path stayed open. A hook rule on the explicit command is still
+reasonable belt-and-braces, but it is not the load-bearing half.
+
+### 6.6 `GENMEDIA_NO_ANALYTICS=1` — and `us.i.posthog.com` stays OUT of the allowlist
+
+Also promoted from an open question. `isOptedOut()` (`analytics.ts:34`) is checked
+**before** `await import("posthog-node")`, so with the variable set the client is
+never constructed and no connection is ever attempted — not blocked-and-swallowed,
+never tried.
+
+The CLI is fail-safe without it (the whole init sits in `try {} catch {}` under
+the comment "Analytics must never break the CLI"), so this is not about
+correctness. It is about latency and about not being talked into an allowlist
+entry later: the client is built `flushAt: 1, flushInterval: 0`, one flush per
+event, so leaving it enabled means a connection attempt per command against a
+host that 403s. The wrong fix for that symptom is allowlisting an analytics host.
+The PostHog key is compiled into the binary (`--define __POSTHOG_KEY__`), so it
+cannot be disabled by simply not configuring one.
+
+## 7. STILL OPEN — one item
+
+### 7.1 The key itself
+
+**Profile chosen 2026-08-30: `fluidmomenta`**, to start. It is where the ComfyUI
+work from 0016 lives and where the 2026-08-29 reachability probe came from. The
+other two profiles get the image (it is shared) but no key, which is the honest
+answer to source item 2.8: the tooling is present everywhere, the capability is
+not.
+
+One key or three stays open until there is a second profile to argue about.
+Per-profile keys are the only route to provider-side attribution (§5.4); the cost
+is a `recreate` per rotation.
+
+*Blocking D1 and nothing else.* Every step in §8 up to D1 proceeds without it. The
+key is placed by the operator into
+`~/.ai-sandbox/profiles/fluidmomenta/secrets.env` — never read, printed or
+committed here. Because `env_file` is read only at container CREATE and the image
+rebuild forces a recreate anyway, placing it before the rebuild costs nothing;
+placing it after costs one extra `profile.sh fluidmomenta recreate`.
+
+## 8. Steps
+
+**D1 — the measurement run.** Blocked on §7.1 only. Vehicle corrected from the
+first revision: **not** `run-ephemeral.sh` — that script builds its `docker run`
+by hand and never loads `secrets.env` (`scripts/run-ephemeral.sh:88-105`), so a
+scratch container has no key. Use:
+
+```
+scripts/with-egress.sh <profile> --with fal -- 'genmedia ...'
+```
+
+which `docker exec`s the **persistent** agent container (`with-egress.sh:949`) —
+that one has the `env_file` — opens `[fal]` for the command, restores the
+allowlist verbatim on exit, and writes the install audit log. No new capture
+tooling is needed either: `egress_hosts()` (`with-egress.sh:826-847`) already
+reads `access.log` for the window and classifies allowed/denied per host, carrying
+the millisecond-boundary fix that once made a real install log report zero egress.
+
+Re-gate `[fal]` first. It is uncommented in the working tree, and `--with` on an
+already-open block is a documented safe no-op (`with-egress.sh:60`) — the run
+would exercise none of the gate and report nothing newly opened.
+
+What D1 must answer, in order:
+
+1. The full host census on submit → poll → download, from `egress_hosts()`.
+   **Delete** any line in `[fal]` the run never produces — the block's own rule.
+2. Do download redirects stay inside `.fal.media`?
+3. Does `genmedia init` need egress, or are the skills bundled in the binary?
+   (`skills-install.ts` shows no registry fetch — unresolved, §10.)
+4. The shape of a denied-host failure and an expired-key failure, deliberately.
+5. `genmedia status <endpoint> <request-id> --result --download` after the
+   submitting session is killed — the orphan-recovery path (§10 caveat).
+Steps 1–2 of the first revision are gone: the env-vs-`setup` question closed from
+source (§3.2), and the telemetry question closed by §6.6. The `noexec /tmp`
+question closed by measurement — see §8.1.
+
+### 8.1 Done 2026-08-30 — the image half
+
+`Dockerfile`: §6.1 pinned binary, §6.4 ffmpeg, §6.5/§6.6 the two ENV opt-outs.
+`dockerfile-order.test.sh` 8/8. Verified against the built image, not the build
+log:
+
+| Check | Result |
 |---|---|
-| 1.4 baked / per-sandbox / per-repo allowlist, who amends | **None of those.** One host-side file, `proxy/allowed_domains.txt`, in git, mounted `./proxy:/etc/squid/host:ro` as a **directory** and shared by every profile's proxy. Amended by editing it; `squid -k reconfigure` picks it up. [ADR-0003](../../docs/adr/0003-strict-egress-default.md). Caveat worth knowing: the Streamlit dashboard rewrites this file wholesale, so hand-added blocks can vanish — check `git diff` after using it. |
-| 1.6 update / telemetry endpoints allowed or blocked | **Blocked, by construction.** Default-deny: a host not listed is 403. No decision needed; the residual question (does the client hard-fail on a blocked telemetry call?) folds into D1's real run. |
-| 2.1 injection point; "image layers are readable and exportable" | **Nothing is ever baked.** `secrets.env` is an *optional* `env_file` (`required: false`) at `~/.ai-sandbox/profiles/<p>/secrets.env`, outside the repo tree, `chmod 600` by `profile.sh`. It reaches no image layer and no downstream consumer. |
-| 2.4 rotation — how in-flight sandboxes are handled | **`env_file` is read only at container CREATE.** So rotation costs a `scripts/profile.sh <p> recreate`; a plain `up` will not re-read it. That mechanic *is* the in-flight answer. Cadence is policy, folded into D3. |
-| 2.6 visible to agent process, shell, both, or neither | **Both** — and this is the finding, not a checkbox. See §5.3. |
-| 4.2 pin versions, rebuild trigger and cadence | Established pattern: pin in the `Dockerfile`, Gate 2/3 quarantine applies at build time, `--refresh-ai` bumps the tail layer, and AGENTS.md's boundary-monitor rule requires a detector in `just check-upstreams` for any new vendored payload. |
-| 4.3 self-update disabled? drift across long-lived sandboxes | Repo posture is already no-self-update (an in-container `claude` self-update is a known breakage, not a feature). Drift is `check-upstreams`. |
-| 4.4 install location survival + executable | The state-placement table in AGENTS.md decides it. Note `/tmp` is `noexec` (verify asserts the `just` shebang workaround) and `/root` scratch is tmpfs. |
-| 4.6 how a consumer discovers what is installed | `scripts/profile.sh <p> verify` prints per-tool presence lines. |
-| 5.1 skill level: image / user-global / per-sandbox / per-repo | **Templates in this repo, converged into every profile on `up`** — [ADR-0005](../../docs/adr/0005-skill-templates-are-source-of-truth.md), extended to policy by [ADR-0007](../../docs/adr/0007-policy-templates-are-source-of-truth-for-every-agent.md). The note's worry that "image-level content is invisible to anyone reading the repo" inverts here: the templates *are* the repo. |
-| 5.2 directory divergence, symlink strategies breaking on Windows | Convergence **mirrors by copy**, never symlinks; `profile-skills.test.sh` (24/24) locks it. No Windows checkout exists — the substrates are WSL2 and bare Linux. |
-| 5.3 is a registry-installed bundle reviewed before it lands? | `scripts/vendor-tools.sh` is the only door: every hash verified **before anything is copied**, plus a content diff against the claimed source commit. `vendor-tools.test.sh` (65/65). 0019 §2.3 is the worked example of what this catches — a plugin bringing 42 skills nobody asked for. |
-| 5.5 update path for a corrected skill | Converge on the next `up`. Same ADR-0005. |
-| 5.6 portable knowledge vs repo-specific seams | Pattern exists: `sandbox_templates/skills/web-read/SKILL.md`. Follow it if D5 produces a skill. |
-| 6.4 what a consumer does when neither backend is reachable | **Unreachable is the normal state** under default-deny. The gated block means "no fal" is the resting posture, not an error path. |
-| 7.5 a sandbox without the tooling degrades cleanly | Same answer: no key set, block closed, `webfetch`-style absence. Confirm in D1's run, do not design for it. |
-| 8.1 who owns image, allowlist, secret store — same party? | **One operator owns all three.** The question presumes separation that does not exist. |
+| binary present | `/usr/local/bin/genmedia` |
+| **hash** | `72a39bd3…d760fd34` — byte-identical to upstream `checksums.txt` for `genmedia-linux-x64` |
+| opt-outs live | `GENMEDIA_NO_ANALYTICS=1`, `GENMEDIA_NO_UPDATE=1` |
+| media tooling | `ffmpeg` + `ffprobe` 6.1.1-3ubuntu5 |
+| runs keyless | `genmedia version` → `{"version":"0.7.0","update_available":null}` — `update_available: null` is the updater confirming it did not run |
+| **under full hardening** | seccomp + `cap_drop ALL` + `no_new_privs` + `noexec /tmp`: `version`, `--help` and `models` all execute |
+| **`noexec /tmp`** | not an issue — the compiled Bun executable does not extract to `/tmp`, unlike the `just` shebang case. Measured, not assumed. |
+| keyless boundary | `genmedia models` returns a clean JSON error naming `FAL_KEY` and attempts **no** request — matching `getApiKey()` erroring ahead of the call |
 
-## 4. Not applicable — 4 items
+**The running containers are still on the old image.** `build` does not recreate,
+and no `--recreate-running` was passed. `fluidmomenta` picks this up on its next
+`scripts/profile.sh fluidmomenta recreate` — the same recreate that reads a newly
+placed `FAL_KEY` (§7.1), so one action serves both.
 
-- **2.2 scope: per-repo / per-session / per-tenant key.** The only unit the mechanism can express is the **profile**. Three profiles, one operator, no tenants. The live part of this question — *which* profiles get a real value — is real and lives in D3.
-- **5.4 licensing of vendored third-party instruction content.** Nothing third-party is proposed. Becomes live only if D5 chooses to vendor a skill from elsewhere, at which point `vendor-tools.sh` and `UPSTREAM.md` already carry it.
-- **6.3 is the fallback provisioned everywhere or only where the primary cannot land?** Presumes a fleet with varying capability. Three profiles built from one shared image.
-- **8.1's second half** — see §3.
+Two incidental findings about `run-ephemeral.sh`, both of which disqualify it as
+D1's vehicle and neither of which is a defect on its own terms: it has no
+`--env-file` (`:88-105`), and it hardcodes `docker run --rm -it` (`:75`), so it
+cannot be driven non-interactively at all.
 
-## 5. The five findings that survive
+**Then, in order:** `check-upstreams` detector for the pinned version →
+`deny-destructive.sh` ask rule for a paid submit (§6.3) → key placement (§7.1) →
+D1 → allowlist correction from D1's census → docs.
 
-### 5.1 No working run has ever happened. The host list is a probe plus a source read.
+## 9. Non-goals
 
-The six hosts in `[fal]` have two provenances, and neither is a completed job:
+- Reopening 0016's local ComfyUI. fal is for what the local GPU cannot do; this
+  item does not make it the default path for image work.
+- Any always-on egress. `[fal]` stays gated whatever else lands.
+- Vendoring the community skills into this repo (§6.2 decided against).
+- Baking a key anywhere.
 
-- `mcp.fal.ai`, `api.fal.ai`, `fal.run`, `queue.fal.run` — **observed** 2026-08-29 in
-  `egress-proxy-fluidmomenta` `access.log`: four `TCP_DENIED/403` CONNECTs inside
-  64ms. That is a **reachability probe**, explicitly not a working run.
-- `rest.fal.ai` — **read out of both client sources** 2026-08-30 (`fal_client/client.py`
-  `REST_URL`, `@fal-ai/client` `config.ts getRestApiUrl()`). It replaced
-  `rest.alpha.fal.ai`, which was in the hand-written list this block came from and
-  appears in **neither client and in no log line**. The list was denying the host
-  that is called and permitting one nothing calls.
-- `.fal.media` — the one wildcard, kept deliberately wider than the source names
-  (`CDN_URL = "https://v3.fal.media"`) because fal versions its media hosts. The
-  audit probe reports every leading-dot entry as INFO for periodic review
-  (`scripts/audit/probes/proxy.py:131`).
+## 10. Unverified — do not present these as fact
 
-So source item **1.1** — *"capture from a real run, not from docs"* — is this
-repo's own rule, stated in 0016 and proven twice by `[pytorch]` needing three
-hosts found one at a time. It is unmet. **1.3** (do download redirects land inside
-the `.fal.media` wildcard?) cannot be answered any other way.
-
-The `rest.alpha.fal.ai` episode is also the concrete instance of **8.2**: a
-provider-side host list drifted and nothing here detected it. It was found by
-reading source, by hand, once.
-
-### 5.2 A paid submit can be orphaned by a mid-job denial — and the evidence is on tmpfs
-
-This is the item with no precedent anywhere in the repo, and the reason the
-external note earns its keep. Source item **1.5**.
-
-fal meters at **submit**. The cycle is submit → poll → download, across at least
-three different hosts (`queue.fal.run`, `rest.fal.ai`, `*.fal.media`). A denial on
-the *first* leg is free and loud. A denial on the poll or download leg means the
-money is spent, the artifact exists on fal's side, and the local process sees a
-connection error indistinguishable from a network blip.
-
-Two things make it worse here:
-
-- `scripts/with-egress.sh` opens a gated block **for the duration of one command**
-  and closes it after. A job that outlives its widening loses its egress *by
-  design*, mid-flight.
-- `/var/log/squid` is **tmpfs, 64m** (`docker-compose.yml:241`). The `TCP_DENIED`
-  line that would tell you which leg died does not survive a proxy restart, and
-  rolls at 64m. Proxy failures here are already known to be forensically silent.
-
-Source item **7.2** — "verify a submitted job is pollable and retrievable after the
-session dies" — is the recovery half of the same finding, and it needs the request
-id written somewhere durable (the workspace bind mount), not to tmpfs or a
-transcript.
-
-### 5.3 This is the first key in `secrets.env` the agent can spend by itself
-
-Source items **2.6, 2.7, 7.3**. The mechanism is honest and the consequence is not
-comfortable:
-
-- `env_file` puts `FAL_KEY` in the **container's environment**. The agent can read
-  it (`env`, `/proc/self/environ`) and call fal directly with `curl`-equivalents.
-- That is *unlike* every other key in the file. `TAVILY_API_KEY` and friends are
-  read by `sandbox_templates/bin/webfetch`, a broker the model does not author
-  requests for; `webfetch.test.sh` (90/90) locks that keys travel in headers and
-  never in URLs, because Squid logs URLs. **There is no equivalent lock on a fal
-  call path, because there is no fal call path yet.**
-- Therefore source item **7.3** — "confirm no credential appears in environment
-  dumps" — **fails as written** and must be restated rather than checked off. The
-  correct claim is narrower: it appears in the environment by design, and is kept
-  out of *argv, URLs, logs, and git* by the header rule.
-
-The template written 2026-08-30 states the naming evidence (`FAL_KEY` canonical;
-`FAL_KEY_ID`+`FAL_KEY_SECRET` legacy and AND-checked; `Authorization: Key`, not
-`Bearer`) and the header rule. It does not, and cannot, make the key invisible to
-the agent.
-
-Source items **2.3** (scoped/revocable keys) and **2.5** (revocation speed) are
-provider-side and **unverified** — see §9.
-
-### 5.4 Spend has no cap, no telemetry, and no attribution
-
-Source items **3.1, 3.3, 3.5, 8.3**. Measured: nothing in this repo tracks cost.
-There is no cost log, no per-profile meter, no budget check.
-
-- **3.3** — "where does cost telemetry land?" **Nowhere.** Squid's `access.log` is
-  the only per-profile network record and it is tmpfs (§5.2).
-- **3.5 / 8.3** — attribution after the fact is impossible **if one key is shared
-  across the three profiles**, because fal's side cannot distinguish them either.
-  Per-profile keys would make it attributable at the provider. That is the live
-  half of source item 2.2, and it lands in D3.
-- **3.2** — blast radius. The genuine mitigation already exists and is worth
-  naming: the `[fal]` block is gated, so an unattended loop can only spend while a
-  `with-egress.sh --with fal` widening is active. That bounds it in wall-clock, not
-  in dollars.
-- **3.4** — the cheap/expensive boundary maps onto machinery this repo already has:
-  `deny-destructive.sh` is a **three-tier** engine (warn / ask / deny) and a claude
-  `ask` in a headless or subagent context is a deny carrying the reason. A fal
-  submit is exactly the shape of thing the ask tier exists for.
-
-### 5.5 Nothing is installed — no client, no CLI, and no ffmpeg
-
-Source items **4.1, 4.5, 6.1, 6.2**. Measured in `ai-sandbox-nranthony`,
-2026-08-30:
-
-- no `fal` CLI, no `fal_client` module (`ModuleNotFoundError`);
-- **no `ffmpeg`** — not in the `Dockerfile`, not on `PATH`.
-
-The last one is source item 4.5 landing squarely: generated **video** would arrive
-as bytes nothing in the container can transcode, inspect, or thumbnail. Whatever
-D5 decides, that gap is real and independent of it.
-
-**6.1/6.2** — backend selection — has a precedent to follow and one option the
-external note could not see:
-
-- Precedent: [ADR-0011](../../docs/adr/0011-web-read-backends-are-peers-with-no-default.md)
-  — web-read backends are **peers with no default**, knowledge written once,
-  invocation swappable. That is source item 6.2, already decided as a principle.
-- The option it could not see: **ComfyUI already runs inside the boundary** (0016),
-  on the local GPU, for free, with zero always-on egress. For a large share of
-  image work, "use fal" and "use the thing already here" are competing answers, and
-  the free one does not raise §5.2, §5.3 or §5.4 at all.
-
-## 6. DECISIONS — present to the owner before implementing
-
-### D1 — do a real end-to-end run first, or provision from the current list?
-
-Source items 1.1, 1.3, 7.1, 7.4, 8.2. **Recommended: run first.** One scratch
-job via `scripts/run-ephemeral.sh` under the production ACL and secret path,
-capturing `access.log` live (it is tmpfs — capture during, or never), answering:
-every host on submit → poll → download; whether download redirects stay inside
-`.fal.media`; what a denied host looks like from the client; what an expired key
-looks like. Everything else in this spec is cheaper after that run.
-
-### D2 — what is the failure signal when a leg is denied mid-job?
-
-Source items 1.5, 7.2. Options: (a) accept the orphan risk, document it; (b)
-persist the fal request id to the workspace on submit so any later session can
-poll and retrieve; (c) refuse to submit unless the widening window is long
-enough to cover the job. (b) is cheap and is the recovery half of 7.2.
-
-### D3 — one key across three profiles, or one per profile? And which profiles?
-
-Source items 2.2 (live half), 2.8, 3.5, 8.3, plus rotation cadence from 2.4.
-Per-profile keys are the only way to get provider-side attribution. Against:
-three keys to rotate, each costing a `recreate`. The placeholder is commented in
-all three `secrets.env` files as of 2026-08-30 — no profile has a value.
-
-### D4 — is a fal submit an `ask`?
-
-Source item 3.4. If yes, it is a rule in `deny-destructive.sh` and the suite grows;
-the ask tier is dialect-branched (claude `ask` / agy `force_ask`) and both arms
-must be written. If no, the only control is the gated block plus whatever cap D3's
-key model supports.
-
-### D5 — what, if anything, gets installed?
-
-Source items 4.1, 4.5, 6.1. Three separable questions: the **client** (pinned
-`fal_client` below Gate 3 / the MCP endpoint at `mcp.fal.ai`, which inherits
-0019's D3 problem of where an `mcpServers` entry can live and survive converge /
-nothing, calling the REST API directly); the **skill** (one, ADR-0011-shaped,
-naming fal and local ComfyUI as peers); and **`ffmpeg`**, which is a plain
-"yes/no, and if yes it is a `Dockerfile` line with a rebuild".
-
-## 7. Steps, after §6 sign-off
-
-1. D1's ephemeral run, `access.log` captured live. Write the observed host set into
-   the `[fal]` block by name, and **delete** any line the run never produced —
-   the block's own instruction.
-2. Add a `[fal]` line to `just check-upstreams` only if D5 bakes something; the
-   host list itself has no detector and §5.1 is the argument for giving it one.
-3. Whatever D2/D3/D4 decide, in the surface that owns it — allowlist, secrets
-   template, hook engine — each with its own suite run.
-4. Docs: ARCHITECTURE.md only if D5 changes the image.
-
-## 8. Non-goals
-
-- Reopening 0016's decision to run ComfyUI locally. This item may conclude fal is
-  not needed for most work; that is a *use* decision, not a reversal.
-- Any always-on egress. `[fal]` stays gated whatever is decided.
-- Baking a key anywhere. §3, source item 2.1.
-
-## 9. Unverified — do not present these as fact
-
-- **fal's key model.** Whether keys can be scoped, whether spend caps exist per key
-  or per account, and how fast revocation takes effect (source items 2.3, 2.5,
-  3.1). Not checked. The external note's framing — "in-repo instruction files are
-  advisory only" — is correct regardless: if no enforceable cap exists provider-side,
-  the gated block is the *only* real bound.
-- **fal's pricing granularity**, and whether any per-request cost is returned in a
-  response header that could be logged locally.
-- **Whether `mcp.fal.ai` speaks streamable-HTTP MCP** and how it authenticates
-  beyond "the same key". Assumed, not measured.
-- The claim that a denial on the download leg leaves the artifact retrievable
-  later. Plausible from the queue API's shape; untested (D1/D2).
+- **Whether the `@fal-ai/genmedia-cli` npm tarball ships the prebuilt binary** or
+  requires a Bun build. Only matters if §6.1's GitHub-release route fails.
+- **Where `genmedia skills install` fetches from.** `skills-install.ts` shows no
+  URL constant; the content may be bundled in the 106MB binary. If it is, `init`
+  needs no egress at all — a materially better answer than assuming a registry
+  host. Not resolved; D1 step 5.
+- **Whether the orphan-recovery path actually works.** `--async` + persisted
+  request ID + `genmedia status … --result --download` is what the collated note
+  prescribes and the command surface supports it, but no one here has killed a
+  session mid-job and recovered the artifact.
+- **fal's key model** — scoping, per-key spend caps, revocation latency. Unchecked.
+  If no enforceable cap exists provider-side, §6.3's ask tier and the gated block
+  are the only real bounds.
+- **Whether v0.7.0 has an update opt-out or a telemetry opt-out env var.** §7.2, §7.3.
+- **Whether the project is still maintained.** Three months quiet after six weeks
+  of rapid releases. Relevant to §6.1's pin: a stale pin on an abandoned project is
+  fine; a stale pin on an active one is drift.
