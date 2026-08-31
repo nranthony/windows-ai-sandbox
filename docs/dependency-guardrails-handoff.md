@@ -156,7 +156,8 @@ tool with its own dependency tree is self-defeating.
 |---|---|---|
 | `posture <path>` | no | ~22 config checks (`N*` node, `P*` python, `X*` cross-cutting, `D*` discovery) with file+line. **N03** finds a child directory weakening the quarantine; **X04/X05** scan the whole tree, skipping vendored/venv trees |
 | `pkg <eco> <name> [ver]` | yes | OSV lookup; `MAL-` prefix is the sole BLOCK discriminator |
-| `deps <path>` | yes | Enumerates every lockfile-pinned package → purl → OSV |
+| `deps <path>` | yes | Enumerates every lockfile-pinned package → purl → OSV, and **names the requirement lines it could not** (only `==` yields a version to query) |
+| `roots <ws>` | no | Which repos under a workspace a scan will consider — SCAN **and** SKIP, both reported (work/0018) |
 
 Surfaced as `scripts/profile.sh <p> deps [--osv|--json|--strict|--history]`.
 
@@ -166,8 +167,8 @@ A **withdrawn** `MAL-` record is `INFO`, not `BLOCK` (the reported May 2026 with
 157 records, which wrongly flagged FastAPI/Strawberry GraphQL/rdflib, is the worked
 example and is pinned in the test corpus).
 
-Test suite: `bash scripts/depaudit.test.sh` — **38 offline / 39 with `--online`**, over 9
-fixtures.
+Test suite: `bash scripts/depaudit.test.sh` — **56 offline**, more with `--online`, over 9
+fixtures plus generated trees.
 
 ### Tripwires — `scripts/profile.sh <p> verify`
 
@@ -300,6 +301,8 @@ did not fail; it produced a confident number that **stopped work for days**.
 | `/usr/etc` does not exist in the base image | Build failure; needs `mkdir -p` |
 | **Dockerfile layer order is load-bearing** | The npmrc layer must come *after* the `claude`/`agy` install — `min-release-age` applies at **build** time too, so writing it earlier makes `@anthropic-ai/claude-code@latest` unresolvable whenever the newest release is inside the window. A self-inflicted build break |
 | A project `.npmrc` silently overrides the global quarantine | Precedence is `cli > env > project > user > global`. Detected by `verify`, which now **compares** rather than merely reporting presence |
+| `deps` asked one question per immediate child: *is there a manifest at ITS root?* | **The workspace's ComfyUI tree was never scanned, for the whole life of the subcommand** — its manifest sits at `comfyui/requirements.txt`. Total failure was loud ("No manifests found"); PARTIAL coverage said nothing at all. Enumeration moved into `depaudit roots`, which reports SKIP as well as SCAN (work/0018) |
+| `enumerate_locked` silently drops any requirement line without an `==` pin | OSV is queried by name AND version. ComfyUI pins 5 of 35 lines, so the report read `Checked 5 package(s)` — true, and indistinguishable from coverage. Now stated as an explicit uncovered count |
 | pip's wheels-only refusal message | Reads `Could not find a version that satisfies the requirement X (from versions: none)` — **indistinguishable from the package not existing**, i.e. exactly like a slopsquat miss. uv names the real reason |
 
 ### Tooling traps that cost time (not product defects)

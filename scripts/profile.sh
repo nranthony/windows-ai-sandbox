@@ -1701,18 +1701,29 @@ PY
 
     # A profile's workspace holds MANY repos (docker-compose.yml: "the profile's
     # repo parent folder = /workspace"). depaudit is root-scoped by design, so
-    # iterate: the workspace root, plus each immediate child that has a manifest.
-    # Without this the common case reports "no manifests" and reads as clean.
+    # iterate: the workspace root, plus each repo under it that carries a
+    # manifest.
+    #
+    # Enumeration lives in depaudit's `roots` (work/0018), NOT here. What it
+    # replaced asked only "does a manifest sit at this child's root?", which
+    # silently omitted my_comfyui — manifest at comfyui/requirements.txt, and
+    # the largest dependency surface in the workspace — for the whole life of
+    # this subcommand. Two reasons it moved: the vendored-tree exclusion is now
+    # depaudit's own skipped(), so it cannot drift from the one the checks use;
+    # and the enumeration is testable offline in depaudit.test.sh.
     dep_roots=""
-    for m in package.json pyproject.toml requirements.txt Pipfile; do
-      [[ -e "$ws/$m" ]] && { dep_roots="$ws"; break; }
-    done
-    for d in "$ws"/*/; do
-      [[ -d "$d" ]] || continue
-      for m in package.json pyproject.toml requirements.txt Pipfile; do
-        [[ -e "$d$m" ]] && { dep_roots="$dep_roots ${d%/}"; break; }
-      done
-    done
+    dep_skipped=""
+    # Captured, not piped: an enumeration that CRASHES must not read as "no
+    # manifests here" — that is the same under-report in a different disguise.
+    dep_rows=$(python3 "$da" roots "$ws") \
+      || fail "depaudit roots failed for $ws — enumeration is not optional"
+    while IFS=$'\t' read -r dep_verdict dep_path dep_reason; do
+      case "$dep_verdict" in
+        SCAN) dep_roots="$dep_roots $dep_path" ;;
+        SKIP) dep_skipped="${dep_skipped}${dep_path#"$ws"/}|$dep_reason
+" ;;
+      esac
+    done <<< "$dep_rows"
     [[ -n "${dep_roots// /}" ]] || { warn "No manifests found under $ws"; exit 0; }
 
     dep_rc=0
@@ -1756,6 +1767,15 @@ PY
         printf '  %-32s %s\n' "$name" "$counts"
       done
       printf '%s\n' "----------------------------------------------------------"
+      if [[ -n "$dep_skipped" ]]; then
+        printf '%s\n' "  NOT SCANNED — a skip is not a pass:"
+        printf '%s' "$dep_skipped" | while IFS='|' read -r name reason; do
+          [[ -z "$name" ]] && continue
+          printf '  %-32s %s\n' "$name" "$reason"
+        done
+        printf '%s\n' "----------------------------------------------------------"
+      fi
+      printf '%s\n' "  scanned $(printf '%s' "$dep_roots" | wc -w) repo root(s), skipped $(printf '%s' "$dep_skipped" | grep -c . || true)."
       printf '%s\n' "  depaudit is READ-ONLY and reports on configuration; it does"
       printf '%s\n' "  not enforce anything. FAIL = a control that is absent, not"
       printf '%s\n' "  a vulnerability. Fixes belong in the repo it names."

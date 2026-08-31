@@ -309,20 +309,54 @@ lh3.googleusercontent.com
 github.com
 api.github.com
 codeload.github.com
-# objects.githubusercontent.com
-# release-assets.githubusercontent.com
-# raw.githubusercontent.com
-# gist.githubusercontent.com
+# ─── OPEN by OPERATOR OVERRIDE, 2026-08-31 ──────────────────────────────────
+# The host(s) immediately below are UNCOMMENTED against this file's
+# strict-by-default posture. Deliberate, single override by the owner, who has
+# current sandbox-usage and agent-status context this file does not. NOT a new
+# default and NOT a precedent: the committed state was CLOSED, and re-closing
+# is the expected end of the task that needed it.
+# The sanctioned route is `scripts/with-egress.sh <p> --with <tag> -- '<cmd>'`,
+# which opens, runs one command, and restores the file verbatim. A hand or
+# dashboard edit has no automatic close — which is why this note carries a date.
+# ────────────────────────────────────────────────────────────────────────────
+objects.githubusercontent.com
+release-assets.githubusercontent.com
+raw.githubusercontent.com
+gist.githubusercontent.com
 # github.io
 # gitlab.com
 
 # --- Python package ecosystem [pypi] ---
-# .pypi.org
-# .files.pythonhosted.org
-# .astral.sh
+.pypi.org
+.files.pythonhosted.org
+.astral.sh
 
 # --- PyTorch / NVIDIA CUDA wheels [pytorch] ---
-# download.pytorch.org
+# THREE hosts, and only the first is guessable. A cu130 install walks all three:
+#   download.pytorch.org      the simple index + .metadata probes
+#   download-r2.pytorch.org   the wheel BYTES (Cloudflare R2) — the index host
+#                             302s here, so with only the first, RESOLUTION
+#                             succeeds and the DOWNLOAD fails
+#   pypi.nvidia.com           NVIDIA's own index, which the cu130 index links
+#                             out to for nvidia-*/cuda-* dependencies
+# Each missing host fails as `tunnel error: unsuccessful`, which reads as a
+# network fault rather than an allowlist gap — so the failure never points at
+# this file. This tag is deliberately self-sufficient: pypi.nvidia.com sits here
+# rather than in [nvidia] below (different hosts, different purpose) so that
+# `--with pytorch` alone is enough.
+# OBSERVED, not guessed — the rule work/0016 §2.6 sets for CDN hosts, and it
+# took two rounds here because each host only appears once the one before it is
+# open. Measured 2026-08-28 in egress-proxy-<p> access.log during a cu130
+# install: 52x TCP_TUNNEL/200 download.pytorch.org, 12x TCP_DENIED/403
+# download-r2.pytorch.org, then 13x TCP_DENIED/403 pypi.nvidia.com once r2 was
+# allowed. with-egress.sh named each one on its DENIED line as it surfaced.
+# NOTE: torch's pinned CUDA deps (cuda-toolkit, cuda-bindings, nvidia-cudnn-cu13)
+# are often days old, so a cu130 install also needs
+# `--allow-fresh "<reason>"` to clear the 7-day age gate. That is a SEPARATE
+# control from this allowlist — opening egress does not lift it.
+download.pytorch.org
+download-r2.pytorch.org
+pypi.nvidia.com
 
 # --- Node.js / npm (Claude Code updates + per-repo npm) [npm] ---
 # registry.npmjs.org
@@ -330,23 +364,23 @@ codeload.github.com
 # deb.nodesource.com
 
 # --- NVIDIA container + compute stack [nvidia] ---
-# developer.download.nvidia.com
-# developer.nvidia.com
+developer.download.nvidia.com
+developer.nvidia.com
 
 # --- Numerai tournament + MCP [numerai] ---
 # GraphQL API (all ops: data listing, submissions, staking, diagnostics, MCP)
-api-tournament.numer.ai
+# api-tournament.numer.ai
 # Website (MCP device-token auth flow, account/key creation)
-numer.ai
+# numer.ai
 # S3 data buckets (presigned URLs for dataset download + submission upload).
 # Bucket names returned dynamically by the GraphQL API; these are the known
 # ones. If a download/upload hits TCP_DENIED, check Squid access.log for the
 # actual S3 subdomain and add it here.
-numerai-datasets-us-west-2.s3.amazonaws.com
-numerai-datasets-us-west-2.s3.us-west-2.amazonaws.com
-numerai-datasets-us-west-2.s3-us-west-2.amazonaws.com
-numerai-datasets.s3.amazonaws.com
-numerai-public-datasets.s3-us-west-2.amazonaws.com
+# numerai-datasets-us-west-2.s3.amazonaws.com
+# numerai-datasets-us-west-2.s3.us-west-2.amazonaws.com
+# numerai-datasets-us-west-2.s3-us-west-2.amazonaws.com
+# numerai-datasets.s3.amazonaws.com
+# numerai-public-datasets.s3-us-west-2.amazonaws.com
 
 # --- Kaggle CLI [kaggle] ---
 # `kaggle` package (pip-installed, already covered by [pypi]) talks to the
@@ -502,6 +536,208 @@ blender.org
 # docs.google.com
 # drive.google.com
 # sheets.googleapis.com
+
+# # --- ComfyUI app control plane [comfyui] ---
+# # ComfyUI-Manager's node/model DATABASE and the Comfy Registry — not model
+# # weights (those are [comfyui-models]). Without raw.githubusercontent.com the
+# # Manager UI cannot populate at all: glob/manager_core.py pins DEFAULT_CHANNEL
+# # to raw.githubusercontent.com/ltdrdata/ComfyUI-Manager/main. api.comfy.org is
+# # glob/cnr_utils.py's base_url; registry.comfy.org serves node reference links.
+# # MEASURED 2026-08-28, first real run inside a profile: with this block closed
+# # Manager fails five startup fetches (custom-node-list, alter-list,
+# # extension-node-map, model-list, github-stats) with `403 Forbidden` from
+# # egress-proxy:3128, plus `Cannot connect to comfyregistry`, then falls back to
+# # its bundled copies and logs "switching to local mode". Read-only browsing of
+# # the catalogue still works offline; it is updates that stop. Manager's own
+# # `network_mode: offline` setting suppresses the attempts (and the traceback
+# # noise) if you never intend to open this — prefer that over opening the block.
+# # Node INSTALLS clone from github.com, which is always-on under [git] — so
+# # opening this tag is what turns "browse the catalogue" into a working UI,
+# # while node install itself is already reachable. Keep gated: a workflow run
+# # should not be able to reach the catalogue unattended. raw.githubusercontent
+# # also appears under [beads-install]; duplicate dstdomain lines are harmless.
+# raw.githubusercontent.com
+# api.comfy.org
+# registry.comfy.org
+
+# # --- ComfyUI model weights — main path [comfyui-models] ---
+# # 91% of ComfyUI-Manager's curated model-list.json (479 of 527 URL entries)
+# # resolves to huggingface.co, as do the seven installed custom nodes that fetch
+# # at node-execution time via hf_hub_download / from_pretrained.
+# # THIS BLOCK IS INCOMPLETE BY CONSTRUCTION. huggingface.co only serves the
+# # metadata request; the bytes come from a CDN host chosen by the server at
+# # request time — an X-Xet-Cas-Url response header under Xet (huggingface_hub
+# # constants.py:274), or a 302 to a server-picked CDN without it. Neither host
+# # appears in any source file, and requests follows the redirect silently, so a
+# # denial presents as "download failed" with no host named. Do NOT guess the
+# # CDN names into this block: open it, pull one small model, read the actual
+# # TCP_DENIED lines out of Squid's access.log, and add the exact hosts seen —
+# # the same procedure the [numerai] block documents for its dynamic S3 buckets.
+# # Capture that log live; cache.log is tmpfs and docker logs is blind for squid.
+# # Setting HF_HUB_DISABLE_XET=1 forces the classic CDN path and narrows the host
+# # set (constants.py:283 -> utils/_runtime.py:159) at a cost in download speed.
+# # Pinned hosts only, no parent wildcards — same stance as [git].
+# # SECURITY: huggingface.co hosts arbitrary user-uploaded repos, so this is a
+# # general fetch capability, not a narrow vendor API. It is also the container
+# # an agent runs in. That is why this is gated and not always-on. Weights are
+# # executable-adjacent (.ckpt is pickle); nothing in this repo inspects them.
+# # us.aws.cdn.hf.co is the CDN host the metadata request redirects to, OBSERVED
+# # 2026-08-28 pulling a model into my_comfyui, not guessed: huggingface.co
+# # tunnelled clean (4x TCP_TUNNEL/200) while the bytes died on
+# # `TCP_DENIED/403 CONNECT us.aws.cdn.hf.co:443`. It is the CLASSIC (non-Xet)
+# # path — a Xet-backed repo redirects to a xethub CAS host instead, which has
+# # NOT been seen here and is therefore NOT listed. The name is region- and
+# # provider-shaped (<region>.<provider>.cdn.hf.co), so a model served from
+# # another region will deny under a sibling name: read that denial out of
+# # access.log too rather than pre-emptively widening to a parent wildcard.
+# ─── OPEN by OPERATOR OVERRIDE, 2026-08-31 ──────────────────────────────────
+# The host(s) immediately below are UNCOMMENTED against this file's
+# strict-by-default posture. Deliberate, single override by the owner, who has
+# current sandbox-usage and agent-status context this file does not. NOT a new
+# default and NOT a precedent: the committed state was CLOSED, and re-closing
+# is the expected end of the task that needed it.
+# The sanctioned route is `scripts/with-egress.sh <p> --with <tag> -- '<cmd>'`,
+# which opens, runs one command, and restores the file verbatim. A hand or
+# dashboard edit has no automatic close — which is why this note carries a date.
+# ────────────────────────────────────────────────────────────────────────────
+huggingface.co
+us.aws.cdn.hf.co
+
+# # --- ComfyUI model weights — long tail [comfyui-models-extra] ---
+# # The remaining ~9% of the curated list: dl.fbaipublicfiles.com is Meta (SAM,
+# # detectron, 19 entries across the main and node_db/new lists), civitai.com is
+# # 6 entries, heibox.uni-heidelberg.de is the original LDM/VAE weights, and
+# # openaipublic.azureedge.net is CLIP. Split from [comfyui-models] so the
+# # narrow choice (huggingface only) and the wide one are a one-word difference
+# # at the command line rather than an edit to this file. storage.googleapis.com
+# # accounts for one further entry and already exists gated under [kaggle] and
+# # [antigravity-install] — open one of those instead of duplicating it here.
+# # civitai.com redirects downloads to an R2 bucket host; same observation rule
+# # as [comfyui-models] applies — read the denial out of access.log, do not guess.
+# dl.fbaipublicfiles.com
+# civitai.com
+# heibox.uni-heidelberg.de
+# openaipublic.azureedge.net
+
+# # --- fal.ai hosted inference + its MCP endpoint [fal] ---
+# # The tag is `fal`, NOT `fal.ai`. with-egress.sh matches section tags with
+# # `\[[a-z-]+\]`, so a dot in the tag makes the block unopenable: it would sit
+# # here looking gated and silently ignore `--with fal.ai` forever.
+# #
+# # WHAT THIS OPENS, stated plainly because it is not a read-only API. fal runs
+# # arbitrary models on ITS GPUs and hands back generated media, so an open tag
+# # here is a compute-and-fetch capability the agent drives on its own. Three
+# # consequences: whatever it submits leaves the boundary (prompts, and any
+# # image or video passed as INPUT); the media hosts return bytes nothing in
+# # this repo inspects; and it is metered against a key, so an unattended loop
+# # costs money as well as egress. The key belongs in the environment and never
+# # in a URL — Squid logs URLs, so a key in a query string is a leak the agent
+# # cannot see (same rule as the webfetch broker).
+# #
+# # OBSERVED denied 2026-08-29, egress-proxy-fluidmomenta access.log, four
+# # TCP_DENIED/403 CONNECTs inside 64ms — a reachability probe, not a working
+# # run, so these are hosts the client ATTEMPTS, not yet hosts a completed
+# # inference needs:
+# #   mcp.fal.ai      the MCP endpoint itself
+# #   api.fal.ai      NOT in the hand-written list this block came from; the log
+# #                   had it. Evidence beats a list every time.
+# #   fal.run         synchronous inference
+# #   queue.fal.run   queued inference
+# #
+# # NOT observed, but READ OUT OF THE CLIENT SOURCE, which is the same kind of
+# # evidence as the log and better than a hand-written list:
+# #   rest.fal.ai     file storage — where an image or video passed as INPUT is
+# #                   uploaded — plus queue status / result polling. Hardcoded in
+# #                   BOTH clients: fal_client/client.py `REST_URL`, and
+# #                   @fal-ai/client config.ts `getRestApiUrl()`. Checked
+# #                   2026-08-30 against fal-ai/fal and fal-ai/fal-js main.
+# #                   It REPLACES `rest.alpha.fal.ai`, which was in the
+# #                   hand-written list this block came from and appears in
+# #                   neither client and in no access.log line: the list denied
+# #                   the host that is actually called and permitted one nothing
+# #                   calls. Same lesson as api.fal.ai above, found from the
+# #                   other direction.
+# #
+# # NOT observed in a log, and the only entry here kept WIDER than what the
+# # source names — the source names one version of it (fal_client/client.py
+# # `CDN_URL = "https://v3.fal.media"`), and versioning is exactly why the entry
+# # is not pinned to it:
+# #   .fal.media          generated image + video delivery. WILDCARD, and the
+# #                       only one in this block: fal serves media from
+# #                       VERSIONED hosts (v3.fal.media today), so a pinned
+# #                       entry leaves the next version denying on a URL the
+# #                       API itself just handed back. Squid reads a LEADING
+# #                       DOT as "this domain and every subdomain" — measured
+# #                       against the existing .astral.sh line, whose apex
+# #                       tunnels 200 — so this replaces fal.media and
+# #                       v3.fal.media both. `*.fal.media` is NOT squid
+# #                       dstdomain syntax: it matches literally, matches
+# #                       nothing, and reads as present while denying.
+# #
+# # OBSERVED denied 2026-08-30, egress-proxy-fluidmomenta access.log, from a
+# # `genmedia skills list` inside the profile:
+# #   TCP_DENIED/403 3394 CONNECT genmedia.sh:443 - HIER_NONE/- text/html
+# # HIER_NONE means squid refused at the ACL and never went upstream — the 403
+# # is OURS, not fal's, which is worth stating because the CLI reports it as
+# # "Failed to fetch skills registry ... 403 Forbidden" and that reads like a
+# # rejection by the vendor.
+# #   genmedia.sh     the genmedia CLI's skills INDEX, and its installer host.
+# #
+# # INDEX AND CONTENT ARE DIFFERENT HOSTS, which is why half the skills workflow
+# # already worked. `GET https://genmedia.sh/skills?q=` returns JSON naming its
+# # own backing store: {"registry":"https://raw.githubusercontent.com/
+# # fal-ai-community/skills/refs/heads/main/skills", ... "total":17}. So
+# # `genmedia init` goes STRAIGHT to raw.githubusercontent.com and needs only
+# # [git]; `genmedia skills list` and `skills install` query THIS host first.
+# # The full workflow needs both blocks open, and neither alone looks broken —
+# # it looks like one subcommand works and another does not.
+# #
+# # NOT genmedia-sh.fal.ai, and not both. Measured 2026-08-30: genmedia.sh has
+# # its own A records and NO CNAME or alias, while genmedia-sh.fal.ai is a CNAME
+# # to cdn.webflow.com — a shared CDN serving a marketing page, a different
+# # service entirely. Squid matches dstdomain against the hostname in the CONNECT
+# # line, and /skills?q= answers 200 with zero redirects, so the client never
+# # asks for the second name: an entry for it would match nothing while opening a
+# # shared CDN. (A cookie on the response carries Domain=genmedia-sh.fal.ai and
+# # suggested otherwise; the DNS does not support it. Cookie attributes are not
+# # evidence of a resolution path.)
+# #
+# # WHAT OPENING IT COSTS, stated because it is not only an index. This host also
+# # serves `genmedia.sh/install`, the `curl ... | bash` installer. Allowlisting
+# # makes that fetchable inside a profile. Two things already stand between that
+# # and a run: the fetch-and-run form is denied at permissions.deny regardless of
+# # egress, and the image bakes a pinned, hash-verified binary, so nothing here
+# # needs the installer. Exact host only — `.sh` is a registrable TLD and a
+# # parent entry would be absurd; `.fal.ai` would not match this name at all.
+# #
+# # Operated by fal on the evidence of fal's own CLI hardcoding it and fal's
+# # docs publishing it — inference from their code, not something DNS proves.
+# #
+# # Pinned hosts everywhere EXCEPT media delivery, and the split is deliberate.
+# # The API and MCP hosts are the CONTROL surface — where prompts, inputs and a
+# # key go — so they stay exact; `.fal.ai` or `.fal.run` as a parent would hand
+# # over every future subdomain fal creates, including any write API. .fal.media
+# # is the return path, bytes coming back, and its hostnames version. The audit
+# # probe reports it as an INFO wildcard for periodic review. A new host outside
+# # that pattern is still read out of access.log and added by name, never
+# # guessed and never widened.
+# ─── OPEN by OPERATOR OVERRIDE, 2026-08-31 ──────────────────────────────────
+# The host(s) immediately below are UNCOMMENTED against this file's
+# strict-by-default posture. Deliberate, single override by the owner, who has
+# current sandbox-usage and agent-status context this file does not. NOT a new
+# default and NOT a precedent: the committed state was CLOSED, and re-closing
+# is the expected end of the task that needed it.
+# The sanctioned route is `scripts/with-egress.sh <p> --with <tag> -- '<cmd>'`,
+# which opens, runs one command, and restores the file verbatim. A hand or
+# dashboard edit has no automatic close — which is why this note carries a date.
+# ────────────────────────────────────────────────────────────────────────────
+mcp.fal.ai
+api.fal.ai
+fal.run
+queue.fal.run
+rest.fal.ai
+genmedia.sh
+.fal.media
 
 
 # =============================================================================

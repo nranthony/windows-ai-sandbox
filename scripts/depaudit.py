@@ -327,6 +327,102 @@ def skipped(p: Path, root: Path) -> bool:
                for part in parts)
 
 
+# --------------------------------------------------------------------------
+# workspace enumeration — which repos does a scan even CONSIDER? (work/0018)
+# --------------------------------------------------------------------------
+
+# Trees whose manifests belong to somebody else. `skipped()` covers vendored and
+# INSTALLED code; these are the plugin dirs an application manages on the user's
+# behalf. A ComfyUI custom node's requirements.txt is a real supply-chain surface
+# but it is NOT the repo's declared dependencies, and a naive descent turns one
+# omitted repo into dozens of spurious ones (work/0018 §4b, work/0016 §7).
+PLUGIN_DIRS = ("custom_nodes", "extensions", "plugins")
+
+
+def _tree_skipped(p: Path, ws: Path) -> bool:
+    """`skipped()` COMPOSED with the plugin trees — never re-implemented.
+
+    Two predicates that must agree will drift; this repo has already paid for
+    that lesson twice with its two hand-edited policy lists.
+    """
+    return skipped(p, ws) or any(part in PLUGIN_DIRS
+                                 for part in p.relative_to(ws).parts)
+
+
+def has_manifest(d: Path) -> bool:
+    return any((d / m).exists() for m in MANIFESTS)
+
+
+def _subdirs(d: Path) -> list[Path]:
+    """Visible child directories, or none if the directory cannot be read.
+
+    A workspace routinely contains a tree the scanning user cannot traverse
+    (root-owned output, a broken symlink). One of those must not abort the whole
+    workspace enumeration — it becomes a SKIP row, which is the point of §3.
+    """
+    try:
+        return sorted(c for c in d.iterdir()
+                      if c.is_dir() and not c.name.startswith("."))
+    except OSError:
+        return []
+
+
+def enumerate_roots(ws: Path, max_depth: int = 2) -> list[tuple[str, Path, str]]:
+    """(verdict, path, reason) for every repo under a workspace root.
+
+    Verdict is SCAN or SKIP, and **both are reported**. The predecessor of this
+    function lived in `profile.sh` and answered only "does a manifest sit at the
+    child's root?" — which silently omitted `my_comfyui`, whose manifest is at
+    `comfyui/requirements.txt`, for the entire life of the `deps` subcommand.
+    Total failure was loud; PARTIAL coverage said nothing (work/0018 §1-3).
+
+    Depth is bounded and conditional, not general recursion: a repo's subdirs
+    are examined ONLY when its own root has no manifest, and only down to
+    `max_depth` (default 2 — one level below the repo). That is precisely the
+    observed shape, a repo whose real manifest lives inside a vendored upstream
+    checkout, and it cannot change the result for any repo that already scanned
+    correctly.
+    """
+    out: list[tuple[str, Path, str]] = []
+    if has_manifest(ws):
+        out.append(("SCAN", ws, "manifest at workspace root"))
+
+    for child in _subdirs(ws):
+        if _tree_skipped(child, ws):
+            out.append(("SKIP", child, "vendored / installed / plugin tree"))
+            continue
+        if has_manifest(child):
+            out.append(("SCAN", child, "manifest at repo root"))
+            continue
+        hits = _descend(child, ws, max_depth)
+        if hits:
+            for h in hits:
+                depth = len(h.relative_to(ws).parts)
+                out.append(("SCAN", h, f"manifest at depth {depth} (repo root has none)"))
+        else:
+            out.append(("SKIP", child, f"no manifest at depth <= {max_depth}"))
+    return out
+
+
+def _descend(start: Path, ws: Path, max_depth: int) -> list[Path]:
+    """Breadth-first to the FIRST level that carries manifests, then stop.
+
+    Stopping at the first hit is deliberate: once `<repo>/comfyui` is found,
+    descending further only collects the manifests that checkout vendors for
+    itself (`comfyui/tests-unit/requirements.txt` is a live example).
+    """
+    level, depth = [start], len(start.relative_to(ws).parts)
+    while depth < max_depth:
+        nxt = [c for d in level for c in _subdirs(d) if not _tree_skipped(c, ws)]
+        if not nxt:
+            return []
+        hits = [c for c in nxt if has_manifest(c)]
+        if hits:
+            return hits
+        level, depth = nxt, depth + 1
+    return []
+
+
 def _child_rc_files(root: Path, max_depth: int = 4) -> list[Path]:
     """Config files below the root that can override the quarantine.
 
@@ -1242,6 +1338,32 @@ def enumerate_locked(root: Path) -> list[tuple[str, str, str | None]]:
     return uniq
 
 
+def unpinned_requirements(root: Path) -> list[tuple[str, str]]:
+    """(file, line) for requirement lines `enumerate_locked` cannot hand to OSV.
+
+    OSV is queried by name AND version, and only `==` supplies one, so a range,
+    a `>=`, a bare name or a URL requirement is DROPPED. Silently, which is the
+    defect: ComfyUI's requirements.txt carries 35 requirement lines of which 5
+    are `==`-pinned, so the report reads `Checked 5 package(s)` — a true
+    sentence that reads as coverage of the file (work/0018).
+
+    Reported, not fixed here. Resolving a range is exactly the "build an
+    environment to enumerate one" act this tool exists to avoid; naming what was
+    not checked is the honest half that costs nothing.
+    """
+    out: list[tuple[str, str]] = []
+    for r in sorted(root.glob("requirements*.txt")):
+        for line in read(r).splitlines():
+            s = line.strip()
+            if not s or s.startswith(("#", "-")):
+                continue
+            s = s.split(" #", 1)[0].strip()
+            if not s or re.match(r"([A-Za-z0-9._-]+)\s*==\s*([^\s;]+)", s):
+                continue
+            out.append((r.name, s))
+    return out
+
+
 def posture(root: Path) -> Report:
     rep = Report(root=str(root))
     ctx = discover(root, rep)
@@ -1261,6 +1383,12 @@ def main(argv: list[str]) -> int:
     p.add_argument("--format", choices=("md", "json"), default="md")
     p.add_argument("--fail-on", choices=("fail", "warn", "never"), default="fail",
                    help="exit non-zero at this severity (default: fail)")
+
+    r = sub.add_parser("roots", help="enumerate scannable repo roots under a workspace (NO network)")
+    r.add_argument("path", nargs="?", default=".")
+    r.add_argument("--max-depth", type=int, default=2,
+                   help="how deep to look when a repo root has no manifest (default: 2)")
+    r.add_argument("--format", choices=("tsv", "json"), default="tsv")
 
     default_cache = Path.home() / ".cache" / "depaudit" / "osv.json"
     for name, helptext in (("pkg", "check one package against OSV (network)"),
@@ -1295,11 +1423,27 @@ def main(argv: list[str]) -> int:
             return 1
         return 0
 
+    if args.cmd == "roots":
+        ws = Path(args.path).resolve()
+        if not ws.is_dir():
+            print(f"depaudit: not a directory: {ws}", file=sys.stderr)
+            return 2
+        rows = enumerate_roots(ws, args.max_depth)
+        if args.format == "json":
+            print(json.dumps({"schema": "depaudit/roots/1", "workspace": str(ws),
+                              "roots": [{"verdict": v, "path": str(q), "reason": why}
+                                        for v, q, why in rows]}, indent=2))
+        else:
+            for v, q, why in rows:
+                print(f"{v}\t{q}\t{why}")
+        return 0
+
     # ---- pkg / deps: the SAME code path phase 3's install-window pre-flight
     # calls. One implementation of "is this package trustworthy", two invocation
     # contexts — otherwise the scanner and the gate drift and start disagreeing,
     # which is worse than having only one of them (plan 01 §9).
     cache = Cache(Path(args.cache) if args.cache else None)
+    unpinned: list[tuple[str, str]] = []
     if args.cmd == "pkg":
         targets = [(args.ecosystem, args.name, args.version)]
         label = purl(args.ecosystem, args.name, args.version)
@@ -1309,9 +1453,15 @@ def main(argv: list[str]) -> int:
             print(f"depaudit: not a directory: {root}", file=sys.stderr)
             return 2
         targets = enumerate_locked(root)
+        unpinned = unpinned_requirements(root)
         label = str(root)
         if not targets:
-            print(f"depaudit: no lockfile-pinned packages found under {root}",
+            # NOT a clean result. A requirements.txt of 30 unpinned lines
+            # enumerates to nothing, and "no pinned packages" must not be the
+            # last word on it (work/0018).
+            print(f"depaudit: no lockfile-pinned packages found under {root}"
+                  + (f" ({len(unpinned)} requirement line(s) carry no `==` pin "
+                     f"and cannot be queried)" if unpinned else ""),
                   file=sys.stderr)
             return 0
 
@@ -1342,16 +1492,23 @@ def main(argv: list[str]) -> int:
     if args.format == "json":
         print(json.dumps({"schema": "depaudit/pkg/1", "target": label,
                           "checked": len(results),
+                          "unpinned": [{"file": f, "line": ln} for f, ln in unpinned],
                           "results": [{"purl": p_, "verdict": v, "detail": d}
                                       for p_, v, d in results]}, indent=2))
     else:
         print(f"# depaudit — OSV malicious-package check\n\n**Target:** {label}  ")
         print(f"**Checked:** {len(results)} package(s)  ")
+        if unpinned:
+            print(f"**Not checked:** {len(unpinned)} requirement line(s) with no "
+                  f"`==` pin — OSV is queried by name AND version, so these are "
+                  f"outside the count above, not covered by it.  ")
         print(f"**BLOCK {len(blocked)} · INFO {len(info)} · UNKNOWN {len(unknown)} · "
               f"{CLEAN} {len(results)-len(blocked)-len(info)-len(unknown)}**\n")
         for p_, v, d in results:
             if v != CLEAN or len(results) == 1:
                 print(f"- **[{v}]** `{p_}`  \n  {d}")
+        for f_, ln in unpinned:
+            print(f"- **[NOT CHECKED]** `{ln}`  \n  {f_}: no `==` pin, no version to query")
         if not blocked and not unknown and not info and len(results) > 1:
             print(f"No malicious-package records. Note this is REACTIVE: "
                   f"{CLEAN} means nothing is known yet, not that these are safe. "

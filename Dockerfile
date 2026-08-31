@@ -63,8 +63,11 @@ RUN apt-get update \
  # been rebuilt upstream, so re-pulling it fetches identical bytes and
  # cannot clear the finding. This upgrades exactly the two flagged packages
  # while leaving the base digest — and its reproducibility — untouched.
- # Drop the matching .trivyignore.yaml entry (expires 2026-08-31) once a
- # rebuilt base image scans clean on its own.
+ # The .trivyignore.yaml entry for CVE-2026-45447 was DELETED on 2026-08-28:
+ # that rebuild scans with libssl3t64@3.0.13-0ubuntu3.15, past the ubuntu3.11
+ # fix, so the finding no longer fires. This upgrade line is now the ONLY thing
+ # holding it clear — the base digest still ships ubuntu3.4. Remove this line
+ # and the CVE comes back with no ignore entry left to explain it.
  && apt-get install -y --only-upgrade openssl libssl3t64 \
  && apt-get purge -y openssh-client \
  && if dpkg -l openssh-client 2>/dev/null | awk '/^ii/{found=1} END{exit !found}'; then \
@@ -89,6 +92,30 @@ RUN apt-get update \
       libxcb1 libxkbcommon0 libx11-6 libxcomposite1 libxdamage1 \
       libxext6 libxfixes3 libxrandr2 \
       libgbm1 libcairo2 libpango-1.0-0 libasound2t64 \
+ && apt-get clean \
+ && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+
+# ---------- OpenCV runtime library ------------------------------------------
+# libgl1 provides libGL.so.1, which the NON-headless opencv wheels
+# (opencv-python, opencv-contrib-python) link against at import. Without it
+# `import cv2` dies with "ImportError: libGL.so.1: cannot open shared object
+# file" — and the failure is confusing, because it depends on WHICH opencv
+# variant a workspace resolved rather than on anything in the code.
+#
+# Baked in rather than left to the workspace for two reasons. First, apt-get
+# cannot run at container runtime here: cap_drop ALL + no_new_privs stops it
+# acquiring locks, so the alternative is a with-egress.sh --with apt window on
+# every container recreate. Second, a workspace does not get to choose reliably:
+# pip's resolver installs whichever opencv variant a transitive dependency asks
+# for, and several ComfyUI custom nodes pull the non-headless one. Pinning
+# opencv-python-headless in one project does not stop a sibling dragging in the
+# other; providing the library makes every variant work and removes a whole
+# class of "works on my profile" failure.
+#
+# libglib2.0-0t64 — opencv's other common runtime need — is already installed
+# by the Chromium block above, so this is genuinely one package (~1 MB).
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends libgl1 \
  && apt-get clean \
  && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
@@ -329,6 +356,105 @@ RUN ARCH="$(dpkg --print-architecture)" \
  && rm -f /tmp/just.tar.gz /tmp/SHA256SUMS \
  && just --version
 
+# ---------- ffmpeg (media pipeline dependency) ------------------------------
+# Required BY the genmedia block below, not optional to it. The fal.ai media
+# workflow normalises every generated clip, concatenates from an explicit ordered
+# edit list, and validates duration / resolution / fps / codec with `ffprobe`
+# before an edit is promoted to final. Without it, generated video arrives as
+# bytes nothing in this container can transcode, inspect or thumbnail — a gap
+# that reads as "the model returned something broken" rather than as a missing
+# tool. Measured absent 2026-08-30 (work/0020 §6.4).
+#
+# Baked for the same reason as libgl1 above: apt-get cannot run at container
+# runtime here — cap_drop ALL + no_new_privs stops it acquiring its locks — so
+# the alternative is a with-egress.sh --with apt window on every recreate.
+#
+# ffprobe ships in the same package; both are smoke-checked so a base-image
+# change that drops either fails the build rather than a video job months later.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ffmpeg \
+ && apt-get clean \
+ && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* \
+ && ffmpeg  -version | head -1 \
+ && ffprobe -version | head -1
+
+# ---------- genmedia (fal.ai agent-first CLI) -------------------------------
+# Discover endpoints, inspect schemas, submit, poll, upload inputs, download
+# outputs, check pricing. Distinct from the `fal` CLI, which deploys fal
+# applications. work/0020 §6.1.
+#
+# WHY NOT THE DOCUMENTED INSTALL. Upstream says
+# `curl https://genmedia.sh/install -fsS | bash`. That is the exact fetch-and-run
+# form sandbox_templates/common/agent-notice.md names and permissions.deny
+# blocks, from a host that is not in the allowlist — so the vendor's path is
+# unusable inside a profile by design, not by oversight. It also resolves
+# "latest" at run time, which cannot be pinned. Its two good properties are kept
+# here and the pipe is dropped: upstream's install.sh honours a version variable,
+# and it verifies the release's own checksums.txt. Both are reproduced below.
+#
+# WHAT THIS IS. A Bun single-file executable (`bun build --compile --bytecode`),
+# ~107 MB for linux-x64. Bun is embedded, so this needs no `bun` on PATH and does
+# not reopen the parked bun-runtime question in work/0009 — but the bytes ARE a
+# Bun runtime, so describe it that way rather than as "a Node CLI".
+#
+# PLACEMENT. Above the AI-CLI refresh cache-buster below, so a routine
+# `build --refresh-ai` does not re-download 107 MB. It is a static binary needing neither Gate 2 nor Gate 3, so
+# it sits with the other pinned tool installs rather than in the quarantined
+# tail; dockerfile-order.test.sh anchors on the six strings of that chain and
+# none of them are here.
+#
+# THE HASH IS VERIFIED BEFORE THE BINARY IS MADE EXECUTABLE, and the build fails
+# if checksums.txt has no line for this asset — an absent entry must not read as
+# a passing check. Same shape as the `just` block above.
+#
+# TWO ENV OPT-OUTS, both load-bearing, both measured in the v0.7.0 source:
+#
+#   GENMEDIA_NO_ANALYTICS=1 — the CLI is built with a PostHog key baked in at
+#     compile time (`--define __POSTHOG_KEY__`) and reports to
+#     https://us.i.posthog.com (src/lib/analytics.ts:10). That host is NOT
+#     allowlisted and must not be: this variable is checked in isOptedOut()
+#     BEFORE `await import("posthog-node")`, so with it set the client is never
+#     constructed and no connection is ever attempted. Without it the client is
+#     built with flushAt:1/flushInterval:0 — a connection attempt per command
+#     against a host that 403s. Opting out avoids the latency question entirely
+#     rather than trusting how the vendor's SDK handles a proxy refusal.
+#
+#   GENMEDIA_NO_UPDATE=1 — genmedia SELF-UPDATES IN THE BACKGROUND by default.
+#     maybeTriggerBackgroundUpdate() (src/lib/updater.ts:120) Bun.spawns a
+#     detached `__update-check` child, hourly-rate-limited, which reads
+#     api.github.com/repos/fal-ai-community/genmedia-cli/releases/latest and
+#     stages a binary swap. api.github.com IS allowlisted (the [git] block is an
+#     accepted-open residual), so without this variable a pinned, hash-verified
+#     binary is pinned in name only, and the drift would be invisible to
+#     `just check-upstreams`. The opt-out is read at updater.ts:122, before any
+#     network call. Note it also returns early for non-TTY and for --json, so an
+#     agent would rarely trigger it — but `profile.sh <p> attach` is a TTY, and
+#     "rarely" is not a control.
+#
+# The key is NEVER passed here. getApiKey() (src/lib/api.ts:7) reads
+# process.env.FAL_KEY FIRST, ahead of its stored config, so `genmedia setup`
+# never needs running and the key never touches argv — where it would be visible
+# in `ps` and in the Bash-tool transcript. FAL_KEY arrives per profile via the
+# optional secrets.env env_file. See sandbox_templates/common/secrets.env.template.
+ARG GENMEDIA_VERSION=0.7.0
+ENV GENMEDIA_NO_ANALYTICS=1 \
+    GENMEDIA_NO_UPDATE=1
+RUN ARCH="$(dpkg --print-architecture)" \
+ && case "$ARCH" in \
+      amd64) ASSET="genmedia-linux-x64" ;; \
+      arm64) ASSET="genmedia-linux-arm64" ;; \
+      *) echo "unsupported arch: $ARCH" >&2; exit 1 ;; \
+    esac \
+ && BASE="https://github.com/fal-ai-community/genmedia-cli/releases/download/v${GENMEDIA_VERSION}" \
+ && curl -fsSL -o /tmp/genmedia      "${BASE}/${ASSET}" \
+ && curl -fsSL -o /tmp/checksums.txt "${BASE}/checksums.txt" \
+ && EXPECTED="$(awk -v f="$ASSET" '$2==f{print $1}' /tmp/checksums.txt)" \
+ && [ -n "$EXPECTED" ] || { echo "no checksums.txt entry for $ASSET" >&2; exit 1; } \
+ && echo "${EXPECTED}  /tmp/genmedia" | sha256sum -c - \
+ && install -m 0755 /tmp/genmedia /usr/local/bin/genmedia \
+ && rm -f /tmp/genmedia /tmp/checksums.txt \
+ && genmedia version
+
 # ---------- beads (bd) — per-repo execution ledger --------------------------
 # Git-backed, dependency-graph issue tracker (gastownhall/beads; Go + embedded
 # Dolt). Adopted per docs/adr ADR-0005 + BEADS_ADOPTION_PLAN — this sandbox is
@@ -478,6 +604,51 @@ RUN mkdir -p /etc/uv \
     > /etc/pip.conf \
  && uv --version
 
+# ---------- managed CPython interpreters (3.12 + 3.13) -----------------------
+# uv's THIRD directory, and the one the UV_TOOL_DIR pin above missed.
+# `uv venv --python 3.13` fetches a MANAGED interpreter, and by default that
+# lands in /root/.local/share/uv/python — the 256m noexec tmpfs from
+# docker-compose.yml, where it installs and then cannot execute (measured:
+# exit 126, EPERM) and is wiped on every recreate. That last part is the quiet
+# failure: .venv/bin/python is a SYMLINK into this directory, never a copy, so a
+# workspace venv outlives the interpreter it points at and the repo reads as
+# broken rather than the interpreter as missing.
+#
+# /opt for the same reason UV_TOOL_DIR uses it: exec-allowed, and — the part
+# that decides it — NOT shadowed by a bind mount. /root/.cache is the
+# obvious-looking choice and is wrong: it IS a mount (docker-compose.yml,
+# ~/.ai-sandbox/profiles/<p>/cache), so anything baked there at build time is
+# invisible the instant the container starts.
+#
+# BAKED rather than left to first use because the download needs the GitHub
+# release-asset hosts, which exist only in CLOSED gated blocks in
+# proxy/allowed_domains.txt. The build bypasses Squid; a running container does
+# not. Leaving it to runtime means an egress window on every recreate.
+#
+# TWO versions so a workspace pinning either needs no egress: 3.13 for new work,
+# 3.12 to match the system /usr/bin/python3.12 (3.12.3) at a current patch
+# level. ~130 MB each. Add a version here rather than reaching for egress later.
+#
+# An ad-hoc `uv python install 3.11` at runtime still works, but lands in the
+# container's writable layer and dies on recreate — bake it here if it matters.
+#
+# UV_PYTHON_BIN_DIR is the SAME trap one level down, and the reason `python3.13`
+# would otherwise not be a command at runtime. `uv python install` also drops
+# convenience symlinks into a bin dir, defaulting to /root/.local/bin — which is
+# the noexec tmpfs again, so they are baked at build time and then wiped by the
+# mount at container start, leaving working interpreters that nothing on PATH
+# points at. Pinned to /usr/local/bin, exactly as UV_TOOL_BIN_DIR is, and for the
+# same reason. Measured, not assumed: with it set the symlink lands in
+# /usr/local/bin and /root/.local/bin/python3.13 does not exist.
+#
+# ABOVE the myclickup wheel deliberately: that payload is the most frequently
+# re-vendored artifact in the tree, and below it every bump would re-download
+# both interpreters.
+ENV UV_PYTHON_INSTALL_DIR=/opt/uv/python \
+    UV_PYTHON_BIN_DIR=/usr/local/bin
+RUN uv python install 3.12 3.13 \
+ && uv python list --only-installed
+
 # ---------- myclickup — vendored ClickUp CLI (OPTIONAL payload) --------------
 # Zero-dependency pure-Python wheel from the PRIVATE nranthony/myclickup repo
 # (its ADR-0002). `docker-compose.yml` sets `build.context: .`, so a sibling
@@ -555,8 +726,22 @@ RUN set -eu; \
 # sandbox_templates/common/agent-notice.md. LAST on PATH so a read-only,
 # host-controlled mount can never shadow an image binary. Inert on bare Linux,
 # where the overlay is not layered and the directory does not exist.
+#
+# UV_LINK_MODE=copy: uv populates a venv by hardlinking out of its cache, and
+# here that can NEVER work. The cache (/root/.cache) and every workspace venv
+# (/workspace) are separate BIND MOUNTS, and Linux returns EXDEV across mount
+# points even when both sit on the same device — measured: `stat -c %d` gives
+# 2096 for both, a same-mount link succeeds, and the cross-mount one fails with
+# `Invalid cross-device link`. So uv's default emits a "Failed to hardlink
+# files; falling back to full copy" warning on EVERY install in EVERY profile,
+# and its suggested causes ("different filesystems") send the reader looking for
+# a storage problem that does not exist. The copy is what happens regardless;
+# this only stops uv attempting the link first and warning about it. Runtime
+# only — the build has no bind mounts, so hardlinking works there and this is
+# deliberately not set above.
 ENV HOME=/root \
     SHELL=/usr/bin/zsh \
+    UV_LINK_MODE=copy \
     DISABLE_AUTOUPDATER=1 \
     DISABLE_UPDATES=1 \
     PATH="/root/.local/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/usr/lib/wsl/lib"

@@ -19,7 +19,7 @@
   ],
   "syscalls": [
     {
-      "_comment": "Basic I/O, memory, signals — required for any process",
+      "_comment": "Basic I/O, memory, signals — required for any process. `creat` is the legacy alias for open(O_CREAT|O_WRONLY|O_TRUNC) and reaches nothing that the already-allowed open/openat/openat2 do not; GNU tar creates its archive with it, so denying it broke `tar -cf <file>` with an EPERM that reads as a capability problem (work/0017).",
       "names": [
         "access", "arch_prctl", "brk", "capget", "capset",
         "chdir", "chmod", "chown", "clock_getres", "clock_gettime",
@@ -49,7 +49,7 @@
         "mincore", "mkdir", "mkdirat", "mknod", "mknodat", "mlock", "mlock2",
         "mmap", "mprotect", "mremap", "msync", "munlock", "munmap",
         "nanosleep", "newfstatat",
-        "open", "openat", "openat2",
+        "creat", "open", "openat", "openat2",
         "pause", "pidfd_open", "pidfd_send_signal", "pidfd_getfd", "pipe", "pipe2",
         "poll", "ppoll", "prctl",
         "pread64", "preadv", "preadv2",
