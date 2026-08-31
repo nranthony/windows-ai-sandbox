@@ -1,6 +1,12 @@
 # 0022 — Port this repo's work forward to macolima
 
-**Status: Draft — 2026-08-31.** Scoped and measured here; **execution is
+**Status: Stage 2 COMPLETE 2026-08-31 — awaiting Mac-side execution (stage 3).**
+The handoff document is written and indexed:
+[`docs/handoff-to-macolima-port-forward.md`](../../docs/handoff-to-macolima-port-forward.md).
+Nothing further can be done from this host; see §6 for what was done and §10 for
+what came out of doing it.
+
+**Originally: Draft — 2026-08-31.** Scoped and measured here; **execution is
 partly not ours.** Everything that touches macolima's image or compose needs the
 macOS/Colima host, so this item's deliverable in *this* repo is the selection,
 the substrate filter, and a handoff document — not the macolima commits.
@@ -118,28 +124,29 @@ Also excluded, per `macolima@work/0001` §1's "judgement calls, default no":
 `glab` (removed there deliberately), beads, the PDF/OCR stack, and every
 profile-specific allowlist block.
 
-## 6. Stage 2 — what is implementable from here, now
+## 6. Stage 2 — what is implementable from here — **DONE 2026-08-31**
 
-Short list. Everything else needs the Mac.
+Short list. Everything else needs the Mac. All four items closed; two of them
+produced findings that changed the handoff (§10).
 
-- **S2-a. Correct `macolima@work/0001` in place** — re-anchor it on
+- ✅ **S2-a. Correct `macolima@work/0001` in place** — DONE (uncommitted in that repo). — re-anchor it on
   `main@eda42dd`, fold in §3's measurements and §4's table, replace its §A9 with
   a pointer to [0021](../0021-pull-back-controls-from-macolima/spec.md), and mark
   Phase D unblocked. This is an edit in the *other* repo but needs no Mac.
-- **S2-b. Two artifacts written for macolima that it never consumed** — both
+- ✅ **S2-b. Two artifacts written for macolima that it never consumed** — DONE, and the verdict SPLIT; see §10. — both
   already in the bash-3.2/POSIX-awk subset, both sitting here unread:
   `docs/handoff-to-macolima-subnet-allocator.md` (the Phase A1 allocator, with
   its two known bugs called out in §5) and `sync-agent-notice.sh` +
   `sandbox_templates/common/agent-notice.md`. Verify they are still current
   against this repo's code before they travel — the notice in particular has
   moved since it was written for that audience.
-- **S2-c. `docs/sibling-repo-relationship.md`** — add the divergences the last
+- ✅ **S2-c. `docs/sibling-repo-relationship.md`** — DONE. — add the divergences the last
   two comparisons kept rediscovering: allowlist wildcards as INFO-not-DRIFT
   ([0021](../0021-pull-back-controls-from-macolima/spec.md) §6), the hook
   write-protect asymmetry, and the tag-count / test-suite-count gap. Also fix its
   "Quick cross-check commands" block, which still tells the reader to expect a
   clean `seccomp.json` diff.
-- **S2-d. Prepare the handoff document** — §7.
+- ✅ **S2-d. Prepare the handoff document** — DONE, indexed in `docs/index.md`.
 
 Nothing in stage 2 changes this repo's runtime, so it carries no rebuild.
 
@@ -206,3 +213,59 @@ re-measure.
    — the owner's stated next conversation.
 5. Item archived to `docs/_archive/` per the exit rule; the durable rules it
    produced folded into `docs/sibling-repo-relationship.md`, not left here.
+
+## 10. What stage 2 turned up
+
+Two of the four items produced findings that changed the handoff. Recorded here
+because they are the reason stage 2 was worth doing separately rather than
+folding into the handoff draft.
+
+### 10.1 The subnet allocator is current — verified, not assumed
+
+`docs/handoff-to-macolima-subnet-allocator.md` was written 2026-06-09, and
+`profile.sh` has since grown from ~700 to 2136 lines, so the doc's §4 drop-in
+was the obvious staleness risk. It is not stale: §4 is **byte-identical to live
+`profile.sh:1008-1083`** — 57 code lines, comments ignored, all five functions
+(`octet_start`, `sibling_octets`, `first_free_octet`, `ensure_subnet_octet`,
+`ensure_octet_free`). It travels verbatim.
+
+### 10.2 The agent notice does NOT travel, and its own test cannot say so
+
+`sandbox_templates/common/agent-notice.md` passes `agent-notice.test.sh` 13/13
+here and is still wrong for macolima in three ways: the title names
+`windows-ai-sandbox`, five `/root` paths need substitution, and **lines 133–152
+are a WSL2/CUDA section** (`/dev/dxg`, `/usr/lib/wsl`, `CUDA_VERSION=12.6.3`,
+`LD_LIBRARY_PATH` ordering) describing hardware macolima does not have.
+
+The suite cannot catch this. Its two locks are *no repo-relative path* and *no
+host-side mechanism* — both frame-of-reference rules, neither a substrate-
+applicability rule. A notice that confidently explains a GPU to an agent on a
+GPU-less host is the same class of defect the suite exists to prevent (the
+notice is read on filesystems where this repo does not exist), just on an axis
+it does not cover.
+
+**Follow-on candidate, not opened here:** a third lock asserting the notice
+carries no substrate-specific claim outside a marked, strippable block. That is
+a design change to the notice's structure, so it belongs in its own item rather
+than widening this one. Flagged for the owner.
+
+`scripts/sync-agent-notice.sh` itself is clean — zero bash-4 constructs, and its
+header already documents the macolima portability intent.
+
+### 10.3 Two bash-4 hazards, five sites
+
+`mapfile` is bash 4+: `scripts/webfetch.test.sh` lines 124, 150, 169 and
+`scripts/private-names-check.sh` lines 53, 63. Whether they matter depends on
+what `/usr/bin/env bash` resolves to on the Mac — a §8 question in the handoff,
+not an assumption. The rewrite is mechanical. The other eight offline suites are
+clean.
+
+### 10.4 The cross-check commands in `sibling-repo-relationship.md` were wrong
+
+Three defects, all now fixed: `diff seccomp.json # expect no diff` has been
+false since 2026-08-29; a raw `allowed_domains.txt` diff is noise across 32-vs-15
+tagged blocks (replaced with a tag-set comparison, filtered for the two prose
+fragments `[tag]` and `[a-z-]` that a naive grep picks up); and the probe
+comparison was file-level, which is precisely what made `macolima@work/0001`
+§A9 four-fifths wrong — it now points at `work/0021` §2's check-level
+extraction.
