@@ -156,7 +156,7 @@ template carries defaults (stripping only `live` makes the template's
 `"model": "opus"` read as DRIFT on every profile where the operator picked
 something else). `converge --defaults` is the opt-out and captures what it
 replaced under `preference_resets`.
-Edits to `scripts/depaudit.py` require `bash scripts/depaudit.test.sh` (43/43
+Edits to `scripts/depaudit.py` require `bash scripts/depaudit.test.sh` (56/56
 offline; `--online` adds the OSV corpus). Two of its assertions are regression
 locks for checks that shipped **inverted** — read the header before changing them.
 Edits to `scripts/with-egress.sh` require `bash scripts/with-egress.test.sh`
