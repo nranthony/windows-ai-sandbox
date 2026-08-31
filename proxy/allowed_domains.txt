@@ -654,6 +654,45 @@ blender.org
 # #                       dstdomain syntax: it matches literally, matches
 # #                       nothing, and reads as present while denying.
 # #
+# # OBSERVED denied 2026-08-30, egress-proxy-fluidmomenta access.log, from a
+# # `genmedia skills list` inside the profile:
+# #   TCP_DENIED/403 3394 CONNECT genmedia.sh:443 - HIER_NONE/- text/html
+# # HIER_NONE means squid refused at the ACL and never went upstream — the 403
+# # is OURS, not fal's, which is worth stating because the CLI reports it as
+# # "Failed to fetch skills registry ... 403 Forbidden" and that reads like a
+# # rejection by the vendor.
+# #   genmedia.sh     the genmedia CLI's skills INDEX, and its installer host.
+# #
+# # INDEX AND CONTENT ARE DIFFERENT HOSTS, which is why half the skills workflow
+# # already worked. `GET https://genmedia.sh/skills?q=` returns JSON naming its
+# # own backing store: {"registry":"https://raw.githubusercontent.com/
+# # fal-ai-community/skills/refs/heads/main/skills", ... "total":17}. So
+# # `genmedia init` goes STRAIGHT to raw.githubusercontent.com and needs only
+# # [git]; `genmedia skills list` and `skills install` query THIS host first.
+# # The full workflow needs both blocks open, and neither alone looks broken —
+# # it looks like one subcommand works and another does not.
+# #
+# # NOT genmedia-sh.fal.ai, and not both. Measured 2026-08-30: genmedia.sh has
+# # its own A records and NO CNAME or alias, while genmedia-sh.fal.ai is a CNAME
+# # to cdn.webflow.com — a shared CDN serving a marketing page, a different
+# # service entirely. Squid matches dstdomain against the hostname in the CONNECT
+# # line, and /skills?q= answers 200 with zero redirects, so the client never
+# # asks for the second name: an entry for it would match nothing while opening a
+# # shared CDN. (A cookie on the response carries Domain=genmedia-sh.fal.ai and
+# # suggested otherwise; the DNS does not support it. Cookie attributes are not
+# # evidence of a resolution path.)
+# #
+# # WHAT OPENING IT COSTS, stated because it is not only an index. This host also
+# # serves `genmedia.sh/install`, the `curl ... | bash` installer. Allowlisting
+# # makes that fetchable inside a profile. Two things already stand between that
+# # and a run: the fetch-and-run form is denied at permissions.deny regardless of
+# # egress, and the image bakes a pinned, hash-verified binary, so nothing here
+# # needs the installer. Exact host only — `.sh` is a registrable TLD and a
+# # parent entry would be absurd; `.fal.ai` would not match this name at all.
+# #
+# # Operated by fal on the evidence of fal's own CLI hardcoding it and fal's
+# # docs publishing it — inference from their code, not something DNS proves.
+# #
 # # Pinned hosts everywhere EXCEPT media delivery, and the split is deliberate.
 # # The API and MCP hosts are the CONTROL surface — where prompts, inputs and a
 # # key go — so they stay exact; `.fal.ai` or `.fal.run` as a parent would hand
@@ -667,6 +706,7 @@ blender.org
 # fal.run
 # queue.fal.run
 # rest.fal.ai
+# genmedia.sh
 # .fal.media
 
 
