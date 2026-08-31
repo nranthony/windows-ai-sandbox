@@ -309,10 +309,20 @@ lh3.googleusercontent.com
 github.com
 api.github.com
 codeload.github.com
-# objects.githubusercontent.com
-# release-assets.githubusercontent.com
-# raw.githubusercontent.com
-# gist.githubusercontent.com
+# ─── OPEN by OPERATOR OVERRIDE, 2026-08-31 ──────────────────────────────────
+# The host(s) immediately below are UNCOMMENTED against this file's
+# strict-by-default posture. Deliberate, single override by the owner, who has
+# current sandbox-usage and agent-status context this file does not. NOT a new
+# default and NOT a precedent: the committed state was CLOSED, and re-closing
+# is the expected end of the task that needed it.
+# The sanctioned route is `scripts/with-egress.sh <p> --with <tag> -- '<cmd>'`,
+# which opens, runs one command, and restores the file verbatim. A hand or
+# dashboard edit has no automatic close — which is why this note carries a date.
+# ────────────────────────────────────────────────────────────────────────────
+objects.githubusercontent.com
+release-assets.githubusercontent.com
+raw.githubusercontent.com
+gist.githubusercontent.com
 # github.io
 # gitlab.com
 
@@ -359,18 +369,18 @@ developer.nvidia.com
 
 # --- Numerai tournament + MCP [numerai] ---
 # GraphQL API (all ops: data listing, submissions, staking, diagnostics, MCP)
-api-tournament.numer.ai
+# api-tournament.numer.ai
 # Website (MCP device-token auth flow, account/key creation)
-numer.ai
+# numer.ai
 # S3 data buckets (presigned URLs for dataset download + submission upload).
 # Bucket names returned dynamically by the GraphQL API; these are the known
 # ones. If a download/upload hits TCP_DENIED, check Squid access.log for the
 # actual S3 subdomain and add it here.
-numerai-datasets-us-west-2.s3.amazonaws.com
-numerai-datasets-us-west-2.s3.us-west-2.amazonaws.com
-numerai-datasets-us-west-2.s3-us-west-2.amazonaws.com
-numerai-datasets.s3.amazonaws.com
-numerai-public-datasets.s3-us-west-2.amazonaws.com
+# numerai-datasets-us-west-2.s3.amazonaws.com
+# numerai-datasets-us-west-2.s3.us-west-2.amazonaws.com
+# numerai-datasets-us-west-2.s3-us-west-2.amazonaws.com
+# numerai-datasets.s3.amazonaws.com
+# numerai-public-datasets.s3-us-west-2.amazonaws.com
 
 # --- Kaggle CLI [kaggle] ---
 # `kaggle` package (pip-installed, already covered by [pypi]) talks to the
@@ -580,8 +590,18 @@ blender.org
 # # provider-shaped (<region>.<provider>.cdn.hf.co), so a model served from
 # # another region will deny under a sibling name: read that denial out of
 # # access.log too rather than pre-emptively widening to a parent wildcard.
-# huggingface.co
-# us.aws.cdn.hf.co
+# ─── OPEN by OPERATOR OVERRIDE, 2026-08-31 ──────────────────────────────────
+# The host(s) immediately below are UNCOMMENTED against this file's
+# strict-by-default posture. Deliberate, single override by the owner, who has
+# current sandbox-usage and agent-status context this file does not. NOT a new
+# default and NOT a precedent: the committed state was CLOSED, and re-closing
+# is the expected end of the task that needed it.
+# The sanctioned route is `scripts/with-egress.sh <p> --with <tag> -- '<cmd>'`,
+# which opens, runs one command, and restores the file verbatim. A hand or
+# dashboard edit has no automatic close — which is why this note carries a date.
+# ────────────────────────────────────────────────────────────────────────────
+huggingface.co
+us.aws.cdn.hf.co
 
 # # --- ComfyUI model weights — long tail [comfyui-models-extra] ---
 # # The remaining ~9% of the curated list: dl.fbaipublicfiles.com is Meta (SAM,
@@ -701,13 +721,23 @@ blender.org
 # # probe reports it as an INFO wildcard for periodic review. A new host outside
 # # that pattern is still read out of access.log and added by name, never
 # # guessed and never widened.
-# mcp.fal.ai
-# api.fal.ai
-# fal.run
-# queue.fal.run
-# rest.fal.ai
-# genmedia.sh
-# .fal.media
+# ─── OPEN by OPERATOR OVERRIDE, 2026-08-31 ──────────────────────────────────
+# The host(s) immediately below are UNCOMMENTED against this file's
+# strict-by-default posture. Deliberate, single override by the owner, who has
+# current sandbox-usage and agent-status context this file does not. NOT a new
+# default and NOT a precedent: the committed state was CLOSED, and re-closing
+# is the expected end of the task that needed it.
+# The sanctioned route is `scripts/with-egress.sh <p> --with <tag> -- '<cmd>'`,
+# which opens, runs one command, and restores the file verbatim. A hand or
+# dashboard edit has no automatic close — which is why this note carries a date.
+# ────────────────────────────────────────────────────────────────────────────
+mcp.fal.ai
+api.fal.ai
+fal.run
+queue.fal.run
+rest.fal.ai
+genmedia.sh
+.fal.media
 
 
 # =============================================================================
