@@ -356,6 +356,105 @@ RUN ARCH="$(dpkg --print-architecture)" \
  && rm -f /tmp/just.tar.gz /tmp/SHA256SUMS \
  && just --version
 
+# ---------- ffmpeg (media pipeline dependency) ------------------------------
+# Required BY the genmedia block below, not optional to it. The fal.ai media
+# workflow normalises every generated clip, concatenates from an explicit ordered
+# edit list, and validates duration / resolution / fps / codec with `ffprobe`
+# before an edit is promoted to final. Without it, generated video arrives as
+# bytes nothing in this container can transcode, inspect or thumbnail — a gap
+# that reads as "the model returned something broken" rather than as a missing
+# tool. Measured absent 2026-08-30 (work/0020 §6.4).
+#
+# Baked for the same reason as libgl1 above: apt-get cannot run at container
+# runtime here — cap_drop ALL + no_new_privs stops it acquiring its locks — so
+# the alternative is a with-egress.sh --with apt window on every recreate.
+#
+# ffprobe ships in the same package; both are smoke-checked so a base-image
+# change that drops either fails the build rather than a video job months later.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ffmpeg \
+ && apt-get clean \
+ && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* \
+ && ffmpeg  -version | head -1 \
+ && ffprobe -version | head -1
+
+# ---------- genmedia (fal.ai agent-first CLI) -------------------------------
+# Discover endpoints, inspect schemas, submit, poll, upload inputs, download
+# outputs, check pricing. Distinct from the `fal` CLI, which deploys fal
+# applications. work/0020 §6.1.
+#
+# WHY NOT THE DOCUMENTED INSTALL. Upstream says
+# `curl https://genmedia.sh/install -fsS | bash`. That is the exact fetch-and-run
+# form sandbox_templates/common/agent-notice.md names and permissions.deny
+# blocks, from a host that is not in the allowlist — so the vendor's path is
+# unusable inside a profile by design, not by oversight. It also resolves
+# "latest" at run time, which cannot be pinned. Its two good properties are kept
+# here and the pipe is dropped: upstream's install.sh honours a version variable,
+# and it verifies the release's own checksums.txt. Both are reproduced below.
+#
+# WHAT THIS IS. A Bun single-file executable (`bun build --compile --bytecode`),
+# ~107 MB for linux-x64. Bun is embedded, so this needs no `bun` on PATH and does
+# not reopen the parked bun-runtime question in work/0009 — but the bytes ARE a
+# Bun runtime, so describe it that way rather than as "a Node CLI".
+#
+# PLACEMENT. Above the AI-CLI refresh cache-buster below, so a routine
+# `build --refresh-ai` does not re-download 107 MB. It is a static binary needing neither Gate 2 nor Gate 3, so
+# it sits with the other pinned tool installs rather than in the quarantined
+# tail; dockerfile-order.test.sh anchors on the six strings of that chain and
+# none of them are here.
+#
+# THE HASH IS VERIFIED BEFORE THE BINARY IS MADE EXECUTABLE, and the build fails
+# if checksums.txt has no line for this asset — an absent entry must not read as
+# a passing check. Same shape as the `just` block above.
+#
+# TWO ENV OPT-OUTS, both load-bearing, both measured in the v0.7.0 source:
+#
+#   GENMEDIA_NO_ANALYTICS=1 — the CLI is built with a PostHog key baked in at
+#     compile time (`--define __POSTHOG_KEY__`) and reports to
+#     https://us.i.posthog.com (src/lib/analytics.ts:10). That host is NOT
+#     allowlisted and must not be: this variable is checked in isOptedOut()
+#     BEFORE `await import("posthog-node")`, so with it set the client is never
+#     constructed and no connection is ever attempted. Without it the client is
+#     built with flushAt:1/flushInterval:0 — a connection attempt per command
+#     against a host that 403s. Opting out avoids the latency question entirely
+#     rather than trusting how the vendor's SDK handles a proxy refusal.
+#
+#   GENMEDIA_NO_UPDATE=1 — genmedia SELF-UPDATES IN THE BACKGROUND by default.
+#     maybeTriggerBackgroundUpdate() (src/lib/updater.ts:120) Bun.spawns a
+#     detached `__update-check` child, hourly-rate-limited, which reads
+#     api.github.com/repos/fal-ai-community/genmedia-cli/releases/latest and
+#     stages a binary swap. api.github.com IS allowlisted (the [git] block is an
+#     accepted-open residual), so without this variable a pinned, hash-verified
+#     binary is pinned in name only, and the drift would be invisible to
+#     `just check-upstreams`. The opt-out is read at updater.ts:122, before any
+#     network call. Note it also returns early for non-TTY and for --json, so an
+#     agent would rarely trigger it — but `profile.sh <p> attach` is a TTY, and
+#     "rarely" is not a control.
+#
+# The key is NEVER passed here. getApiKey() (src/lib/api.ts:7) reads
+# process.env.FAL_KEY FIRST, ahead of its stored config, so `genmedia setup`
+# never needs running and the key never touches argv — where it would be visible
+# in `ps` and in the Bash-tool transcript. FAL_KEY arrives per profile via the
+# optional secrets.env env_file. See sandbox_templates/common/secrets.env.template.
+ARG GENMEDIA_VERSION=0.7.0
+ENV GENMEDIA_NO_ANALYTICS=1 \
+    GENMEDIA_NO_UPDATE=1
+RUN ARCH="$(dpkg --print-architecture)" \
+ && case "$ARCH" in \
+      amd64) ASSET="genmedia-linux-x64" ;; \
+      arm64) ASSET="genmedia-linux-arm64" ;; \
+      *) echo "unsupported arch: $ARCH" >&2; exit 1 ;; \
+    esac \
+ && BASE="https://github.com/fal-ai-community/genmedia-cli/releases/download/v${GENMEDIA_VERSION}" \
+ && curl -fsSL -o /tmp/genmedia      "${BASE}/${ASSET}" \
+ && curl -fsSL -o /tmp/checksums.txt "${BASE}/checksums.txt" \
+ && EXPECTED="$(awk -v f="$ASSET" '$2==f{print $1}' /tmp/checksums.txt)" \
+ && [ -n "$EXPECTED" ] || { echo "no checksums.txt entry for $ASSET" >&2; exit 1; } \
+ && echo "${EXPECTED}  /tmp/genmedia" | sha256sum -c - \
+ && install -m 0755 /tmp/genmedia /usr/local/bin/genmedia \
+ && rm -f /tmp/genmedia /tmp/checksums.txt \
+ && genmedia version
+
 # ---------- beads (bd) — per-repo execution ledger --------------------------
 # Git-backed, dependency-graph issue tracker (gastownhall/beads; Go + embedded
 # Dolt). Adopted per docs/adr ADR-0005 + BEADS_ADOPTION_PLAN — this sandbox is
