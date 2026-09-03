@@ -91,7 +91,12 @@ docker run --rm -it \
   -e HTTPS_PROXY=http://egress-proxy:3128 \
   -e http_proxy=http://egress-proxy:3128 \
   -e https_proxy=http://egress-proxy:3128 \
-  -e NO_PROXY=localhost,127.0.0.1,egress-proxy \
+  # `ollama` mirrors docker-compose.yml: the sibling is an HTTP service and
+  # must be reached direct, not CONNECTed through squid (which would deny it).
+  # Name resolution here comes from Docker's embedded DNS on the compose
+  # network, so no --add-host is needed for it.
+  -e NO_PROXY=localhost,127.0.0.1,egress-proxy,ollama \
+  -e no_proxy=localhost,127.0.0.1,egress-proxy,ollama \
   -e GIT_CONFIG_GLOBAL=/root/.config/git/config \
   -e SANDBOX_PROFILE="$PROFILE" \
   -e SANDBOX_HOST_GPU="$HOST_GPU" \
