@@ -174,6 +174,11 @@ db profile *args:
 db-reset profile *args:
     {{profile_sh}} {{profile}} db-reset {{args}}
 
+# local inference sibling (ollama:11434 on sandbox-internal, no outbound path).
+# SUB: enable | disable | status | pull <model> | create <name> -f <Modelfile> | rm <model> | list
+ollama profile *args:
+    {{profile_sh}} {{profile}} ollama {{args}}
+
 # re-run everything `up` seeds, touching NO container: every agent's policy, the
 # skills tree, the agent-notice. Replaces reset-settings / reset-skills /
 # reset-antigravity, removed 2026-08-24 (work/0011, ADR-0007) with no aliases —

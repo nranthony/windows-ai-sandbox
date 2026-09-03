@@ -43,11 +43,26 @@
 #                   removed 2026-08-24 (work/0011, ADR-0007) — no aliases.
 #   db <SUB>        set this profile's DEFAULT DB sibling(s) so a plain `up`
 #                   brings them up with no COMPOSE_PROFILES prefix (persisted in
-#                   the profile's compose-profiles file, mirroring subnet-octet).
+#                   the profile's compose-profiles file, mirroring subnet-octet;
+#                   the file is a comma-separated LIST and this touches only the
+#                   db-* token, never the `ollama` one).
 #                   SUB: enable <postgres|mongo|all> | disable | status.
 #                   Does not touch running containers — run up/recreate to apply.
 #   db-reset        wipe the postgres data volume and bring postgres back up
 #                   with a fresh initdb. Flags: --yes (skip confirmation).
+#   ollama <SUB>    local inference sibling (ollama-<profile> on sandbox-internal,
+#                   reachable from the agent at http://ollama:11434 and nowhere
+#                   else — it has no outbound path at all).
+#                   SUB: enable | disable | status — edit only the `ollama` token
+#                   of the persisted compose-profiles list (no container touched;
+#                   run up/recreate to apply).
+#                   SUB: pull <model> | create <name> -f <Modelfile> | rm <model>
+#                   | list — write/read the SHARED model store at
+#                   ~/.ai-sandbox/models/ollama, host-side, in a throwaway
+#                   container on Docker's default bridge. Deliberately OUTSIDE
+#                   the sandbox boundary (same class as `docker pull`): the agent
+#                   has no docker socket and the running sibling mounts that
+#                   store READ-ONLY, so it is the only write path.
 #   clean           prune rotating state (old .claude.json backups, paste-cache,
 #                   shell-snapshots). Pass --deep to also drop MCP debug logs
 #                   and settings.json.bak.* backups.
@@ -57,8 +72,9 @@
 #                   Flags: --dry-run, --yes, --all-volumes
 #   list            list all existing profiles with up/down status
 #   health          cross-profile consistency check (no profile arg): flags any
-#                   profile whose agent / egress-proxy / configured DB siblings
-#                   aren't all up together (or all down). Read-only; exit 1 if
+#                   profile whose agent / egress-proxy / configured siblings
+#                   (DBs, ollama) aren't all up together (or all down).
+#                   Read-only; exit 1 if
 #                   any profile is DEGRADED.
 #   deps            dependency-supply-chain posture for this profile's workspace
 #                   (scripts/depaudit.py). Runs HOST-SIDE and read-only: it
@@ -109,6 +125,12 @@ set -euo pipefail
 
 REPO_ROOT="${HOME}/repo"
 PROFILES_ROOT="${HOME}/.ai-sandbox/profiles"
+
+# Large model weights, SHARED across profiles and sitting beside profiles/ on
+# purpose — not under any one profile's state dir. Safe to share only because
+# every profile mounts $MODELS_ROOT/ollama READ-ONLY (docker-compose.yml);
+# the host-side `ollama` subcommand is the sole writer.
+MODELS_ROOT="${HOME}/.ai-sandbox/models"
 
 # Container-side allowlist path. MUST agree with the mount target in
 # docker-compose.yml and the acl path in proxy/squid.conf.
@@ -876,6 +898,16 @@ converge_agent_policies() {
 ensure_state() {
   local p="$PROFILES_ROOT/$PROFILE"
   mkdir -p "$p/claude-home" "$p/cache" "$p/config" "$p/gemini-home" "$p/kaggle"
+  # Ollama model store. Deliberately NOT under "$p" — SHARED by every profile,
+  # because model blobs run to many GB and duplicating them per profile is pure
+  # waste. Sharing is safe only because the runtime mount is READ-ONLY
+  # (docker-compose.yml): Ollama's API can create and delete models, so a
+  # writable shared store would let one profile plant a Modelfile another
+  # profile then runs. Writes happen only through `profile.sh <p> ollama
+  # pull|create|rm`, host-side. Mirrors init-profile-state.sh. Created
+  # unconditionally so the :ro bind mount has a target even for profiles that
+  # never enable the sibling.
+  mkdir -p "$MODELS_ROOT/ollama"
   if [[ ! -s "$p/claude.json" ]]; then
     printf '{}\n' > "$p/claude.json"
   fi
@@ -1082,18 +1114,180 @@ ensure_octet_free() {
   export SANDBOX_OCTET="$want"
 }
 
-# Persistent per-profile DB selection. Mirrors subnet-octet: one small file under
-# the profile's state dir, read on every command and exported before any compose
-# call, so `up`/`recreate`/`rebuild` bring the chosen DB sibling(s) up WITHOUT a
-# COMPOSE_PROFILES prefix (closes the "plain up starts no Postgres" footgun).
-# An explicit COMPOSE_PROFILES in the environment always wins as a one-shot
-# override and is NOT persisted — set the durable default with `db enable`.
+# Persistent per-profile sibling selection. Mirrors subnet-octet: one small file
+# under the profile's state dir, read on every command and exported before any
+# compose call, so `up`/`recreate`/`rebuild` bring the chosen sibling(s) up
+# WITHOUT a COMPOSE_PROFILES prefix (closes the "plain up starts no Postgres"
+# footgun). An explicit COMPOSE_PROFILES in the environment always wins as a
+# one-shot override and is NOT persisted — set the durable default with
+# `db enable` / `ollama enable`.
+#
+# The file holds a COMMA-SEPARATED LIST of compose profile tokens
+# (`db-postgres,ollama`) — exactly the form COMPOSE_PROFILES already accepts.
+# It used to hold a single value; a legacy `db-postgres` file is a one-element
+# list and keeps working with no migration.
+#
+# The tokens are owned by DIFFERENT subcommands and must not clobber each other:
+# `db` edits only the `db-*` token, `ollama` only the `ollama` token. That is
+# the whole reason for the list — a DB choice and an inference choice are
+# independent, and one rewriting the other is the bug this shape prevents.
 ensure_compose_profiles() {
-  local f="$PROFILES_ROOT/$PROFILE/compose-profiles" want
-  if [[ -n "${COMPOSE_PROFILES+x}" ]]; then return; fi   # env override — respect, don't touch the file
-  if [[ -f "$f" ]] && read -r want < "$f" && [[ -n "$want" ]]; then
+  local want
+  # Record whether the value came from the CALLER or from the file, before we
+  # overwrite the distinction by exporting. `status` reports the two very
+  # differently ("one-shot override" vs "persisted"), and after the export
+  # below `${COMPOSE_PROFILES+x}` is true either way.
+  COMPOSE_PROFILES_FROM_ENV=0
+  if [[ -n "${COMPOSE_PROFILES+x}" ]]; then   # env override — respect, don't touch the file
+    COMPOSE_PROFILES_FROM_ENV=1
+    return
+  fi
+  want="$(read_compose_profiles)"
+  if [[ -n "$want" ]]; then
     export COMPOSE_PROFILES="$want"
   fi
+}
+
+# Print the persisted list for $PROFILE (empty when unset).
+read_compose_profiles() {
+  local f="$PROFILES_ROOT/$PROFILE/compose-profiles" want=""
+  [[ -f "$f" ]] && { read -r want < "$f" || true; }
+  printf '%s' "$want"
+}
+
+# Persist a list. An EMPTY list DELETES the file rather than writing a blank
+# one: ensure_compose_profiles treats an empty value as "nothing persisted",
+# and leaving a zero-length file behind makes `status` and `health` read
+# "configured, nothing selected" — a state with no meaning.
+write_compose_profiles() {
+  local f="$PROFILES_ROOT/$PROFILE/compose-profiles"
+  if [[ -z "$1" ]]; then rm -f "$f"; return 0; fi
+  mkdir -p "$PROFILES_ROOT/$PROFILE"
+  printf '%s\n' "$1" > "$f"
+}
+
+# compose_profiles_has <token> <list> — exact TOKEN match, never a substring:
+# `db-all` must not answer yes to a search for `all`, and `ollama` must not
+# match a future `ollama-foo`.
+compose_profiles_has() {
+  local tok="$1" list="$2" t
+  local IFS=','
+  for t in $list; do
+    [[ "$t" == "$tok" ]] && return 0
+  done
+  return 1
+}
+
+# compose_profiles_set_db <db-token|""> <list> — replace the db-* token,
+# leaving every other token untouched and in order. An empty first argument
+# REMOVES the db token. The db token is written first so the list reads in the
+# order the siblings were introduced.
+compose_profiles_set_db() {
+  local sel="$1" list="$2" t
+  local out=()
+  local IFS=','
+  for t in $list; do
+    [[ -n "$t" ]] || continue
+    case "$t" in db-*) continue ;; esac
+    out+=("$t")
+  done
+  [[ -n "$sel" ]] && out=("$sel" ${out[@]+"${out[@]}"})
+  printf '%s' "${out[*]:-}"
+}
+
+# compose_profiles_toggle_ollama <on|off> <list> — same contract in the other
+# direction: only the `ollama` token moves.
+compose_profiles_toggle_ollama() {
+  local mode="$1" list="$2" t
+  local out=()
+  local IFS=','
+  for t in $list; do
+    [[ -n "$t" ]] || continue
+    case "$t" in ollama) continue ;; esac
+    out+=("$t")
+  done
+  [[ "$mode" == "on" ]] && out+=("ollama")
+  printf '%s' "${out[*]:-}"
+}
+
+# ---------------------------------------------------------------------------
+# Host-side Ollama model-store helpers (`profile.sh <p> ollama pull|create|rm|list`)
+#
+# These run a THROWAWAY container on Docker's DEFAULT bridge, with the shared
+# model store mounted READ-WRITE. That is deliberately OUTSIDE the sandbox
+# boundary: it is a host-side operator action of the same class as `docker
+# pull`, not something the agent can reach (there is no docker socket inside
+# any profile container). The running sibling never has this reach — it sits on
+# sandbox-internal with the same store mounted read-only.
+#
+# Routing the pull through the profile's Squid was considered and rejected:
+# registry.ollama.ai redirects blob fetches to CDN hosts that would each have to
+# be observed and allowlisted, widening egress for a path the agent never uses.
+# ---------------------------------------------------------------------------
+
+# The image pin lives in exactly ONE place — docker-compose.yml. A second
+# literal here is a pin that drifts silently: the helper would populate the
+# store with one Ollama version while the sibling serves it with another.
+ollama_image() {
+  local img
+  img=$(sed -n 's|^[[:space:]]*image:[[:space:]]*\(ollama/ollama[^[:space:]]*\).*|\1|p' \
+        "$SCRIPT_DIR/docker-compose.yml" | head -1)
+  [[ -n "$img" ]] || fail "could not read the pinned ollama image from docker-compose.yml (looked for an 'image: ollama/ollama…' line)"
+  printf '%s' "$img"
+}
+
+# Every CLI verb — list, pull, create, rm — talks to the HTTP API; none of them
+# touches the store directly. So a server has to be running in the same
+# throwaway container. The image has no curl and its ENTRYPOINT is `ollama`, so
+# override to /bin/sh (which the image does have), start a server in the
+# background, wait for it to answer, then run the verb.
+OLLAMA_HELPER_PREAMBLE='ollama serve >/dev/null 2>&1 &
+i=0
+while [ "$i" -lt 30 ]; do ollama list >/dev/null 2>&1 && break; i=$((i+1)); sleep 1; done'
+
+# ollama_helper <shell-script> [args...] — args land in $1.. of the script.
+# Extra `docker run` arguments (e.g. the Modelfile source mount) come from the
+# OLLAMA_HELPER_MOUNTS array, set by the caller.
+#
+# The store is mounted at /models with OLLAMA_MODELS=/models, matching the
+# sibling exactly, so manifests/ and blobs/ sit at the STORE ROOT. Mounting it
+# at /root/.ollama instead would nest everything under a models/ subdir the
+# sibling cannot see, and drop Ollama's id_ed25519 client key into the shared
+# store — hence the tmpfs over /root/.ollama here as well.
+ollama_helper() {
+  local script="$1"; shift
+  mkdir -p "$MODELS_ROOT/ollama"
+  docker run --rm \
+    --network bridge \
+    --cap-drop ALL \
+    --security-opt no-new-privileges \
+    --pids-limit 512 \
+    --tmpfs /root/.ollama:size=16m \
+    -e OLLAMA_MODELS=/models \
+    -v "$MODELS_ROOT/ollama:/models:rw" \
+    ${OLLAMA_HELPER_MOUNTS[@]+"${OLLAMA_HELPER_MOUNTS[@]}"} \
+    --entrypoint /bin/sh \
+    "$(ollama_image)" \
+    -c "$OLLAMA_HELPER_PREAMBLE
+$script" sh "$@"
+}
+
+# One line per successful ingest, host-side and outside any container layer —
+# the same argument as the with-egress audit log: losing the record of what
+# entered the shared store would hurt. The digest is the sha256 of the manifest
+# file Ollama just wrote, which is the cheapest identifier available without a
+# second server round-trip.
+ollama_log_pull() {
+  local model="$1" name tag digest="" man
+  name="${model%%:*}"; tag="${model#*:}"
+  [[ "$tag" == "$model" ]] && tag="latest"
+  case "$name" in */*) ;; *) name="library/$name" ;; esac
+  man="$MODELS_ROOT/ollama/manifests/registry.ollama.ai/$name/$tag"
+  if [[ -f "$man" ]]; then
+    digest="sha256:$(sha256sum "$man" | awk '{print $1}')"
+  fi
+  printf '%s pull %s%s\n' "$(date -u +%FT%TZ)" "$model" "${digest:+ $digest}" \
+    >> "$MODELS_ROOT/ollama/pull.log"
 }
 
 # ---------------------------------------------------------------------------
@@ -1190,13 +1384,14 @@ fi
 # Read-only. For EVERY known profile (state dir OR live container) it checks
 # the containers that MUST run together:
 #   agent  ai-sandbox-<p>     proxy  egress-proxy-<p>
-#   + the configured DB sibling(s): postgres-<p> / mongo-<p>, per the profile's
-#     persisted compose-profiles default (db-postgres|db-mongo|db-all).
+#   + the configured optional sibling(s): postgres-<p> / mongo-<p> / ollama-<p>,
+#     per the profile's persisted compose-profiles LIST (a comma-separated set
+#     of tokens: db-postgres|db-mongo|db-all and/or ollama).
 # A profile with NOTHING running is assumed intentionally down (OK). A profile
 # with SOME containers up but an expected sibling missing/exited is DEGRADED
 # and flagged with a fix hint — this is the proxy-exited (ECONNREFUSED :3128)
-# and stale-DB failure modes. Orphan DBs (a DB up while its agent is down) are
-# flagged too. Never starts or stops anything. Exit 1 if any profile is
+# and stale-DB failure modes. Orphan siblings (one up while its agent is down)
+# are flagged too. Never starts or stops anything. Exit 1 if any profile is
 # DEGRADED, so it doubles as a tripwire (`just health` in CI/pre-flight).
 if [[ "${1:-}" == "health" ]]; then
   shopt -s nullglob
@@ -1212,7 +1407,7 @@ if [[ "${1:-}" == "health" ]]; then
   profiles="$(
     { for d in "$PROFILES_ROOT"/*/; do [[ -d "$d" ]] && basename "$d"; done
       printf '%s\n' "$snapshot" | awk -F '\t' '{print $1}' \
-        | sed -n -E 's/^(ai-sandbox|egress-proxy|postgres|mongo)-(.+)$/\2/p'
+        | sed -n -E 's/^(ai-sandbox|egress-proxy|postgres|mongo|ollama)-(.+)$/\2/p'
     } | sort -u
   )"
   if [[ -z "$profiles" ]]; then
@@ -1221,41 +1416,52 @@ if [[ "${1:-}" == "health" ]]; then
   fi
 
   printf "${C_D}Host state: %s   |   up=running, exited/created/…=present-not-running, -=absent${C_0}\n\n" "$PROFILES_ROOT"
-  printf '\033[1m%-18s %-8s %-8s %-16s %s\033[0m\n' PROFILE AGENT PROXY DB VERDICT
+  printf '\033[1m%-18s %-8s %-8s %-26s %s\033[0m\n' PROFILE AGENT PROXY SIBLINGS VERDICT
   flags=()
   degraded=0
   while IFS= read -r p; do
     [[ -n "$p" ]] || continue
     a_s=$(cstate "ai-sandbox-$p"); x_s=$(cstate "egress-proxy-$p")
     g_s=$(cstate "postgres-$p");   m_s=$(cstate "mongo-$p")
+    o_s=$(cstate "ollama-$p")
 
     cur=""; f="$PROFILES_ROOT/$p/compose-profiles"
     [[ -f "$f" ]] && { read -r cur < "$f" || true; }
-    exp_pg=0; exp_mongo=0
-    case "$cur" in
-      db-postgres) exp_pg=1 ;;
-      db-mongo)    exp_mongo=1 ;;
-      db-all)      exp_pg=1; exp_mongo=1 ;;
-    esac
+    exp_pg=0; exp_mongo=0; exp_ollama=0
+    # The file is a comma-separated LIST (db-postgres,ollama). A legacy
+    # single-value file is a one-element list and parses identically here.
+    IFS=',' read -r -a want_tokens <<< "$cur"
+    for tok in ${want_tokens[@]+"${want_tokens[@]}"}; do
+      case "$tok" in
+        db-postgres) exp_pg=1 ;;
+        db-mongo)    exp_mongo=1 ;;
+        db-all)      exp_pg=1; exp_mongo=1 ;;
+        ollama)      exp_ollama=1 ;;
+      esac
+    done
 
     a_run=0; [[ "$a_s" == running ]] && a_run=1
     x_run=0; [[ "$x_s" == running ]] && x_run=1
     g_run=0; [[ "$g_s" == running ]] && g_run=1
     m_run=0; [[ "$m_s" == running ]] && m_run=1
-    active=$(( a_run || x_run || g_run || m_run ))
+    o_run=0; [[ "$o_s" == running ]] && o_run=1
+    active=$(( a_run || x_run || g_run || m_run || o_run ))
 
-    # DB cell: show each expected DB's state; mark unexpected-but-running with '!'.
+    # SIBLINGS cell: show each expected sibling's state; mark
+    # unexpected-but-running with '!'.
     parts=()
     (( exp_pg ))          && parts+=("pg:$(slab "$g_s")")
     (( exp_mongo ))       && parts+=("mongo:$(slab "$m_s")")
+    (( exp_ollama ))      && parts+=("ollama:$(slab "$o_s")")
     (( !exp_pg && g_run )) && parts+=("pg:up!")
     (( !exp_mongo && m_run )) && parts+=("mongo:up!")
-    if (( ${#parts[@]} == 0 )); then db_cell='-'; else db_cell="${parts[*]}"; fi
+    (( !exp_ollama && o_run )) && parts+=("ollama:up!")
+    if (( ${#parts[@]} == 0 )); then sib_cell='-'; else sib_cell="${parts[*]}"; fi
 
     if (( ! active )); then
       verdict="down"; color="$C_D"
       # Fully down is fine, but note any stopped leftovers worth cleaning.
-      for pair in "ai-sandbox-$p=$a_s" "egress-proxy-$p=$x_s" "postgres-$p=$g_s" "mongo-$p=$m_s"; do
+      for pair in "ai-sandbox-$p=$a_s" "egress-proxy-$p=$x_s" "postgres-$p=$g_s" "mongo-$p=$m_s" "ollama-$p=$o_s"; do
         nm="${pair%=*}"; st="${pair##*=}"
         case "$st" in
           absent|running) ;;
@@ -1268,7 +1474,8 @@ if [[ "${1:-}" == "health" ]]; then
       (( x_run )) || probs+=("egress-proxy-$p is $(slab "$x_s") — egress DOWN (ECONNREFUSED …:3128 on auth/network) — scripts/profile.sh $p up  (quick: docker start egress-proxy-$p)")
       (( !exp_pg    || g_run )) || probs+=("postgres-$p is $(slab "$g_s") but DB default is '$cur' — scripts/profile.sh $p up")
       (( !exp_mongo || m_run )) || probs+=("mongo-$p is $(slab "$m_s") but DB default is '$cur' — scripts/profile.sh $p up")
-      # Orphan DBs: running but not configured. Harmless if agent is up
+      (( !exp_ollama || o_run )) || probs+=("ollama-$p is $(slab "$o_s") but persisted siblings are '$cur' — scripts/profile.sh $p up")
+      # Orphan siblings: running but not configured. Harmless if agent is up
       # (likely a one-shot COMPOSE_PROFILES); a stale hazard if agent is down.
       if (( !exp_pg && g_run )); then
         if (( a_run )); then flags+=("WARN  $p: postgres-$p up but not the persisted default (one-shot COMPOSE_PROFILES? — 'scripts/profile.sh $p db enable postgres' to persist)")
@@ -1278,6 +1485,10 @@ if [[ "${1:-}" == "health" ]]; then
         if (( a_run )); then flags+=("WARN  $p: mongo-$p up but not the persisted default (one-shot COMPOSE_PROFILES? — 'scripts/profile.sh $p db enable mongo' to persist)")
         else probs+=("mongo-$p running but agent is down — orphan/stale DB — docker rm -f mongo-$p  (or scripts/profile.sh $p up)"); fi
       fi
+      if (( !exp_ollama && o_run )); then
+        if (( a_run )); then flags+=("WARN  $p: ollama-$p up but not a persisted sibling (one-shot COMPOSE_PROFILES? — 'scripts/profile.sh $p ollama enable' to persist)")
+        else probs+=("ollama-$p running but agent is down — orphan/stale sibling — docker rm -f ollama-$p  (or scripts/profile.sh $p up)"); fi
+      fi
       if (( ${#probs[@]} == 0 )); then
         verdict="OK"; color="$C_G"
       else
@@ -1286,8 +1497,8 @@ if [[ "${1:-}" == "health" ]]; then
       fi
     fi
 
-    printf "%-18s %-8s %-8s %-16s ${color}%s${C_0}\n" \
-      "$p" "$(slab "$a_s")" "$(slab "$x_s")" "$db_cell" "$verdict"
+    printf "%-18s %-8s %-8s %-26s ${color}%s${C_0}\n" \
+      "$p" "$(slab "$a_s")" "$(slab "$x_s")" "$sib_cell" "$verdict"
   done <<< "$profiles"
 
   if (( ${#flags[@]} )); then
@@ -1872,7 +2083,9 @@ PY
     # reads into COMPOSE_PROFILES on every command — so once enabled, a plain
     # `up` brings the DB up with no env-var prefix. Does not touch running
     # containers; run `up`/`recreate` afterwards to apply.
-    f="$PROFILES_ROOT/$PROFILE/compose-profiles"
+    #
+    # Only the `db-*` token is touched. An `ollama` token in the same list is
+    # left exactly as it was, in both directions — see the helpers above.
     sub="${1:-status}"
     case "$sub" in
       enable)
@@ -1883,28 +2096,36 @@ PY
           "")       fail "db enable: which? (postgres | mongo | all)" ;;
           *)        fail "db enable: unknown target '${2}' (valid: postgres | mongo | all)" ;;
         esac
-        mkdir -p "$PROFILES_ROOT/$PROFILE"
-        printf '%s\n' "$sel" > "$f"
-        ok "profile '$PROFILE' default DB set to '$sel'"
+        cur="$(read_compose_profiles)"
+        new="$(compose_profiles_set_db "$sel" "$cur")"
+        write_compose_profiles "$new"
+        ok "profile '$PROFILE' default DB set to '$sel' (siblings: $new)"
         info "apply it now:  scripts/profile.sh $PROFILE up   (or recreate, if already up)"
         ;;
       disable)
-        if [[ -f "$f" ]]; then
-          rm -f "$f"
-          ok "profile '$PROFILE' DB default cleared — 'up' now brings agent + proxy only"
-          info "stop a running DB sibling with:  scripts/profile.sh $PROFILE recreate"
-        else
+        cur="$(read_compose_profiles)"
+        new="$(compose_profiles_set_db "" "$cur")"
+        if [[ "$new" == "$cur" ]]; then
           info "profile '$PROFILE' had no DB default set (nothing to clear)"
+        else
+          write_compose_profiles "$new"
+          if [[ -n "$new" ]]; then
+            ok "profile '$PROFILE' DB default cleared (siblings still: $new)"
+          else
+            ok "profile '$PROFILE' DB default cleared — 'up' now brings agent + proxy only"
+          fi
+          info "stop a running DB sibling with:  scripts/profile.sh $PROFILE recreate"
         fi
         ;;
       status)
-        if [[ -n "${COMPOSE_PROFILES+x}" ]]; then
+        if (( ${COMPOSE_PROFILES_FROM_ENV:-0} )); then
           info "COMPOSE_PROFILES='${COMPOSE_PROFILES}' set in environment (one-shot override; not persisted)"
         fi
-        if [[ -f "$f" ]] && read -r cur < "$f" && [[ -n "$cur" ]]; then
-          ok "profile '$PROFILE' default DB: $cur"
+        cur="$(read_compose_profiles)"
+        if [[ -n "$cur" ]]; then
+          ok "profile '$PROFILE' persisted siblings: $cur"
         else
-          info "profile '$PROFILE' has no default DB (plain 'up' = agent + proxy only)"
+          info "profile '$PROFILE' has no persisted siblings (plain 'up' = agent + proxy only)"
         fi
         ;;
       *) fail "db: unknown subcommand '$sub' (valid: enable <postgres|mongo|all> | disable | status)" ;;
@@ -1977,6 +2198,108 @@ PY
       echo "  COMPOSE_PROFILES=db-postgres scripts/profile.sh $PROFILE recreate"
       echo "  (make it the default so plain 'up' includes Postgres:  scripts/profile.sh $PROFILE db enable postgres)"
     fi
+    ;;
+
+  ollama)
+    # Local inference sibling. Two halves, deliberately separate:
+    #
+    #   enable/disable/status — edit ONLY the `ollama` token in this profile's
+    #     persisted compose-profiles list, exactly as `db` edits only the db-*
+    #     token. Touches no container; run up/recreate to apply.
+    #
+    #   pull/create/rm/list — write the SHARED model store, host-side, in a
+    #     throwaway container on Docker's default bridge (see the helpers
+    #     above). This is the ONLY writer: the running sibling mounts the same
+    #     store read-only, so a compromised profile cannot plant a model that
+    #     another profile then runs.
+    sub="${1:-status}"
+    case "$sub" in
+      enable)
+        cur="$(read_compose_profiles)"
+        new="$(compose_profiles_toggle_ollama on "$cur")"
+        write_compose_profiles "$new"
+        ok "profile '$PROFILE' will start the ollama sibling (siblings: $new)"
+        info "apply it now:  scripts/profile.sh $PROFILE up   (or recreate, if already up)"
+        info "the agent reaches it at http://ollama:11434 (NO_PROXY'd — direct, not via squid)"
+        ;;
+      disable)
+        cur="$(read_compose_profiles)"
+        new="$(compose_profiles_toggle_ollama off "$cur")"
+        if [[ "$new" == "$cur" ]]; then
+          info "profile '$PROFILE' did not have the ollama sibling enabled (nothing to clear)"
+        else
+          write_compose_profiles "$new"
+          if [[ -n "$new" ]]; then
+            ok "profile '$PROFILE' ollama sibling disabled (siblings still: $new)"
+          else
+            ok "profile '$PROFILE' ollama sibling disabled — 'up' now brings agent + proxy only"
+          fi
+          info "stop a running sibling with:  scripts/profile.sh $PROFILE recreate"
+        fi
+        ;;
+      status)
+        if (( ${COMPOSE_PROFILES_FROM_ENV:-0} )); then
+          info "COMPOSE_PROFILES='${COMPOSE_PROFILES}' set in environment (one-shot override; not persisted)"
+        fi
+        cur="$(read_compose_profiles)"
+        if compose_profiles_has ollama "$cur"; then
+          ok "profile '$PROFILE' persisted siblings: ${cur} (ollama enabled)"
+        elif [[ -n "$cur" ]]; then
+          info "profile '$PROFILE' persisted siblings: ${cur} (ollama NOT enabled)"
+        else
+          info "profile '$PROFILE' has no persisted siblings (ollama NOT enabled)"
+        fi
+        ctr="ollama-$PROFILE"
+        if docker inspect "$ctr" >/dev/null 2>&1; then
+          state="$(docker inspect -f '{{.State.Status}}' "$ctr" 2>/dev/null || echo unknown)"
+          info "container $ctr: $state"
+        else
+          info "container $ctr: absent"
+        fi
+        info "model store: $MODELS_ROOT/ollama (shared across profiles; read-only to every sibling)"
+        ;;
+      pull)
+        model="${2:-}"
+        [[ -n "$model" ]] || fail "ollama pull: usage: ollama pull <model>  (e.g. qwen3-coder:30b)"
+        info "pulling '$model' into $MODELS_ROOT/ollama (host-side, default bridge — outside the sandbox boundary)"
+        OLLAMA_HELPER_MOUNTS=()
+        ollama_helper 'ollama pull "$1"' "$model" \
+          || fail "ollama pull failed for '$model'"
+        ollama_log_pull "$model"
+        ok "pulled '$model' — recorded in $MODELS_ROOT/ollama/pull.log"
+        ;;
+      create)
+        mname="${2:-}"
+        [[ -n "$mname" ]] || fail "ollama create: usage: ollama create <name> -f <Modelfile>"
+        [[ "${3:-}" == "-f" ]] || fail "ollama create: expected -f <Modelfile> (got '${3:-}')"
+        mfile="${4:-}"
+        [[ -n "$mfile" ]] || fail "ollama create: -f needs a Modelfile path"
+        [[ -f "$mfile" ]] || fail "ollama create: no such Modelfile: $mfile"
+        # The Modelfile is a HOST path. Mount its whole directory read-only so a
+        # relative `FROM ./model.gguf` beside it resolves too, and hand the
+        # container the mapped path.
+        mdir="$(cd "$(dirname "$mfile")" && pwd)"
+        info "creating '$mname' from $mfile into $MODELS_ROOT/ollama (host-side)"
+        OLLAMA_HELPER_MOUNTS=(-v "$mdir:/modelfile-src:ro")
+        ollama_helper 'ollama create "$1" -f "$2"' "$mname" "/modelfile-src/$(basename "$mfile")" \
+          || fail "ollama create failed for '$mname'"
+        ok "created '$mname' in the shared model store"
+        ;;
+      rm)
+        model="${2:-}"
+        [[ -n "$model" ]] || fail "ollama rm: usage: ollama rm <model>"
+        OLLAMA_HELPER_MOUNTS=()
+        ollama_helper 'ollama rm "$1"' "$model" \
+          || fail "ollama rm failed for '$model'"
+        ok "removed '$model' from the shared model store"
+        ;;
+      list)
+        OLLAMA_HELPER_MOUNTS=()
+        ollama_helper 'ollama list' \
+          || fail "ollama list failed"
+        ;;
+      *) fail "ollama: unknown subcommand '$sub' (valid: enable | disable | status | pull <model> | create <name> -f <Modelfile> | rm <model> | list)" ;;
+    esac
     ;;
 
   wipe)

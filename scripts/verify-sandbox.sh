@@ -120,6 +120,65 @@ else
   pass "disallowed domain blocked by proxy"
 fi
 
+# --- agent backend / ollama sibling -----------------------------------------
+# Which model is Claude Code actually talking to? ANTHROPIC_BASE_URL comes from
+# the profile's secrets.env (read at container CREATE — recreate after editing),
+# so it is invisible from the host repo and worth stating out loud on every
+# verify. The controls this repo owns — deny lists, the hook engine, seccomp,
+# egress — are all on the harness, not the model, so a backend switch does not
+# weaken them. What it DOES change is documented by Anthropic: MCP tool search
+# is off by default and model IDs pass through unvalidated.
+if [[ -n "${ANTHROPIC_BASE_URL:-}" ]]; then
+  case "$ANTHROPIC_BASE_URL" in
+    http://ollama:11434)
+      pass "agent backend: ollama sibling ($ANTHROPIC_BASE_URL)" ;;
+    https://*)
+      # Not fatal — openrouter.ai, for one, is already allowlisted. But the
+      # host has to BE on the allowlist or squid refuses the CONNECT and every
+      # request fails with no clue as to why, so name it rather than nod.
+      warn "agent backend: $ANTHROPIC_BASE_URL — non-first-party backend; MCP tool search off, model IDs unvalidated — and the host must be allowlisted or every request fails silently" ;;
+    *)
+      # Plain http to anything but the sibling means an unencrypted API key on
+      # the wire, to a host that is not the one air-gapped service we trust.
+      fail "agent backend: $ANTHROPIC_BASE_URL — plain http to something other than the ollama sibling" ;;
+  esac
+else
+  pass "agent backend: Anthropic API (default)"
+fi
+
+# Name resolution. `ollama` resolves through Docker's embedded DNS on the
+# compose network (resolv.conf is 127.0.0.11 with the sinkhole as its
+# upstream — same-network service names answer, everything else dies), so it
+# resolves even on an agent created before the extra_hosts entry existed. The
+# entry is belt-and-braces against that resolver, not the only path. Measured
+# 2026-09-03: an agent with no `ollama` extra_host still resolved .40.
+if getent hosts ollama >/dev/null 2>&1; then
+  pass "ollama name resolves ($(getent hosts ollama | awk '{print $1; exit}'))"
+else
+  fail "ollama does not resolve — neither embedded DNS nor extra_hosts answered; recreate the agent (scripts/profile.sh <p> recreate)"
+fi
+
+# NO_PROXY is the check that catches a STALE agent. env is fixed at container
+# create, so an agent created before `ollama` joined NO_PROXY sends
+# http://ollama:11434 through squid, which answers 403 for a non-allowlisted
+# host — every Claude Code request against the sibling fails, while the
+# --noproxy probe below still passes. Measured 2026-09-03 on exactly that agent.
+case ",${NO_PROXY:-}," in
+  *,ollama,*) pass "NO_PROXY includes ollama (direct, not via squid)" ;;
+  *) fail "NO_PROXY='${NO_PROXY:-}' lacks ollama — agent predates the compose change; http://ollama:11434 is being sent through squid (403). Recreate: scripts/profile.sh <p> recreate" ;;
+esac
+
+# Reachability. Absence is NOT a failure: the sibling is opt-in per profile.
+# --noproxy '*' is the point of the probe as much as the port is — a reply here
+# proves the NO_PROXY bypass works and the call is not being CONNECTed through
+# squid, which would deny a non-allowlisted host.
+OLLAMA_VER=$(curl -s --noproxy '*' --connect-timeout 3 http://ollama:11434/api/version 2>/dev/null || true)
+if [[ -n "$OLLAMA_VER" ]]; then
+  pass "ollama sibling answers on http://ollama:11434 direct, not via squid ($OLLAMA_VER)"
+else
+  note "ollama sibling not running (enable with scripts/profile.sh <p> ollama enable)"
+fi
+
 # --- deny-destructive PreToolUse hook ---------------------------------------
 # File invariants (baked into image at /usr/local/lib/claude-hooks/):
 HOOK=/usr/local/lib/claude-hooks/deny-destructive.sh
