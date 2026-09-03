@@ -285,30 +285,36 @@ a profile goes idle, which matters on one 12 GB GPU shared by every profile.
 
 ### Pointing Claude Code at it (per profile)
 
-Claude Code has a documented "LLM gateway" path: point `ANTHROPIC_BASE_URL` at
-anything speaking the Messages API. Ollama ≥ 0.14.0 does. The switch lives in
-`~/.ai-sandbox/profiles/<profile>/secrets.env` — **not** in the settings
-template, whose `env` block is sandbox-owned and overwritten on every `up`
-([ADR-0007](../../docs/adr/0007-policy-templates-are-source-of-truth-for-every-agent.md)):
+Claude Code has a documented "LLM gateway" path: `ANTHROPIC_BASE_URL` at
+anything speaking the Messages API. Ollama ≥ 0.14.0 does; OpenRouter does. The
+switch is a command that writes a managed `backend.env` in the profile's state
+dir, injected after `secrets.env`:
 
-```sh
-# Ollama sibling
-ANTHROPIC_BASE_URL=http://ollama:11434
-ANTHROPIC_AUTH_TOKEN=ollama
-ANTHROPIC_API_KEY=                      # present AND empty — see the template
-ANTHROPIC_DEFAULT_OPUS_MODEL=qwen3-coder
-ANTHROPIC_DEFAULT_SONNET_MODEL=qwen3-coder
-ANTHROPIC_DEFAULT_HAIKU_MODEL=qwen3-coder
-
-# OpenRouter (openrouter.ai is already allowlisted — nothing to open)
-ANTHROPIC_BASE_URL=https://openrouter.ai/api
-ANTHROPIC_AUTH_TOKEN=<openrouter key>
-ANTHROPIC_API_KEY=
+```bash
+scripts/profile.sh <profile> backend ollama --model qwen3-coder       # the sibling
+scripts/profile.sh <profile> backend openrouter --model anthropic/claude-sonnet-4.5
+scripts/profile.sh <profile> backend anthropic                        # back to default
+scripts/profile.sh <profile> backend status                           # + "pending recreate" if the live agent differs
 ```
 
-`env_file` is read only at container CREATE, so after editing:
-`scripts/profile.sh <profile> recreate`. A plain `up` will not re-read it.
-`verify` prints which backend the profile is on.
+`just backend <profile> ...` is the alias. For OpenRouter, put
+`OPENROUTER_API_KEY=...` in `secrets.env` first; the command copies it into
+`backend.env` as the bearer token and never takes it on the command line. The
+`--model` value fills all three aliases (opus/sonnet/haiku); `--context
+<tokens>` sets `CLAUDE_CODE_MAX_CONTEXT_TOKENS` for a model Claude Code does
+not recognise (it otherwise assumes 200k).
+
+It is **not** in the settings template, whose `env` block is sandbox-owned and
+overwritten on every `up`
+([ADR-0007](../../docs/adr/0007-policy-templates-are-source-of-truth-for-every-agent.md)),
+and not in `secrets.env`, which is operator-owned and never rewritten by a
+script. `backend.env` is preserved across `wipe` like the other auth files.
+
+`env_file` is read only at container CREATE, so nothing changes until
+`scripts/profile.sh <profile> recreate`. Pass `--recreate` to the command to
+run it immediately. A recreate ends every live shell and any VS Code attach in
+that profile; sessions resume from disk, processes do not. `verify` prints
+which backend the profile is on.
 
 Caveats, all documented rather than assumed:
 

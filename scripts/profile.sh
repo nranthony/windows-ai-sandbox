@@ -63,6 +63,18 @@
 #                   the sandbox boundary (same class as `docker pull`): the agent
 #                   has no docker socket and the running sibling mounts that
 #                   store READ-ONLY, so it is the only write path.
+#   backend <SUB>   which model endpoint Claude Code in this profile talks to.
+#                   SUB: anthropic | ollama --model <m> | openrouter --model <m>
+#                   | status. Writes the profile's backend.env (a sandbox-
+#                   managed env_file injected after secrets.env); `anthropic`
+#                   removes it. OpenRouter's token is COPIED from the
+#                   OPENROUTER_API_KEY line of secrets.env — put the key there,
+#                   never on this command line. env_file is read at container
+#                   CREATE, so nothing changes until `recreate`: pass
+#                   --recreate to run it now (this drops live shells and any
+#                   VS Code attach — sessions resume, processes do not).
+#                   Optional --context <tokens> sets CLAUDE_CODE_MAX_CONTEXT_TOKENS
+#                   for a model Claude Code does not recognise.
 #   clean           prune rotating state (old .claude.json backups, paste-cache,
 #                   shell-snapshots). Pass --deep to also drop MCP debug logs
 #                   and settings.json.bak.* backups.
@@ -985,6 +997,11 @@ ensure_state() {
   fi
   if [[ -f "$p/secrets.env" ]]; then
     chmod 600 "$p/secrets.env" 2>/dev/null || warn "could not chmod 600 $p/secrets.env"
+  fi
+  # backend.env can carry the OpenRouter token (copied from secrets.env by
+  # `backend openrouter`), so it gets the same lock.
+  if [[ -f "$p/backend.env" ]]; then
+    chmod 600 "$p/backend.env" 2>/dev/null || warn "could not chmod 600 $p/backend.env"
   fi
 }
 
@@ -2302,6 +2319,145 @@ PY
     esac
     ;;
 
+  backend)
+    # Which endpoint Claude Code talks to — Anthropic (default), the profile's
+    # air-gapped Ollama sibling, or OpenRouter. Anthropic documents the
+    # mechanism as the "LLM gateway" path: ANTHROPIC_BASE_URL plus a bearer
+    # ANTHROPIC_AUTH_TOKEN, with ANTHROPIC_API_KEY PRESENT AND EMPTY (a real
+    # value there is sent as x-api-key to whatever host the base URL names).
+    #
+    # The switch is a small sandbox-MANAGED env_file, backend.env, injected
+    # after secrets.env so it wins on duplicate keys. It is not the settings
+    # template's `env` block — that block is sandbox-owned and overwritten on
+    # every `up` (ADR-0007) — and it is not secrets.env, which the operator
+    # owns and which must not be rewritten by a script. Three near-copies of
+    # secrets.env were considered and rejected: every key added later would
+    # have to land in all three, and a stale copy fails as a missing key.
+    #
+    # env_file is read at container CREATE. Nothing here touches a container
+    # unless --recreate is passed, because a recreate ends every live shell
+    # and any VS Code attach in that profile.
+    f="$PROFILES_ROOT/$PROFILE/backend.env"
+    s="$PROFILES_ROOT/$PROFILE/secrets.env"
+    sub="${1:-status}"; [[ $# -gt 0 ]] && shift
+    model=""; ctx=""; do_recreate=0
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --model)     model="${2:-}"; shift 2 ;;
+        --model=*)   model="${1#--model=}"; shift ;;
+        --context)   ctx="${2:-}"; shift 2 ;;
+        --context=*) ctx="${1#--context=}"; shift ;;
+        --recreate)  do_recreate=1; shift ;;
+        *) fail "backend: unknown argument '$1' (valid: anthropic | ollama | openrouter | status; flags: --model <m> --context <tokens> --recreate)" ;;
+      esac
+    done
+    [[ -z "$ctx" || "$ctx" =~ ^[0-9]+$ ]] || fail "backend: --context wants a token count, got '$ctx'"
+
+    # What the RUNNING agent was created with, so status can say "pending
+    # recreate" instead of leaving the operator to compare two files.
+    live_base=""
+    if docker inspect "$AGENT" >/dev/null 2>&1; then
+      live_base="$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$AGENT" 2>/dev/null \
+                   | sed -n 's/^ANTHROPIC_BASE_URL=//p' | head -1)"
+    fi
+
+    write_backend() {
+      # $1 label, $2 base url, $3 token, $4 model
+      local tmp
+      mkdir -p "$PROFILES_ROOT/$PROFILE"
+      tmp="$(umask 077 && mktemp "$PROFILES_ROOT/$PROFILE/.backend.env.XXXXXX")" || fail "backend: could not create a temp file"
+      {
+        echo "# MANAGED by scripts/profile.sh $PROFILE backend — rerun that command, do not edit."
+        echo "# Read at container CREATE (scripts/profile.sh $PROFILE recreate). Absent = Anthropic API."
+        echo "CLAUDE_BACKEND=$1"
+        echo "ANTHROPIC_BASE_URL=$2"
+        echo "ANTHROPIC_AUTH_TOKEN=$3"
+        echo "ANTHROPIC_API_KEY="
+        echo "ANTHROPIC_DEFAULT_OPUS_MODEL=$4"
+        echo "ANTHROPIC_DEFAULT_SONNET_MODEL=$4"
+        echo "ANTHROPIC_DEFAULT_HAIKU_MODEL=$4"
+        [[ -n "$ctx" ]] && echo "CLAUDE_CODE_MAX_CONTEXT_TOKENS=$ctx"
+      } > "$tmp"
+      chmod 600 "$tmp"
+      mv -f "$tmp" "$f"
+    }
+
+    case "$sub" in
+      status)
+        if [[ -f "$f" ]]; then
+          cur_label="$(sed -n 's/^CLAUDE_BACKEND=//p' "$f" | head -1)"
+          cur_base="$(sed -n 's/^ANTHROPIC_BASE_URL=//p' "$f" | head -1)"
+          cur_model="$(sed -n 's/^ANTHROPIC_DEFAULT_SONNET_MODEL=//p' "$f" | head -1)"
+          ok "profile '$PROFILE' backend: ${cur_label:-?} ($cur_base) model=$cur_model"
+          # Never echo the token line — it may be the OpenRouter key.
+        else
+          cur_base=""
+          ok "profile '$PROFILE' backend: anthropic (default — no backend.env)"
+        fi
+        if [[ -n "$live_base" || -f "$f" ]] && docker inspect "$AGENT" >/dev/null 2>&1; then
+          if [[ "$live_base" == "$cur_base" ]]; then
+            info "running $AGENT matches (ANTHROPIC_BASE_URL='${live_base:-<unset>}')"
+          else
+            warn "running $AGENT was created with ANTHROPIC_BASE_URL='${live_base:-<unset>}' — PENDING RECREATE: scripts/profile.sh $PROFILE recreate"
+          fi
+        fi
+        exit 0
+        ;;
+      anthropic)
+        if [[ -f "$f" ]]; then
+          rm -f "$f"
+          ok "profile '$PROFILE' backend: anthropic (removed backend.env)"
+        else
+          info "profile '$PROFILE' backend already anthropic (no backend.env)"
+        fi
+        ;;
+      ollama)
+        [[ -n "$model" ]] || {
+          pulled="$(find "$MODELS_ROOT/ollama/manifests" -mindepth 3 -type f 2>/dev/null \
+                    | sed -E 's|.*/registry\.ollama\.ai/library/([^/]+)/([^/]+)$|\1:\2|; t; s|.*/registry\.ollama\.ai/||' | sort | tr '\n' ' ' || true)"
+          # `|| true`: with no manifests dir yet, find exits 1 and pipefail
+          # would make this assignment abort the group under set -e BEFORE
+          # the fail line prints — measured: a silent rc=1 with no message.
+          fail "backend ollama: --model <name> is required. Pulled models: ${pulled:-<none — scripts/profile.sh $PROFILE ollama pull <model>>}"
+        }
+        # Warn, do not fail, on the two prerequisites: the operator may be
+        # setting the switch first and pulling/enabling next.
+        mname="${model%%:*}"; mtag="${model#*:}"; [[ "$mtag" == "$model" ]] && mtag="latest"
+        case "$mname" in */*) mpath="$mname/$mtag" ;; *) mpath="library/$mname/$mtag" ;; esac
+        [[ -f "$MODELS_ROOT/ollama/manifests/registry.ollama.ai/$mpath" ]] \
+          || warn "model '$model' is not in the shared store yet — scripts/profile.sh $PROFILE ollama pull $model"
+        compose_profiles_has ollama "$(read_compose_profiles)" \
+          || warn "the ollama sibling is not enabled for this profile — scripts/profile.sh $PROFILE ollama enable"
+        write_backend ollama "http://ollama:11434" "ollama" "$model"
+        ok "profile '$PROFILE' backend: ollama (http://ollama:11434) model=$model"
+        info "MCP tool search is off by default on a non-Anthropic base URL; model IDs pass through unvalidated"
+        ;;
+      openrouter)
+        [[ -n "$model" ]] || fail "backend openrouter: --model <provider/model> is required (e.g. anthropic/claude-sonnet-4.5)"
+        [[ -f "$s" ]] || fail "backend openrouter: no $s — put OPENROUTER_API_KEY=<key> there first (template: secrets.env.example)"
+        key="$(sed -n 's/^OPENROUTER_API_KEY=//p' "$s" | head -1 | tr -d '"'"'"' \r')"
+        case "$key" in
+          ""|__SET_ME__|*'<'*) fail "backend openrouter: OPENROUTER_API_KEY is not set in $s (an uncommented line, no placeholder)" ;;
+        esac
+        # openrouter.ai is already an always-on allowlist line; say so rather
+        # than let a future gating of it surface as "every request fails".
+        grep -qE '^[[:space:]]*openrouter\.ai[[:space:]]*$' "$SCRIPT_DIR/proxy/allowed_domains.txt" \
+          || warn "openrouter.ai is not an uncommented line in proxy/allowed_domains.txt — squid will refuse it"
+        write_backend openrouter "https://openrouter.ai/api" "$key" "$model"
+        ok "profile '$PROFILE' backend: openrouter (https://openrouter.ai/api) model=$model — token copied from secrets.env"
+        info "MCP tool search is off by default on a non-Anthropic base URL; model IDs pass through unvalidated"
+        ;;
+      *) fail "backend: unknown subcommand '$sub' (valid: anthropic | ollama --model <m> | openrouter --model <m> | status)" ;;
+    esac
+
+    if (( do_recreate )); then
+      info "recreating $AGENT so the new env_file is read (live shells and any VS Code attach end here)"
+      exec "${BASH_SOURCE[0]}" "$PROFILE" recreate
+    else
+      info "apply it:  scripts/profile.sh $PROFILE recreate   (env_file is read at container CREATE; --recreate does this for you)"
+    fi
+    ;;
+
   wipe)
     dry=0; assume_yes=0; all_vols=0
     for a in "$@"; do
@@ -2335,6 +2491,7 @@ PY
     echo "    $p/gemini-home/oauth_creds.json"
     echo "    $p/db.env  (if present)"
     echo "    $p/secrets.env  (if present)"
+    echo "    $p/backend.env  (if present — the Claude Code backend switch)"
     echo "  WIPE:"
     echo "    docker compose down --remove-orphans  ($([[ $all_vols == 1 ]] && echo '+ ALL named volumes' || echo '+ DB volumes preserved'))"
     echo "    rm -rf $p/*  (everything except the PRESERVE list above)"
@@ -2380,6 +2537,7 @@ PY
     [[ -f "$p/gemini-home/oauth_creds.json" ]]  && mv "$p/gemini-home/oauth_creds.json"  "$stage/gemini-home/oauth_creds.json"
     [[ -f "$p/db.env" ]]                        && mv "$p/db.env"                        "$stage/db.env"
     [[ -f "$p/secrets.env" ]]                   && mv "$p/secrets.env"                   "$stage/secrets.env"
+    [[ -f "$p/backend.env" ]]                   && mv "$p/backend.env"                   "$stage/backend.env"
     ok "staged auth artefacts → $stage"
 
     rm -rf "$p"
@@ -2394,6 +2552,7 @@ PY
     [[ -f "$stage/gemini-home/oauth_creds.json" ]]  && mv "$stage/gemini-home/oauth_creds.json"  "$p/gemini-home/oauth_creds.json"
     [[ -f "$stage/db.env" ]]                        && mv "$stage/db.env"                        "$p/db.env"
     [[ -f "$stage/secrets.env" ]]                   && mv "$stage/secrets.env"                   "$p/secrets.env"
+    [[ -f "$stage/backend.env" ]]                   && mv "$stage/backend.env"                   "$p/backend.env"
 
     residue=$(find "$stage" -mindepth 1 -not -type d 2>/dev/null)
     if [[ -n "$residue" ]]; then
@@ -2407,6 +2566,7 @@ PY
     [[ -f "$p/claude-home/.credentials.json" ]] && chmod 600 "$p/claude-home/.credentials.json"
     [[ -f "$p/db.env" ]]                        && chmod 600 "$p/db.env"
     [[ -f "$p/secrets.env" ]]                   && chmod 600 "$p/secrets.env"
+    [[ -f "$p/backend.env" ]]                   && chmod 600 "$p/backend.env"
     ok "restored auth artefacts into fresh $p"
 
     ensure_state

@@ -418,6 +418,7 @@ scripts/profile.sh build --refresh-ai        # bump AI CLIs (tail layer only)
 scripts/with-egress.sh <p> --with pypi -- '<cmd>'   # temporary egress widening
 scripts/profile.sh <p> deps [--osv]           # dependency posture (host-side, read-only)
 scripts/profile.sh <p> ollama enable|pull <model>|status   # local inference sibling (host-side ingest)
+scripts/profile.sh <p> backend ollama|openrouter|anthropic [--model m] [--recreate]  # Claude Code endpoint switch
 scripts/docker-gc.sh --dry-run               # host Docker hygiene (see above)
 ```
 

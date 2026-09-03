@@ -90,8 +90,11 @@ See `sandbox-hardening-package.md` §4 and `docs/compose-network-ipam.md`.
 │                       NOT mounted into any container; the proxy's own
 │                       access.log is tmpfs and dies with it)
 ├── subnet-octet       (this profile's 172.30.<octet>.0/24 allocation)
-└── db.env             (optional; postgres/mongo credentials — see
-                        sandbox_templates/common/db.env.template)
+├── db.env             (optional; postgres/mongo credentials — see
+│                       sandbox_templates/common/db.env.template)
+├── secrets.env        (optional; operator-owned API keys, chmod 600, never rewritten by a script)
+└── backend.env        (optional; MANAGED by `profile.sh <p> backend` — the Claude Code
+                        endpoint switch, injected after secrets.env; absent = Anthropic API)
 ```
 
 Not per profile — one store, shared by every profile's Ollama sibling:

@@ -142,7 +142,7 @@ store. No workspace path is ever writable by the runtime.
 | D3 | Helper CLI | **Yes** — `ollama pull|create|list` under `profile.sh` |
 | D4 | Runtime mount mode | **Read-only** (§2.4). New: came from the 2026-09-02 review |
 | D5 | Keep-alive | **Ollama default (5m)**, not 24h. 12 GB VRAM, one card; an idle profile must release it |
-| D6 | Claude Code backend switch | **Per profile, via `secrets.env`** (§8). The settings template's `env` block is sandbox-owned and overwritten on `up` (ADR-0007), so the switch cannot live there; `env_file` is per profile and read at create. `verify` prints which backend the profile is on |
+| D6 | Claude Code backend switch | **Per profile, via a managed `backend.env`** written by `profile.sh <p> backend anthropic\|ollama\|openrouter` (revised same day from "hand-edit secrets.env"). The settings template's `env` block is sandbox-owned and overwritten on `up` (ADR-0007), and `secrets.env` is operator-owned and must not be rewritten by a script, so the switch needed a third home; injected after `secrets.env` so it wins. Three near-copies of `secrets.env` rejected: every later key would have to land in all three. `--recreate` is explicit because a recreate ends live sessions. `verify` prints which backend the profile is on |
 | D7 | Pull network | **Default bridge, host-side** (§5.2) |
 
 ## 8. Claude Code against Ollama / OpenRouter — what the research established

@@ -135,6 +135,15 @@ services:
       # without keys still come up. See docs/web-read-broker.md.
       - path: ${HOME}/.ai-sandbox/profiles/${PROFILE}/secrets.env
         required: false
+      # Claude Code backend switch (work/0023 §8) — WRITTEN BY
+      # `scripts/profile.sh <p> backend anthropic|ollama|openrouter`, never by
+      # hand. Holds only ANTHROPIC_BASE_URL / ANTHROPIC_AUTH_TOKEN / an empty
+      # ANTHROPIC_API_KEY and the model aliases. Listed AFTER secrets.env on
+      # purpose: a later env_file wins on duplicate keys, so the managed switch
+      # overrides any ANTHROPIC_* an operator left in secrets.env. Absent =
+      # Anthropic API (default). Same create-time semantics as the file above.
+      - path: ${HOME}/.ai-sandbox/profiles/${PROFILE}/backend.env
+        required: false
 
     depends_on:
       - egress-proxy
@@ -232,7 +241,8 @@ services:
   # ---------------------------------------------------------------------------
   # Reach from the agent at `http://ollama:11434`. Since Ollama 0.14.0 that
   # endpoint speaks the Anthropic Messages API, so Claude Code itself can run
-  # against it (ANTHROPIC_BASE_URL in the profile's secrets.env) with every
+  # against it (`scripts/profile.sh <p> backend ollama --model <m>`, which
+  # writes the profile's backend.env) with every
   # control this repo owns — deny lists, the hook engine, seccomp, egress —
   # still in place. See work/0023.
   #
@@ -289,6 +299,12 @@ services:
       # recommendations). On sandbox-internal that already dies with "network is
       # unreachable" — correct, but by accident. This states the intent.
       - OLLAMA_NO_CLOUD=true
+      # Default context window for every loaded model. Ollama's server default
+      # is 4096, and a Claude Code request carries a system prompt well past
+      # that — the server would silently truncate the head of every turn.
+      # Ollama's own Claude Code guidance says at least 32K. Costs KV-cache
+      # VRAM proportionally; a model can still override it per request.
+      - OLLAMA_CONTEXT_LENGTH=32768
       # No OLLAMA_KEEP_ALIVE override: the 5-minute default is correct here.
       # One card is shared by every profile, so an idle profile must release
       # its VRAM rather than sit on it.
