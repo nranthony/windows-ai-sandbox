@@ -222,15 +222,115 @@ shared `.venv`, which just breaks the container's copy instead.
 ## Databases (opt-in siblings)
 
 ```bash
-COMPOSE_PROFILES=db-postgres scripts/profile.sh <profile> up    # or db-mongo / db-all
-scripts/profile.sh <profile> db-reset           # wipe postgres volume, fresh initdb
+scripts/profile.sh <profile> db enable postgres|mongo|all   # persist the default
+scripts/profile.sh <profile> up                             # now includes the sibling
+scripts/profile.sh <profile> db disable                     # stop starting it
+scripts/profile.sh <profile> db-reset            # wipe postgres volume, fresh initdb
 ```
 
 Credentials: copy `sandbox_templates/common/db.env.template` to
 `~/.ai-sandbox/profiles/<profile>/db.env` and fill in. The agent reaches them
 at `postgres:5432` / `mongo:27017` (static IPs via extra_hosts).
-NOTE: a plain `up` does NOT start the DB siblings — the `COMPOSE_PROFILES`
-prefix is required every time.
+
+NOTE: `db enable` **persists** the choice (a token in the profile's
+`compose-profiles` file, which is a comma list shared with `ollama`), so a plain
+`up` starts the sibling from then on. `COMPOSE_PROFILES=...` in the environment
+is a one-shot override for a single command, not the normal route.
+
+## Local inference (Ollama sibling)
+
+An air-gapped Ollama per profile, on `sandbox-internal` only. The agent reaches
+it at `http://ollama:11434` (static IP `.40` via `extra_hosts`, and in `NO_PROXY`
+so it goes direct rather than through Squid). The sibling itself has **no
+outbound path at all**: no default route off the internal network, no proxy
+variables, no published port. It cannot pull at runtime, and it cannot phone
+home.
+
+```bash
+scripts/profile.sh <profile> ollama enable      # persist the `ollama` compose token
+scripts/profile.sh <profile> up                 # starts ollama-<profile>
+scripts/profile.sh <profile> ollama status      # persisted default + container state
+scripts/profile.sh <profile> ollama disable
+scripts/profile.sh health                       # no profile arg; covers ollama-<p>
+                                                # like the DB siblings
+```
+
+`just ollama <profile> ...` is the alias.
+
+### Models come in host-side, never from inside
+
+```bash
+scripts/profile.sh <profile> ollama pull qwen3-coder
+scripts/profile.sh <profile> ollama list
+scripts/profile.sh <profile> ollama create <name> -f <Modelfile>   # local GGUF
+scripts/profile.sh <profile> ollama rm <model>
+```
+
+These run a `--rm` container on Docker's **default bridge** with the store
+mounted read-write — a host-side operator action *outside* the sandbox boundary,
+the same class as `docker pull`. The agent has no docker socket, so it can never
+invoke them. Each pull appends to `pull.log`.
+
+The store is **shared by every profile** at `~/.ai-sandbox/models/ollama/`
+(`manifests/`, `blobs/`, `pull.log`) to avoid duplicating multi-GB blobs, and it
+is mounted **read-only** at `/models` in every running sibling. Read-only is what
+makes sharing safe: Ollama's API has create/delete/copy/blob-upload, so a shared
+writable store would let profile A plant a Modelfile system prompt that profile B
+then runs.
+
+GPU is the same wiring the agent gets, and only from the WSL overlay
+(`/dev/dxg`, `/usr/lib/wsl`); bare Linux runs it CPU-only. There is no
+`OLLAMA_KEEP_ALIVE` override — Ollama's 5-minute default releases the card when
+a profile goes idle, which matters on one 12 GB GPU shared by every profile.
+
+### Pointing Claude Code at it (per profile)
+
+Claude Code has a documented "LLM gateway" path: point `ANTHROPIC_BASE_URL` at
+anything speaking the Messages API. Ollama ≥ 0.14.0 does. The switch lives in
+`~/.ai-sandbox/profiles/<profile>/secrets.env` — **not** in the settings
+template, whose `env` block is sandbox-owned and overwritten on every `up`
+([ADR-0007](../../docs/adr/0007-policy-templates-are-source-of-truth-for-every-agent.md)):
+
+```sh
+# Ollama sibling
+ANTHROPIC_BASE_URL=http://ollama:11434
+ANTHROPIC_AUTH_TOKEN=ollama
+ANTHROPIC_API_KEY=                      # present AND empty — see the template
+ANTHROPIC_DEFAULT_OPUS_MODEL=qwen3-coder
+ANTHROPIC_DEFAULT_SONNET_MODEL=qwen3-coder
+ANTHROPIC_DEFAULT_HAIKU_MODEL=qwen3-coder
+
+# OpenRouter (openrouter.ai is already allowlisted — nothing to open)
+ANTHROPIC_BASE_URL=https://openrouter.ai/api
+ANTHROPIC_AUTH_TOKEN=<openrouter key>
+ANTHROPIC_API_KEY=
+```
+
+`env_file` is read only at container CREATE, so after editing:
+`scripts/profile.sh <profile> recreate`. A plain `up` will not re-read it.
+`verify` prints which backend the profile is on.
+
+Caveats, all documented rather than assumed:
+
+- Anthropic documents the gateway mechanism but names neither vendor; Ollama and
+  OpenRouter each document the recipe themselves.
+- A non-first-party base URL turns MCP tool search off by default, makes Remote
+  Control and server-managed settings unavailable, and passes model IDs through
+  unvalidated.
+- Community measurements put local-model edit accuracy around 70–80 % against
+  ~98 % for Sonnet. OpenRouter's own caveat is that Claude Code is optimised for
+  Anthropic models.
+- Ollama recommends **≥32K context** (64K for large repos); the aliases must
+  name a model that has actually been pulled.
+- Open issue `ollama/ollama#13949` — Claude Code calls
+  `/v1/messages/count_tokens`, Ollama 404s, and the server was reported to wedge
+  afterwards. **Measured 2026-09-03 against the pinned 0.33.3 image: the
+  endpoint still 404s, the server does not wedge**, and a `claude -p` session
+  completed four `/v1/messages` round-trips against `qwen3:0.6b`.
+
+**What does not change:** every control here is on the harness, not the model —
+deny lists, the hook engine, seccomp, the egress allowlist. Swapping the model
+underneath changes none of them.
 
 ## Ephemeral one-shot container
 

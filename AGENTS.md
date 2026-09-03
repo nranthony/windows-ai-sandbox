@@ -337,7 +337,7 @@ Where a piece of state lives decides whether it survives `docker rm`. The rule:
 |---|---|---|
 | Source code | host bind mount, in git | yes |
 | Python env | `.venv` inside the workspace | yes |
-| Models / large data | host dir, gitignored | yes |
+| Models / large data (Ollama store: shared `~/.ai-sandbox/models/ollama`, mounted read-only — the runtime never writes weights) | host dir, gitignored | yes |
 | DB data | named volume | yes |
 | pip / apt / HF caches | writable layer — disposable by design | no |
 
@@ -417,6 +417,7 @@ scripts/profile.sh list
 scripts/profile.sh build --refresh-ai        # bump AI CLIs (tail layer only)
 scripts/with-egress.sh <p> --with pypi -- '<cmd>'   # temporary egress widening
 scripts/profile.sh <p> deps [--osv]           # dependency posture (host-side, read-only)
+scripts/profile.sh <p> ollama enable|pull <model>|status   # local inference sibling (host-side ingest)
 scripts/docker-gc.sh --dry-run               # host Docker hygiene (see above)
 ```
 

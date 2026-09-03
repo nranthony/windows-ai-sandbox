@@ -28,8 +28,10 @@ rootless Docker (userns: container UID 0 ↔ host UID 1000)
   └─ per profile:
       ├─ ai-sandbox-<profile>    (agent; /workspace = ~/repo/<profile>/)
       ├─ egress-proxy-<profile>  (Squid; domain allowlist is the only way out)
-      ├─ postgres-<profile>      (opt-in via COMPOSE_PROFILES=db-postgres)
-      └─ mongo-<profile>         (opt-in via COMPOSE_PROFILES=db-mongo)
+      ├─ postgres-<profile>      (opt-in via `profile.sh <p> db enable postgres`)
+      ├─ mongo-<profile>         (opt-in via `profile.sh <p> db enable mongo`)
+      └─ ollama-<profile>        (opt-in via `profile.sh <p> ollama enable`; local
+                                  inference, sandbox-internal only, no egress at all)
 ```
 
 The security boundary is identical on both substrates: it is a property of
@@ -45,7 +47,9 @@ See `sandbox-hardening-package.md` §4 and `docs/compose-network-ipam.md`.
   per-profile octet allocated by `profile.sh`) — agent-only, no direct internet.
 - `sandbox-external` — Squid's outbound side only.
 - DNS sinkholed (`dns: [127.0.0.1]`) on the agent; internal names resolved via
-  `extra_hosts` with static IPs (`egress-proxy` .10, `postgres` .20, `mongo` .30).
+  `extra_hosts` with static IPs (`egress-proxy` .10, `postgres` .20, `mongo` .30,
+  `ollama` .40 — the first HTTP sibling, so it is also in the agent's `NO_PROXY`,
+  reached direct at `http://ollama:11434` rather than through Squid).
   This closes the DNS-exfil side channel that `internal: true` alone does NOT close.
 - Removing `internal: true` turns the proxy into a suggestion. Never do it.
 - **`proxy/` is bind-mounted as a DIRECTORY** (`./proxy:/etc/squid/host:ro`), not
@@ -89,6 +93,19 @@ See `sandbox-hardening-package.md` §4 and `docs/compose-network-ipam.md`.
 └── db.env             (optional; postgres/mongo credentials — see
                         sandbox_templates/common/db.env.template)
 ```
+
+Not per profile — one store, shared by every profile's Ollama sibling:
+
+```
+~/.ai-sandbox/models/ollama/     (manifests/, blobs/, pull.log — OLLAMA_MODELS root)
+```
+
+Mounted **read-only** at `/models` in every `ollama-<profile>`, and written only
+by the host-side helper (`profile.sh <p> ollama pull|create|rm`), which runs a
+`--rm` container outside the sandbox boundary. Read-only is the reason sharing is
+safe: Ollama's API has create/delete/copy/blob-upload, so a shared *writable*
+store would let profile A plant a Modelfile system prompt that profile B then
+runs. Weights are large data — host bind mount, survives `docker rm`.
 
 ## Security posture
 
