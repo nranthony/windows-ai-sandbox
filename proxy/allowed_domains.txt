@@ -437,6 +437,27 @@ api.grants.gov
 api.staging.grants.gov
 api.simpler.grants.gov
 
+# --- Company job boards / careers pages [job-boards] ---
+# Public job listings on employers' own careers portals, for reading role
+# descriptions and requirements. Read-only HTML, no auth, no API key.
+# Intended to collect a handful of employers whose postings are plain,
+# fetchable pages; add hosts here as they come up.
+#
+# PINNED HOSTS ONLY, and here that matters more than usual: most of these are
+# multi-tenant ATS SaaS (iCIMS, Workday, Greenhouse, Lever), so `.icims.com`
+# would not open "Emory's careers page" — it would open EVERY iCIMS customer's
+# portal, i.e. an arbitrary-content host under a vendor we don't control (M3).
+# One tenant subdomain per line, never the parent.
+#
+# HOW A PAGE ACTUALLY GETS READ: `curl`/`wget` are denied at permissions.deny,
+# so this entry serves the WebFetch tool (scoped per repo) and any HTTP client
+# a human drives in an attached shell. The `webfetch` broker does NOT need
+# these lines — it reads through a vendor's host, not the target's — so if the
+# only route in use is `webfetch --via ...`, this block buys nothing.
+#
+# staff-emory.icims.com — Emory University staff careers portal (iCIMS-hosted).
+staff-emory.icims.com
+
 # --- Google Fonts [google-fonts] ---
 # Web-dev font pulls. fonts.googleapis.com serves the CSS API
 # (@import/link href); fonts.gstatic.com serves the woff2 font files the
