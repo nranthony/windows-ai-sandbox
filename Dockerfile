@@ -686,7 +686,48 @@ RUN uv python install 3.12 3.13 \
 #
 # In-container upgrades are impossible by design (`uv tool install` is denied to
 # the agent) — bumps are host-side: vendor, `profile.sh build`, then recreate.
+#
+# ---------- paperbridge — vendored literature CLI (OPTIONAL payload) ----------
+# work/0026. Same door, same conditional shape, same refusal-on-ambiguity as
+# myclickup above — installed in the SAME `RUN` deliberately, see "ONE RUN".
+#
+# THE FIRST VENDORED PAYLOAD WITH RUNTIME DEPENDENCIES. myclickup's zero-dep
+# invariant is why its install could be verified with `--network none`;
+# paperbridge cannot be. The precedent for a dependency-carrying `uv tool
+# install` is weasyprint (~:193, thirteen packages in /opt/uv/tools) — what is
+# new is that the payload is VENDORED, so its resolution happens here, at build
+# time, against floors this repo did not write. Hence the next two blocks.
+#
+# PINNED, BECAUSE `uv tool install` RE-RESOLVES. It reads the wheel's `>=`
+# floors from PyPI and never sees paperbridge's own uv.lock. Unpinned,
+# `bibtexparser>=1.4` resolves to 2.0.0 — which HAS wheels, so Gate 3 is
+# satisfied, the build goes GREEN, and every BibTeX feature breaks at runtime
+# because 2.x removed the v1 API the code uses. A green build is the failure
+# mode, which is why `-c` is not optional and why the post-install assertions
+# below check the GRAPH and not just the exit code.
+# `sandbox_templates/wheels-host/paperbridge-constraints.txt` is generated from
+# the member's uv.lock at the PUBLISHED source_commit; `vendor-tools.sh --check`
+# fails if it goes stale against VENDORED.lock.
+#
+# TWO HOST-BUILT WHEELS, BECAUSE GATE 3 HOLDS. bibtexparser 1.4.4 and sgmllib3k
+# 1.0.0 publish NO wheel on PyPI, so under `no-build = true` they cannot install
+# at all. Both are built host-side and supplied via `--find-links` rather than
+# weakening the gate — uv's `no-build-package` is a deny-list, so "allow only
+# this one" is inexpressible. Their sha256 is checked from SHA256SUMS BEFORE the
+# install, which is where content verification lives for them: `uv tool install`
+# has no `--require-hashes` (measured, uv 0.12.5), so a hash-bearing constraints
+# file would buy nothing.
+#
+# ONE RUN FOR BOTH PAYLOADS, and that is a fix rather than a tidy-up. This block
+# ends by deleting /tmp/wheels, which is required — the myclickup wheel is
+# private and must not persist in a layer. A SECOND `RUN` placed after it would
+# therefore find an empty directory, take the "no vendored wheel — skipping"
+# branch, and report success: a green build that installed nothing. Keeping the
+# two installs in one layer makes that unrepresentable. The cost is that a
+# paperbridge bump re-runs the myclickup install, which is a 53 KB zero-dep
+# wheel — cheaper than the failure mode it removes.
 COPY sandbox_templates/wheels/ /tmp/wheels/
+COPY sandbox_templates/wheels-host/ /tmp/wheels-host/
 RUN set -eu; \
     n="$(find /tmp/wheels -maxdepth 1 -name 'myclickup-*.whl' | wc -l)"; \
     if [ "$n" -gt 1 ]; then \
@@ -698,7 +739,29 @@ RUN set -eu; \
     else \
       echo "myclickup: no vendored wheel — skipping (run: just vendor-tools)"; \
     fi; \
-    rm -rf /tmp/wheels
+    n="$(find /tmp/wheels -maxdepth 1 -name 'paperbridge-*.whl' | wc -l)"; \
+    if [ "$n" -gt 1 ]; then \
+      echo "paperbridge: $n wheels in sandbox_templates/wheels/ — refusing to guess" >&2; \
+      exit 1; \
+    elif [ "$n" -eq 1 ]; then \
+      whl="$(find /tmp/wheels -maxdepth 1 -name 'paperbridge-*.whl')"; \
+      c=/tmp/wheels-host/paperbridge-constraints.txt; \
+      [ -f "$c" ] || { echo "paperbridge: wheel vendored but $c is missing — refusing to install unpinned (work/0026)" >&2; exit 1; }; \
+      awk '/^wheel  *=/{f=$3} /^wheel_sha256  *=/{print $3"  "f}' \
+        /tmp/wheels-host/SHA256SUMS > /tmp/wheels-host/.check; \
+      [ -s /tmp/wheels-host/.check ] || { echo "paperbridge: SHA256SUMS names no wheels — refusing" >&2; exit 1; }; \
+      (cd /tmp/wheels-host && sha256sum -c .check); \
+      uv tool install -c "$c" -f /tmp/wheels-host \
+        "paperbridge[docs,bibtex,zotero] @ file://$whl"; \
+      paperbridge --version; \
+      for pin in bibtexparser-1.4.4 pyzotero-1.11.0 sgmllib3k-1.0.0; do \
+        [ -n "$(find /opt/uv/tools/paperbridge -type d -name "$pin.dist-info" -print -quit)" ] \
+          || { echo "paperbridge: expected $pin in the installed graph and it is not there — the constraints file did not take (work/0026)" >&2; exit 1; }; \
+      done; \
+    else \
+      echo "paperbridge: no vendored wheel — skipping (run: just vendor-tools)"; \
+    fi; \
+    rm -rf /tmp/wheels /tmp/wheels-host
 
 # ---------- runtime layout ---------------------------------------------------
 # Expected bind mounts (see docker-compose.yml):
