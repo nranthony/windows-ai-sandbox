@@ -450,6 +450,30 @@ assert "unlink asks" \
 assert "the word 'unlinked' does not ask" \
   '{"tool_name":"Bash","tool_input":{"command":"echo unlinked the thing"}}' pass
 
+printf "\n-- ask tier: paperbridge zotero-delete (work/0026) --\n"
+# The first rule about a REMOTE deletion rather than a local file. The static
+# `ask` entry in both policy templates is not enough on its own: under agy a
+# plain `ask` is cached as a permanent Always-Allow grant, which is what the agy
+# assertions below are really testing. On the claude side the rule additionally
+# turns a headless or subagent invocation into a deny carrying the reason.
+assert "paperbridge zotero-delete asks  <-- LOCK" \
+  '{"tool_name":"Bash","tool_input":{"command":"paperbridge zotero-delete ABCD1234"}}' ask "paperbridge-zotero-delete"
+assert "it asks in a chained command too, not just first position" \
+  '{"tool_name":"Bash","tool_input":{"command":"echo hi; paperbridge zotero-delete K1"}}' ask "paperbridge-zotero-delete"
+# --dry-run is the inert form and is allow-listed; a rule that swallowed it
+# would make the safe way to inspect a delete cost a prompt, which trains people
+# to skip the safe way. Same reasoning as the myclickup --dry-run allow entry.
+assert "paperbridge --dry-run zotero-delete does NOT ask" \
+  '{"tool_name":"Bash","tool_input":{"command":"paperbridge --dry-run zotero-delete ABCD1234"}}' pass
+# Scope: only this one command. The other seven paperbridge writes are additive
+# or reversible and stay on the static `ask` entry alone.
+assert "paperbridge zotero-list does not ask" \
+  '{"tool_name":"Bash","tool_input":{"command":"paperbridge zotero-list"}}' pass
+assert "paperbridge zotero-update does not reach this rule" \
+  '{"tool_name":"Bash","tool_input":{"command":"paperbridge zotero-update K1 --title x"}}' pass
+assert "the word zotero-delete inside a message does not ask" \
+  '{"tool_name":"Bash","tool_input":{"command":"echo running paperbridge zotero-delete soon"}}' pass
+
 printf "\n-- ask tier: plain rm, and the carve-outs that keep it usable --\n"
 assert "rm of a source file asks  <-- LOCK" \
   '{"tool_name":"Bash","tool_input":{"command":"rm /workspace/p/main.py"}}' ask "rm-file"
@@ -675,6 +699,15 @@ agy_assert "git branch -D force_asks" \
   '{"toolCall":{"name":"run_command","args":{"CommandLine":"git branch -D old-work"}}}' ask "git-branch-delete"
 agy_assert "unlink force_asks" \
   '{"toolCall":{"name":"run_command","args":{"CommandLine":"unlink /workspace/p/a.txt"}}}' ask "unlink"
+agy_assert "paperbridge zotero-delete force_asks under agy  <-- LOCK" \
+  '{"toolCall":{"name":"run_command","args":{"CommandLine":"paperbridge zotero-delete ABCD1234"}}}' ask "paperbridge-zotero-delete"
+# THE POINT OF THE RULE: without it this command would sit on the static `ask`
+# entry alone, and agy caches that approval permanently — one prompt, then
+# permanent Zotero deletion for the life of the profile.
+agy_assert "paperbridge --dry-run zotero-delete allows under agy" \
+  '{"toolCall":{"name":"run_command","args":{"CommandLine":"paperbridge --dry-run zotero-delete ABCD1234"}}}' pass
+agy_assert "paperbridge zotero-list allows under agy" \
+  '{"toolCall":{"name":"run_command","args":{"CommandLine":"paperbridge zotero-list"}}}' pass
 # The same negatives as the claude side. `command(git checkout)` and
 # `command(git stash)` are on agy's static ALLOW list, so a rule that fired on
 # navigation would be narrowing a grant people use constantly.

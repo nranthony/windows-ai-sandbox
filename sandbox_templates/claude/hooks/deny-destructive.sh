@@ -733,4 +733,34 @@ RM_SEGMENTS
   fi
 fi
 
+# 23. paperbridge-zotero-delete (ASK) — the first rule here about a REMOTE
+#     deletion rather than a local file, and the first driven by an agent's
+#     permission CACHE rather than by the verb alone (work/0026 D5).
+#
+#     WHY A HOOK RULE WHEN A STATIC `ask` ENTRY ALREADY EXISTS. Both policy
+#     templates carry `paperbridge zotero-delete` in `ask`. For claude that
+#     re-prompts and would be enough interactively. For antigravity it is NOT:
+#     agy caches a plain `ask` approval as a permanent Always-Allow grant, so
+#     one approval would make permanent Zotero deletion permanent for that
+#     profile. emit_ask sends agy `force_ask`, which ignores that cache. This is
+#     the same asymmetry the eight myclickup writes still live under (work/0004
+#     Future scope 1) — the difference is what the command destroys.
+#
+#     WHAT IT DESTROYS. The Zotero Web API's DELETE erases; it does not trash.
+#     There is no trash to empty and no undo (paperbridge ADR-0004, which also
+#     records that a live test against a scratch group library would settle it
+#     beyond doubt). The tool snapshots to JSON first and sends nothing if the
+#     snapshot fails — a real fence, but the TOOL's fence, not this sandbox's,
+#     and a fence the sandbox cannot verify from here.
+#
+#     SCOPE IS DELIBERATELY NARROW. Only `zotero-delete`. The other seven
+#     paperbridge writes are additive or reversible against the library and stay
+#     on the static `ask` entry alone. Anchored at a command position and
+#     requiring the subcommand in FIRST position, so `paperbridge --dry-run
+#     zotero-delete …` — the inert form — does not reach this prompt, matching
+#     how the myclickup --dry-run allow entry is kept usable.
+if match '(^|[;&|(])[[:space:]]*paperbridge[[:space:]]+zotero-delete\b'; then
+  emit_ask "paperbridge-zotero-delete" "this deletes from Zotero through the Web API, which ERASES rather than trashing — there is no trash to restore from and no undo. Name the exact item or collection keys and which library (user or group) they are in, say how you established they are the right ones, and wait for confirmation. The tool writes a JSON snapshot first, but that is a copy of what it is about to destroy, not a way to put it back."
+fi
+
 emit_pass

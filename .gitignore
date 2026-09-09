@@ -41,6 +41,10 @@ AGENTS.local.md
 .conventions-dir.local
 # same, for the myclickup checkout (vendor-tools.sh --check content diff)
 .myclickup-dir.local
+# same, for the paperbridge checkout (work/0026). One pointer per member repo:
+# vendor-tools.sh `member_pointer` maps a manifest source_repo to its line here,
+# and a source_repo with no mapping degrades the content half to HASH-ONLY.
+.paperbridge-dir.local
 # the depot CHANNEL ROOT — the directory holding manifest.toml, dist/ and bin/
 # (scripts/vendor-tools.sh, ADR-0014). This is the channel, not a member repo,
 # and it does NOT supersede the two pointers above: the channel supplies the
@@ -61,6 +65,21 @@ sandbox_templates/skills/myclickup/
 # but keep the directory in the Docker build context: a COPY of a missing
 # directory fails the build for everyone (see the myclickup block in Dockerfile)
 !sandbox_templates/wheels/.gitkeep
+#
+# paperbridge (work/0026) is DELIBERATELY ABSENT from the skills line above, and
+# the asymmetry is the point rather than an oversight: nranthony/paperbridge is
+# PUBLIC, so the disclosure argument that gitignores skills/myclickup/ does not
+# apply and its SKILL.md is tracked. The wheel rule above is blanket by design
+# and still covers it — wheels stay out of git because VENDORED.lock is the
+# committed record of what an image contained, not because of who may read them.
+#
+# Host-built wheels for packages PyPI publishes as sdist only (Gate 3 refuses to
+# build those at image time). Not channel artifacts: kept OUT of wheels/ so they
+# never enter vendor-tools.sh's rotation or the Dockerfile's per-artifact "two
+# wheels is a refusal" count. Their sha256 is recorded beside them and checked
+# in the Dockerfile before install. Regenerate per work/0026 plan.md P7.
+sandbox_templates/wheels-host/*.whl
+!sandbox_templates/wheels-host/.gitkeep
 
 # native plan-mode drafts (plansDirectory in .claude/settings.json) — drafts, not the
 # durable artifact; a draft becomes durable by promotion to work/NNNN-slug/plan.md
