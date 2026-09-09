@@ -398,13 +398,30 @@ developer.nvidia.com
 # storage.googleapis.com
 
 # --- Academic / citation tooling [citation-tools] ---
-# Egress for a citation-tooling workload (example project profile).
-# Read-only academic/citation APIs + search/tracing + preprint servers. Every
-# citation-client endpoint is listed, since any client may be exercised.
-# Overlaps already covered elsewhere and NOT repeated here: api.anthropic.com
-# [claude], api.openai.com [openai], github.com/codeload.github.com [git],
-# pypi/pythonhosted [pypi], api.tavily.com [web-read] (the citation clients'
-# Tavily search shares the broker's entry — moved there 2026-08-25).
+# Egress for a citation-tooling workload (example project profile), and since
+# 2026-09-09 for the vendored `paperbridge` CLI (work/0026).
+# Read-only academic/citation APIs + search/tracing + preprint servers, PLUS the
+# document-download hosts below. Overlaps already covered elsewhere and NOT
+# repeated here: api.anthropic.com [claude], api.openai.com [openai],
+# github.com/codeload.github.com [git], pypi/pythonhosted [pypi],
+# api.tavily.com [web-read] (the citation clients' Tavily search shares the
+# broker's entry — moved there 2026-08-25).
+#
+# THE DIRECTION RULE, and why the download half is listed separately.
+# paperbridge carries its OWN download allowlist (`src/paperbridge/_hosts.py`,
+# its ADR-0002) and refuses an unlisted host BEFORE the request — that fence is
+# what lets `download` sit in `allow` and run unprompted. This list must stay a
+# SUPERSET of it. Narrower is the failure: the tool believes a host is
+# fetchable, tries, and the refusal arrives as a connection error
+# indistinguishable from a paper that does not exist — the exact confusion the
+# tool's own fence exists to prevent. Wider is harmless: the tool still refuses.
+# Measured 2026-09-09, before the download block below was added: 13 of 13 API
+# hosts were already here and 5 of 12 download hosts were NOT, so the list was
+# narrower in five places and nothing said so.
+#
+# Apex and `www.`/`export.` forms are spelled out rather than wildcarded, which
+# mirrors the tool's own rule and its reason: `*.arxiv.org` would also allow
+# `arxiv.org.example.net`.
 #
 # LLM / tracing:
 generativelanguage.googleapis.com
@@ -425,6 +442,15 @@ api.biorxiv.org
 www.biorxiv.org
 www.medrxiv.org
 chemrxiv.org
+# Document-download hosts — paperbridge DOWNLOAD_HOSTS, work/0026 (2026-09-09).
+# The other seven entries of that set are already listed above; these five were
+# the gap. `chemrxiv.org` above is the one deliberate asymmetry in the safe
+# direction: allowed here, absent from the tool's list, so the tool refuses it.
+www.ncbi.nlm.nih.gov
+pmc.ncbi.nlm.nih.gov
+www.arxiv.org
+biorxiv.org
+medrxiv.org
 
 # --- Grants.gov REST APIs [grants-gov] ---
 # Federal grants search/opportunity APIs for a grant-admin research
@@ -621,8 +647,8 @@ blender.org
 # which opens, runs one command, and restores the file verbatim. A hand or
 # dashboard edit has no automatic close — which is why this note carries a date.
 # ────────────────────────────────────────────────────────────────────────────
-huggingface.co
-us.aws.cdn.hf.co
+# huggingface.co
+# us.aws.cdn.hf.co
 
 # # --- ComfyUI model weights — long tail [comfyui-models-extra] ---
 # # The remaining ~9% of the curated list: dl.fbaipublicfiles.com is Meta (SAM,
