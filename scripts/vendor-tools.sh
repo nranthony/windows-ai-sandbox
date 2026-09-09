@@ -325,6 +325,17 @@ do_vendor() {
 
   write_lock "$flat" "$root"
   ok "vendored from channel; wrote ${LOCK#"$REPO_ROOT"/}"
+
+  # Vendoring is the moment a pin set goes stale, so say so HERE rather than
+  # leaving it for the next `--check`. A warning, not a failure: the vendor
+  # itself succeeded and reverting it would be the wrong repair.
+  if ! check_pins "$flat" >/dev/null 2>&1; then
+    printf '\n\033[1;33m[WARN]\033[0m  a pinned artifact moved — its constraints file is now STALE.\n'
+    check_pins "$flat" >/dev/null || true   # re-run for the detail on stderr
+    printf '       Regenerate it BEFORE building, or the image installs the new\n'
+    printf '       wheel against the old resolution. `--check` fails until you do.\n'
+  fi
+
   printf '\nNext: scripts/profile.sh build   (the image is not rebuilt by `up`)\n'
   printf 'Then: scripts/profile.sh <p> recreate   (per profile)\n'
 }
@@ -345,6 +356,7 @@ member_pointer() { # <source_repo> -> "<env-name> <pointer-file>"
   case "$1" in
     myclickup)            printf 'MYCLICKUP_DIR .myclickup-dir.local' ;;
     agentic-conventions)  printf 'CONVENTIONS_DIR .conventions-dir.local' ;;
+    paperbridge)          printf 'PAPERBRIDGE_DIR .paperbridge-dir.local' ;;
     *)                    printf '' ;;
   esac
 }
@@ -438,6 +450,63 @@ content_check() { # <flat>
   fi
 }
 
+# --- pinned-dependency stamps (work/0026) -------------------------------------
+#
+# An artifact with runtime dependencies needs its resolution PINNED, because
+# `uv tool install` re-resolves from PyPI against the wheel's `>=` floors and
+# never reads the producer's lock. Those pins live beside the host-built wheels
+# as `wheels-host/<artifact>-constraints.txt`, generated from the member's
+# uv.lock at the PUBLISHED source_commit.
+#
+# WHY THIS CHECK EXISTS. That file is derived from an upstream payload by a
+# route nothing else here watches. Re-vendor without regenerating it and every
+# existing check stays GREEN — the wheel hash matches, the content diff matches —
+# while the image installs a NEW wheel against an OLD pin set: a dependency the
+# bump added resolves free, and one it changed is held at the previous version.
+# That is precisely the "green summary printed over a check that never ran"
+# failure this repo has already been burned by, so the stamp is asserted rather
+# than remembered.
+#
+# GENERIC ON PURPOSE. It keys off the file existing, not off an artifact name,
+# so a second dependency-carrying artifact is covered the day its pins land. An
+# artifact with no constraints file is not a failure — most have no dependencies
+# — but it is COUNTED and said aloud, because "nothing to check" and "checked
+# nothing" must not print the same line.
+check_pins() { # <flat> ; returns non-zero on drift
+  local flat="$1" art want got file pinned=0 unpinned=0 bad=0
+  while read -r art; do
+    file="$TEMPLATES/wheels-host/$art-constraints.txt"
+    [[ -f "$file" ]] || { unpinned=$((unpinned+1)); continue; }
+    want="$(mf "$flat" "$art" source_commit)"
+    got="$(awk '/^#[[:space:]]*source_commit:/ {print $3; exit}' "$file")"
+    if [[ -z "$got" ]]; then
+      printf 'pins: %s — %s carries no `# source_commit:` stamp, so it cannot be
+       checked against the channel. Regenerate it (the header names the command).\n' \
+        "$art" "${file#"$REPO_ROOT"/}" >&2
+      bad=$((bad+1)); continue
+    fi
+    if [[ "$got" != "$want" ]]; then
+      printf 'pins: %s — STALE PIN SET
+       %s
+       stamped:  %s
+       channel:  %s
+       the artifact was re-vendored without regenerating its pins, so the image
+       would install the NEW wheel against the OLD resolution. Every other check
+       here passes in this state, which is why this one exists. The file header
+       names the exact regeneration command.\n' \
+        "$art" "${file#"$REPO_ROOT"/}" "${got:0:12}…" "${want:0:12}…" >&2
+      bad=$((bad+1)); continue
+    fi
+    pinned=$((pinned+1))
+  done < <(cut -f1 <<<"$flat" | sort -u)
+
+  # Same rule as content_check's closing line: say what was not covered, so
+  # partial coverage never reads as full.
+  printf 'pins: %d artifact(s) pinned and current, %d with no pin set (no runtime deps)\n' \
+    "$pinned" "$unpinned"
+  [[ "$bad" -eq 0 ]]
+}
+
 # --- check -------------------------------------------------------------------
 # Is what we consumed still what the channel publishes? Compares VENDORED.lock
 # against a freshly hashed manifest. This is the drift half; the content half
@@ -481,6 +550,9 @@ do_check() {
   fi
   ok "VENDORED.lock matches the channel manifest ($(grep -vc '^#' "$LOCK") artifact rows)"
   content_check "$flat"
+  check_pins "$flat" || die "regenerate the stale pin set(s) above, then re-run.
+       Do NOT clear this by editing the stamp: the stamp is the claim, the pins
+       are what the image installs, and only regenerating makes them agree."
 }
 
 # --- permissions (plan §5.4.7) -----------------------------------------------

@@ -22,9 +22,18 @@ by the next `just vendor-tools`.** Edit them upstream. Currently:
 |---|---|---|---|
 | `myconv` | plugin | `agentic-conventions` → `plugins/myconv/` | channel (`dist/plugins/myconv`) |
 | `myclickup` | skill beside a wheel | `myclickup` → `packaging/sandbox/SKILL.md` | channel (`dist/skills/myclickup`) |
+| `paperbridge` | skill beside a wheel | `paperbridge` → `packaging/sandbox/SKILL.md` | channel (`dist/skills/paperbridge`) |
 
-`myclickup`'s skill is pair-vendored with its wheel (ADR-0006 upstream) so the
-text can never describe a version the image does not have.
+`myclickup`'s and `paperbridge`'s skills are pair-vendored with their wheels
+(ADR-0006 upstream) so the text can never describe a version the image does not
+have.
+
+Unlike `myclickup`'s, **`paperbridge`'s skill is tracked in git** — the
+disclosure argument that gitignores `skills/myclickup/` does not apply, because
+nranthony/paperbridge is public. The wheels stay untracked either way:
+`VENDORED.lock` is the committed record of what an image contained. paperbridge
+is also the first vendored payload with runtime DEPENDENCIES, whose pins live in
+`../wheels-host/` — see work/0026 and AGENTS.md.
 
 **Sandbox-native** skills — `audit-sandbox`, `web-read` — are owned HERE. This
 repo is their source of truth, the channel never touches them, and editing them
