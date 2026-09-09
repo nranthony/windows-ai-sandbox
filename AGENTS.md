@@ -82,6 +82,23 @@ These files carry the sandbox's guarantees:
   through the door meant to check it. It verifies every hash **before copying
   anything**, asserts manifest paths stay inside the channel root, and invokes
   the channel's own `bin/dirhash.py` rather than reimplementing a tree hash.
+- `sandbox_templates/wheels-host/` — the second door, opened by work/0026 for
+  the first vendored payload with runtime dependencies. It holds two things and
+  both are load-bearing. `<artifact>-constraints.txt` PINS an artifact's whole
+  dependency graph, because `uv tool install` **re-resolves from PyPI and never
+  reads the producer's lock**: unpinned, paperbridge's `bibtexparser>=1.4`
+  resolves to 2.0.0, which *has* wheels, so Gate 3 is satisfied, **the build goes
+  green, and BibTeX breaks at runtime**. A green build is the failure mode, which
+  is why the Dockerfile asserts the installed GRAPH and not just the exit code.
+  The `.whl` files beside it are packages PyPI publishes as sdist only
+  (`bibtexparser`, `sgmllib3k`) — built host-side rather than weakening Gate 3,
+  since uv's `no-build-package` is a deny-list and "allow only this one" is
+  inexpressible. `SHA256SUMS` carries two hashes each and they answer different
+  questions: the **published sdist** hash is the provenance claim (stable, and
+  the same value in the producer's `uv.lock`), the **built wheel** hash is what
+  the Dockerfile gates on and legitimately changes on every rebuild. A changed
+  wheel hash with an unchanged sdist hash is an ordinary rebuild; a changed sdist
+  hash means the pinned release moved underneath you.
 - `sandbox_templates/bin/webfetch` — the **only** sanctioned route by which the
   agent reads the open web (`docs/web-read-broker.md`): every backend is a
   hosted reader whose exact API host is allowlisted, so the arbitrary-URL egress
@@ -96,7 +113,7 @@ Any change to them requires:
 3. Affected docs updated (ARCHITECTURE.md, `sandbox-hardening-package.md`).
 
 Hook edits additionally require
-`bash sandbox_templates/claude/hooks/deny-destructive.test.sh` (207/207). That
+`bash sandbox_templates/claude/hooks/deny-destructive.test.sh` (216/216). That
 script is now ONE engine serving TWO agents, selected by `--dialect=`, so a rule
 added for either protects both — and its two failure postures are deliberately
 OPPOSITE: claude fails **open** (its `permissions.deny` is underneath it),
@@ -193,7 +210,7 @@ releases). See [ADR-0005](docs/adr/0005-skill-templates-are-source-of-truth.md),
 extended to every agent's POLICY by
 [ADR-0007](docs/adr/0007-policy-templates-are-source-of-truth-for-every-agent.md).
 Edits to `scripts/vendor-tools.sh` require `bash scripts/vendor-tools.test.sh`
-(65/65, offline — no docker, no network, no real channel). It is the door every
+(76/76, offline — no docker, no network, no real channel). It is the door every
 vendored payload now enters through, so three of its assertions are regression
 locks, each proven to bite by mutation: **nothing is copied when any hash fails**
 (the gate runs over every artifact before the first file moves — a per-artifact
@@ -213,6 +230,16 @@ member's HEAD — otherwise the check reddens on an ordinary state); and **a
 prefix over-match counts as covered** in `--permissions` (`statuses` riding
 `status:*`), because a check that cries wolf on its first run is a check that
 gets ignored.
+Three more (work/0026) lock the PIN half, and it is invisible to every other
+check here: a `wheels-host/<artifact>-constraints.txt` carries a
+`# source_commit:` stamp, and **a stale stamp FAILS even though every hash
+matches and the content diff passes** — re-vendor without regenerating the pins
+and the image installs the NEW wheel against the OLD resolution while the whole
+suite stays green. An **unstamped** pin file fails too rather than being skipped
+(same posture as an unknown kind), and an artifact with **no** pin file is
+counted and said aloud rather than passing silently — "nothing to check" and
+"checked nothing" must not print the same line. `--check` enforces it; `vendor`
+warns at the moment the staleness is created, without failing the vendor itself.
 Edits to `sandbox_templates/bin/webfetch`, to any broker host in
 `proxy/allowed_domains.txt`, or to `sandbox_templates/common/secrets.env.template`
 require `bash scripts/webfetch.test.sh` (90/90, offline — no docker, no
