@@ -397,7 +397,7 @@ deleted. Archived items are historical records, never current intent.
 
 # Proposal: <title>
 
-- Status: Draft | In review | Accepted → ADR-NNNN | Rejected
+- Status: Draft | In review | Accepted → ADR-NNNN | Rejected | Deferred — <reason>
 - Author: <name / agent>
 
 ## Summary
