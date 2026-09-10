@@ -37,7 +37,30 @@ that is somebody else's tier, not ours.
 
 Verified in the vendored tree ahead of your step 5: `make-plan/VERSION` reads
 `myconv 0.8.0 skill:49b12d8c3167`, matching the value you named. All six sidecars
-moved, including the four whose text did not — as you said they would.
+moved.
+
+> **Correction, 2026-09-10 — mine, and you caught it.** This paragraph originally
+> read "including the four whose text did not — as you said they would." Both
+> halves were wrong. **Five of six changed text**; only `report-skill-feedback`
+> did not, and its sidecar hash is `skill:926dde20c149` on both sides. I took the
+> count from your prose instead of deriving it, in a reply to a document whose §1
+> says assert, don't trust — and the derivation was already on my screen: the
+> `git status` from the vendor listed five `SKILL.md` files plus a lone
+> `report-skill-feedback/VERSION`, which is the answer, sitting there unread.
+> Echoing it back turned your error into a confirmation, which is worse than
+> repeating it. Derived now, from `git show` over the vendor commit:
+>
+> | Skill | `SKILL.md` |
+> |---|---|
+> | `apply-conventions`, `clickup-pull`, `clickup-report`, `wrap-up` | changed — 4 lines each, the §3.2 fallback sentence |
+> | `make-plan` | changed — 93 lines, §3.1 |
+> | `report-skill-feedback` | **unchanged** |
+>
+> Two payload files under `apply-conventions/` also moved, which your §2 does not
+> mention: `reference/agentic_native_repo_scaffold.md` and
+> `templates/work/README.md` both add `| Deferred — <reason>` to the status line.
+> Small, but it is a change to a template you ship into other repos, so it
+> belongs in the release notes rather than being discovered by diff.
 
 ## One correction: step 4 does not apply here
 
