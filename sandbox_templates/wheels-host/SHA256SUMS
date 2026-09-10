@@ -1,0 +1,65 @@
+# Host-built wheels — integrity record. GENERATED, do not hand-edit.
+#
+# WHY THESE EXIST. Gate 3 (`no-build = true`, Dockerfile) refuses to build an
+# sdist at image time, because an sdist runs code at install. These two packages
+# publish NO wheel on PyPI, so under that gate they cannot install at all — and
+# both are reachable from paperbridge's baked extras:
+#
+#   bibtexparser 1.4.4  <- paperbridge[bibtex], and pyzotero 1.11.0
+#   sgmllib3k    1.0.0  <- pyzotero 1.11.0 -> feedparser 6.0.12
+#
+# Building them HERE keeps the gate intact. Weakening it was rejected: uv's
+# `no-build-package` is a deny-list, so "allow only this one" is inexpressible
+# (paperbridge ADR-0001 decision 4 reached the same conclusion independently).
+#
+# VERSIONS ARE PINNED AND THE PIN IS LOAD-BEARING. `bibtexparser` 2.x removed
+# the v1 API paperbridge uses (`load`/`loads`/`dump`, `.bibdatabase`,
+# `.bwriter`), and a plain `pip wheel bibtexparser` resolves 2.0.0 today. Build
+# what paperbridge-constraints.txt pins, never `latest`.
+#
+# TWO HASHES PER PACKAGE, AND THEY ANSWER DIFFERENT QUESTIONS.
+#   * sdist_sha256 is PUBLISHED — it is the value in paperbridge's uv.lock and
+#     on PyPI. It is the provenance claim: it says the bytes that were built
+#     came from the real release. Stable forever; verify the download with it.
+#   * wheel_sha256 is of the artifact built HERE. It is what the Dockerfile
+#     checks before installing, so a corrupted or swapped file in the build
+#     context is caught before it enters the image. It is NOT reproducible
+#     across rebuilds (a wheel zip carries timestamps), so rebuilding these
+#     legitimately changes it — update this file in the same commit. A changed
+#     wheel_sha256 with an UNCHANGED sdist_sha256 is an ordinary rebuild; a
+#     changed sdist_sha256 is not, and means the pinned release moved under you.
+#
+# REBUILD RECIPE (offline-verifiable at every step but the download):
+#
+#   # URLs and sdist hashes come from paperbridge's uv.lock at the published
+#   # source_commit — the same lock paperbridge-constraints.txt is generated
+#   # from, so the three files cannot disagree about a version.
+#   d=$(mktemp -d) && cd "$d"
+#   curl -fsSL -O <sdist url from uv.lock>
+#   sha256sum -c <<< "<sdist_sha256>  <file>.tar.gz"   # REFUSE to build on a mismatch
+#   tar xzf <file>.tar.gz && cd <pkg>-<ver>
+#   uv build --wheel --out-dir "$d/out"
+#   # then copy the .whl here and regenerate this file:
+#   #   sha256sum *.whl
+#
+# The wheels themselves are gitignored (.gitignore: wheels-host/*.whl) — this
+# file is the committed record of what the image was built against, exactly as
+# VENDORED.lock is for channel artifacts.
+
+
+[bibtexparser 1.4.4]
+sdist_sha256 = 093b6c824f7a71d3a748867c4057b71f77c55b8dbc07efc993b781771520d8fb
+sdist_url    = https://files.pythonhosted.org/packages/44/1c/577d3ce406e88f370e80a6ebf76ae52a2866521e0b585e8ec612759894f1/bibtexparser-1.4.4.tar.gz
+wheel        = bibtexparser-1.4.4-py3-none-any.whl
+wheel_sha256 = 1c0f37b713983fac4a50a24b6e4cb62a308226269bed2e3f521252ae8471f46f
+
+# sgmllib3k 1.0.0 — REMOVED 2026-09-10, and worth knowing why rather than just
+# that. It was never a paperbridge dependency: it arrived via
+# pyzotero -> feedparser <= 6.0.13, and it has never shipped a wheel, so under
+# Gate 3 it had to be built here. feedparser 6.0.14 replaced it with
+# `feedparser-sgmllib`, which DOES ship a wheel, and pyzotero asks only for
+# feedparser>=6.0.12 — so paperbridge's 0.3.0 re-lock raised the floor and the
+# package left the graph entirely. Found by myclickup's agent, verified against
+# PyPI before acting on it. This directory is down to ONE host-built wheel,
+# permanently. If a future lock reintroduces an sdist-only package, add it here
+# with both hashes and the same rebuild recipe.

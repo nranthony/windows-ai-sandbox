@@ -28,8 +28,10 @@ rootless Docker (userns: container UID 0 ↔ host UID 1000)
   └─ per profile:
       ├─ ai-sandbox-<profile>    (agent; /workspace = ~/repo/<profile>/)
       ├─ egress-proxy-<profile>  (Squid; domain allowlist is the only way out)
-      ├─ postgres-<profile>      (opt-in via COMPOSE_PROFILES=db-postgres)
-      └─ mongo-<profile>         (opt-in via COMPOSE_PROFILES=db-mongo)
+      ├─ postgres-<profile>      (opt-in via `profile.sh <p> db enable postgres`)
+      ├─ mongo-<profile>         (opt-in via `profile.sh <p> db enable mongo`)
+      └─ ollama-<profile>        (opt-in via `profile.sh <p> ollama enable`; local
+                                  inference, sandbox-internal only, no egress at all)
 ```
 
 The security boundary is identical on both substrates: it is a property of
@@ -45,7 +47,9 @@ See `sandbox-hardening-package.md` §4 and `docs/compose-network-ipam.md`.
   per-profile octet allocated by `profile.sh`) — agent-only, no direct internet.
 - `sandbox-external` — Squid's outbound side only.
 - DNS sinkholed (`dns: [127.0.0.1]`) on the agent; internal names resolved via
-  `extra_hosts` with static IPs (`egress-proxy` .10, `postgres` .20, `mongo` .30).
+  `extra_hosts` with static IPs (`egress-proxy` .10, `postgres` .20, `mongo` .30,
+  `ollama` .40 — the first HTTP sibling, so it is also in the agent's `NO_PROXY`,
+  reached direct at `http://ollama:11434` rather than through Squid).
   This closes the DNS-exfil side channel that `internal: true` alone does NOT close.
 - Removing `internal: true` turns the proxy into a suggestion. Never do it.
 - **`proxy/` is bind-mounted as a DIRECTORY** (`./proxy:/etc/squid/host:ro`), not
@@ -86,9 +90,25 @@ See `sandbox-hardening-package.md` §4 and `docs/compose-network-ipam.md`.
 │                       NOT mounted into any container; the proxy's own
 │                       access.log is tmpfs and dies with it)
 ├── subnet-octet       (this profile's 172.30.<octet>.0/24 allocation)
-└── db.env             (optional; postgres/mongo credentials — see
-                        sandbox_templates/common/db.env.template)
+├── db.env             (optional; postgres/mongo credentials — see
+│                       sandbox_templates/common/db.env.template)
+├── secrets.env        (optional; operator-owned API keys, chmod 600, never rewritten by a script)
+└── backend.env        (optional; MANAGED by `profile.sh <p> backend` — the Claude Code
+                        endpoint switch, injected after secrets.env; absent = Anthropic API)
 ```
+
+Not per profile — one store, shared by every profile's Ollama sibling:
+
+```
+~/.ai-sandbox/models/ollama/     (manifests/, blobs/, pull.log — OLLAMA_MODELS root)
+```
+
+Mounted **read-only** at `/models` in every `ollama-<profile>`, and written only
+by the host-side helper (`profile.sh <p> ollama pull|create|rm`), which runs a
+`--rm` container outside the sandbox boundary. Read-only is the reason sharing is
+safe: Ollama's API has create/delete/copy/blob-upload, so a shared *writable*
+store would let profile A plant a Modelfile system prompt that profile B then
+runs. Weights are large data — host bind mount, survives `docker rm`.
 
 ## Security posture
 
@@ -106,6 +126,7 @@ See `sandbox-hardening-package.md` §4 and `docs/compose-network-ipam.md`.
 | Agent tools (`agy`) | `sandbox_templates/antigravity/antigravity-settings.json` carries the same deny set in agy's `command(...)` grammar, diffed against Claude's by `agent-policy.test.sh`. The **static** list is the load-bearing layer here: a workspace `.agents/hooks.json` outranks the global hook and can disable it by name (measured), while nothing in a workspace reaches `settings.json`. Same hook engine, `--dialect=antigravity`, fail-CLOSED. [ADR-0006](docs/adr/0006-antigravity-is-two-layer-like-claude.md) |
 | Dependencies | Registries **unreachable by default** ([ADR-0003](docs/adr/0003-strict-egress-default.md)); installs go through `scripts/with-egress.sh`, which pre-flights named packages against OSV, refuses to open on a live `MAL-` record, and appends an audit record per window. Resolution is quarantined — `min-release-age=7` (npm, `/usr/etc/npmrc`) and `minimum-release-age=10080` min (pnpm), so nothing published this week resolves. Install scripts blocked (`allow-scripts` empty; pnpm 10 blocks by default). Python is **wheels-only** ([ADR-0004](docs/adr/0004-python-wheels-only.md)) — `no-build=true` in `/etc/uv/uv.toml` and `only-binary=:all:` in `/etc/pip.conf`, since an sdist runs `setup.py` at install time; both are set because uv reads no pip config. `verify` asserts all of it; drift fails |
 | Vendored tools | `myclickup` (private ClickUp CLI) is installed from a wheel vendored into `sandbox_templates/wheels/` by `scripts/vendor-tools.sh` from the depot channel (ADR-0014) — zero runtime deps, so no build-time network and nothing an agent could be asked to repair in a container where every installer is denied. The payload is **gitignored** (this repo public, that one private, and a `py3-none-any` wheel is a zip of its source), so the `Dockerfile` copies the *directory* and installs conditionally: a clone without the payload builds fine and simply has no `myclickup`. Its agent skill ships with the wheel, not hand-copied, so it cannot describe a version the image doesn't have. Permission posture: the 18 reads allowed; of the 11 writes (0.7.0), three — `comment`/`set-status`/`update` — were promoted to `allow` by owner sign-off on 2026-08-24 and the other eight prompt ([docs/permissions-model.md](docs/permissions-model.md)) |
+| Vendored tools (with deps) | `paperbridge` (public literature CLI) is the second channel payload and the **first with runtime dependencies**, so it breaks the invariant the row above rests on. Same door (`vendor-tools.sh`, same conditional `Dockerfile` block, same refusal on two wheels), but its resolution happens at build time: `uv tool install` re-resolves from PyPI and never reads the producer's lock, so the graph is PINNED by a generated `sandbox_templates/wheels-host/paperbridge-constraints.txt` and the build asserts the installed graph rather than trusting its own exit code — unpinned, `bibtexparser>=1.4` resolves to 2.0.0, the build goes green and BibTeX breaks at runtime. Two of its transitive packages publish sdists only, so they are built host-side and supplied via `--find-links` rather than weakening Gate 3. Its skill IS tracked (the repo is public); the wheels are not. Permission posture: 20 reads allowed — including `download`/`export`, which write files unprompted but are fenced by the tool's own 12-host download allowlist, of which this sandbox's egress is a strict superset — and all 8 Zotero writes prompt, with `zotero-delete` additionally carrying a `force_ask` hook rule because agy caches a plain `ask` as permanent (work/0026) |
 | GPU (WSL only) | `docker-compose.wsl-gpu.yml` overlay — `/dev/dxg` + `/usr/lib/wsl`; auto-layered on detection |
 | Restart policy | `restart: "no"` — explicit `up` after host reboot (prevents silent config-drift recovery) |
 
@@ -130,7 +151,9 @@ Deliberately NOT installed in the image: `bubblewrap`, `socat`,
 │   ├── claude/                   #   claude-settings.json, hooks/ (deny-destructive — shared engine)
 │   ├── antigravity/              #   hooks.json + antigravity-settings.json (agy policy; ADR-0006)
 │   ├── skills/                   #   sandbox-side skills (audit-sandbox tier-3); some vendored — UPSTREAM.md
-│   └── wheels/                   #   vendored private wheels — GITIGNORED payload, .gitkeep only
+│   ├── wheels/                   #   vendored channel wheels — GITIGNORED payload, .gitkeep only
+│   └── wheels-host/              #   pins + host-built wheels for sdist-only deps (work/0026);
+│                                 #   *.whl gitignored, constraints + SHA256SUMS tracked
 ├── proxy/                        # squid.conf + allowed_domains.txt (egress allowlist)
 ├── scripts/                      # profile.sh (lifecycle driver), verify/audit, with-egress, ephemeral
 │   ├── vendor-tools.sh          #   consumes the depot channel into the build context (wheel, skills, plugins)

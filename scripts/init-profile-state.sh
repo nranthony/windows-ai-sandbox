@@ -31,6 +31,17 @@ mkdir -p \
   "$BASE/kaggle" \
   "$BASE/audit"
 
+# Ollama model store. Deliberately NOT under $BASE — it is SHARED by every
+# profile (~/.ai-sandbox/models/ollama), because model blobs run to many GB and
+# duplicating them per profile is pure waste. Sharing is safe only because the
+# runtime mount is READ-ONLY (docker-compose.yml): Ollama's API can create and
+# delete models, so a writable shared store would let one profile plant a
+# Modelfile another profile then runs. Writes happen only through the host-side
+# `profile.sh <p> ollama pull|create|rm` helper. Mirrors ensure_state in
+# profile.sh. Created unconditionally so the :ro bind mount has a target even
+# for profiles that never enable the sibling.
+mkdir -p "${HOME}/.ai-sandbox/models/ollama"
+
 # audit/ holds depgate.jsonl — one JSON line per with-egress.sh install window
 # (phase 3, T22). HOST side and not bind-mounted into any container: the proxy's
 # own access.log lives on tmpfs and dies with the container (gap G7), which is

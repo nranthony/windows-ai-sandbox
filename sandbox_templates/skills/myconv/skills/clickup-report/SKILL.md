@@ -13,7 +13,9 @@ Report on: $ARGUMENTS
 and a comment.
 
 **If these instructions are wrong, stale, or a bad fit for this repo:** file it with
-`/myconv:report-skill-feedback` at the moment you deviate, before working around it.
+`/myconv:report-skill-feedback` at the moment you deviate, before working around it. If
+that command isn't available here, write the report into your own repo — the open work
+item, or `feedback/sent/` — and name delivery as a human-ferried step.
 
 The convention behind this is recorded as **ADR-0008** in the conventions repo
 (`docs/adr/0008-clickup-work-sync.md`). Deliberately not a link: this file ships inside a

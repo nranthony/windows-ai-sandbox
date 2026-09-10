@@ -1,0 +1,102 @@
+# paperbridge dependency pins — GENERATED, do not hand-edit.
+#
+# WHY THIS FILE EXISTS. `uv tool install <wheel>` RE-RESOLVES from PyPI against
+# the wheel's `>=` floors; paperbridge's own uv.lock is not consulted and cannot
+# be. Without these pins `bibtexparser>=1.4` resolves to 2.0.0 — which HAS
+# wheels, so Gate 3 is satisfied, the build goes GREEN, and every BibTeX feature
+# breaks at runtime because 2.x removed the v1 API the code uses. A green build
+# is the failure mode here, which is why the pins are not optional.
+#
+# HOW IT IS USED (Dockerfile, paperbridge block):
+#   uv tool install -c <this file> -f sandbox_templates/wheels-host/ <wheel>[extras]
+# Constraints keep the WHEEL authoritative about what it needs and this repo
+# authoritative about which version it gets. `--with` pins would restate the
+# graph by hand and drift; installing these as requirements would install them
+# INSTEAD of resolving from the wheel, hiding a dependency a future wheel adds.
+#
+# NO HASHES, deliberately. `uv tool install` has no `--require-hashes` (measured,
+# uv 0.12.5), and two of these pins are satisfied by wheels built on this host
+# whose hashes PyPI never published. Content verification for those two lives
+# where this repo already does it: their sha256 is recorded in SHA256SUMS beside
+# them and checked in the Dockerfile BEFORE the install runs.
+#
+# REGENERATE at the PUBLISHED source_commit, never the member's HEAD (a member
+# ahead of the channel is ordinary, not drift — same rule content_check follows):
+#
+#   COMMIT=$(awk '$1=="paperbridge.wheel"{print $4}' sandbox_templates/VENDORED.lock)
+#   MEMBER=$(awk 'NF && $0 !~ /^[[:space:]]*#/ {print; exit}' .paperbridge-dir.local)
+#   d=$(mktemp -d)
+#   git -C "$MEMBER" show "${COMMIT}:pyproject.toml" > "$d/pyproject.toml"
+#   git -C "$MEMBER" show "${COMMIT}:uv.lock"        > "$d/uv.lock"
+#   (cd "$d" && uv export --frozen --all-extras --no-dev \
+#        --no-emit-project --no-hashes --no-annotate --no-header \
+#        --format requirements-txt)
+#
+# `--no-emit-project` drops the `-e .` line, which a constraints file must not
+# contain. The stamp below is asserted against VENDORED.lock by
+# `vendor-tools.sh --check`: re-vendoring without regenerating this file is
+# caught there rather than discovered in a running container.
+#
+# source_commit: 9e0fcbaa2ffef9ebe966782d541b86a14fe561f1
+#
+annotated-types==0.7.0
+anyio==4.13.0
+babel==2.18.0
+beautifulsoup4==4.14.3
+bibtexparser==1.4.4
+certifi==2026.2.25
+cffi==2.0.0 ; platform_python_implementation != 'PyPy'
+charset-normalizer==3.4.6
+colorama==0.4.6 ; sys_platform == 'win32'
+courlan==1.4.0
+cryptography==50.0.1
+dateparser==1.4.3
+feedparser==6.0.14
+feedparser-sgmllib==2.1.0
+flatbuffers==25.12.19
+h11==0.16.0
+htmldate==1.10.0
+httpcore==1.0.9
+httpx==0.28.1
+idna==3.11
+justext==3.0.2
+loguru==0.7.3
+lxml==6.0.2
+lxml-html-clean==0.4.4
+networkx==3.6.1
+numpy==2.5.3
+onnxruntime==1.29.0
+packaging==26.0
+pdfminer-six==20260107
+pdfplumber==0.11.10
+pillow==12.3.0
+protobuf==7.36.1
+psutil==7.2.2
+pycparser==3.0 ; implementation_name != 'PyPy' and platform_python_implementation != 'PyPy'
+pydantic==2.12.5
+pydantic-core==2.41.5
+pydantic-settings==2.13.1
+pymupdf==1.28.2
+pymupdf-layout==1.28.2
+pymupdf4llm==1.28.2
+pyparsing==3.3.2
+pypdfium2==5.13.0
+python-dateutil==2.9.0.post0
+python-dotenv==1.2.2
+pytz==2026.3.post1
+pyyaml==6.0.3
+pyzotero==1.11.0
+regex==2026.9.10
+requests==2.32.5
+six==1.17.0
+soupsieve==2.8.3
+tabulate==0.10.0
+tld==0.13.2
+trafilatura==2.0.0
+typing-extensions==4.15.0
+typing-inspection==0.4.2
+tzdata==2025.3 ; sys_platform == 'win32'
+tzlocal==5.3.1
+urllib3==2.6.3
+whenever==0.9.5
+win32-setctime==1.2.0 ; sys_platform == 'win32'

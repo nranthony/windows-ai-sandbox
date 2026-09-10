@@ -174,6 +174,18 @@ db profile *args:
 db-reset profile *args:
     {{profile_sh}} {{profile}} db-reset {{args}}
 
+# which endpoint Claude Code talks to in this profile. SUB: anthropic |
+# ollama --model <m> | openrouter --model <m> | status. Writes the profile's
+# managed backend.env; the OpenRouter key is read from secrets.env, never
+# passed here. Add --recreate to apply now (ends live shells / VS Code attach).
+backend profile *args:
+    {{profile_sh}} {{profile}} backend {{args}}
+
+# local inference sibling (ollama:11434 on sandbox-internal, no outbound path).
+# SUB: enable | disable | status | pull <model> | create <name> -f <Modelfile> | rm <model> | list
+ollama profile *args:
+    {{profile_sh}} {{profile}} ollama {{args}}
+
 # re-run everything `up` seeds, touching NO container: every agent's policy, the
 # skills tree, the agent-notice. Replaces reset-settings / reset-skills /
 # reset-antigravity, removed 2026-08-24 (work/0011, ADR-0007) with no aliases —

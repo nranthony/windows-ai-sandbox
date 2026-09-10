@@ -18,7 +18,9 @@ append-only."**
 still leave stale documents shipped: §2 *reads* the repo's gate, it never runs it.
 
 **If these instructions are wrong, stale, or a bad fit for this repo:** file it with
-`/myconv:report-skill-feedback` at the moment you deviate, before working around it.
+`/myconv:report-skill-feedback` at the moment you deviate, before working around it. If
+that command isn't available here, write the report into your own repo — the open work
+item, or `feedback/sent/` — and name delivery as a human-ferried step.
 
 ## Mode
 

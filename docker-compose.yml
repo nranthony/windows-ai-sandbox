@@ -93,7 +93,13 @@ services:
       - HTTPS_PROXY=http://egress-proxy:3128
       - http_proxy=http://egress-proxy:3128
       - https_proxy=http://egress-proxy:3128
-      - NO_PROXY=localhost,127.0.0.1,egress-proxy
+      # `ollama` is the first HTTP sibling (postgres/mongo do not speak HTTP, so
+      # they never needed a bypass). Without it every request to the local
+      # inference endpoint would be CONNECTed through Squid, which denies a
+      # non-allowlisted host — a base URL that fails on every call. Both cases
+      # are set: Node/Claude Code read the upper-case form, curl/uv the lower.
+      - NO_PROXY=localhost,127.0.0.1,egress-proxy,ollama
+      - no_proxy=localhost,127.0.0.1,egress-proxy,ollama
 
     networks:
       sandbox-internal:
@@ -111,6 +117,11 @@ services:
       - "egress-proxy:172.30.${SANDBOX_OCTET:-0}.10"
       - "postgres:172.30.${SANDBOX_OCTET:-0}.20"
       - "mongo:172.30.${SANDBOX_OCTET:-0}.30"
+      # Unconditional, like the DB siblings: the name resolves whether or not
+      # the `ollama` compose profile is active. A host entry for a container
+      # that is not up costs nothing (connect refused), and making it
+      # conditional would mean a second extra_hosts list to keep in sync.
+      - "ollama:172.30.${SANDBOX_OCTET:-0}.40"
     env_file:
       # Optional DB creds — only present for profiles that opted into the
       # postgres/mongo sibling containers. required: false so profiles
@@ -123,6 +134,15 @@ services:
       # kept chmod 600, and never passed on argv. required: false so profiles
       # without keys still come up. See docs/web-read-broker.md.
       - path: ${HOME}/.ai-sandbox/profiles/${PROFILE}/secrets.env
+        required: false
+      # Claude Code backend switch (work/0023 §8) — WRITTEN BY
+      # `scripts/profile.sh <p> backend anthropic|ollama|openrouter`, never by
+      # hand. Holds only ANTHROPIC_BASE_URL / ANTHROPIC_AUTH_TOKEN / an empty
+      # ANTHROPIC_API_KEY and the model aliases. Listed AFTER secrets.env on
+      # purpose: a later env_file wins on duplicate keys, so the managed switch
+      # overrides any ANTHROPIC_* an operator left in secrets.env. Absent =
+      # Anthropic API (default). Same create-time semantics as the file above.
+      - path: ${HOME}/.ai-sandbox/profiles/${PROFILE}/backend.env
         required: false
 
     depends_on:
@@ -217,6 +237,96 @@ services:
     restart: "no"
 
   # ---------------------------------------------------------------------------
+  # Optional: Ollama sibling — local LLM inference (opt-in via COMPOSE_PROFILES=ollama)
+  # ---------------------------------------------------------------------------
+  # Reach from the agent at `http://ollama:11434`. Since Ollama 0.14.0 that
+  # endpoint speaks the Anthropic Messages API, so Claude Code itself can run
+  # against it (`scripts/profile.sh <p> backend ollama --model <m>`, which
+  # writes the profile's backend.env) with every
+  # control this repo owns — deny lists, the hook engine, seccomp, egress —
+  # still in place. See work/0023.
+  #
+  # AIR-GAPPED AT RUNTIME, deliberately: sandbox-internal only (internal: true),
+  # no proxy variables, no published port. It cannot phone home, pull a model
+  # at runtime, or exfiltrate. Models arrive ONLY through the host-side helper
+  # `scripts/profile.sh <p> ollama pull`, which runs a throwaway container on
+  # Docker's default bridge — outside this boundary, the same class of operator
+  # action as `docker pull`.
+  #
+  # NOT in "db-all": inference is not a database, and a profile that wants a DB
+  # should not silently acquire a 16g LLM runtime. `ollama` is its own token in
+  # the profile's compose-profiles list (`profile.sh <p> ollama enable`).
+  #
+  # The model store is mounted READ-ONLY. Ollama's API includes create, delete,
+  # copy and blob upload; with a shared writable store, profile A could plant a
+  # Modelfile whose system prompt profile B then runs. Read-only closes that
+  # cross-profile injection channel — and is what makes sharing the store
+  # across profiles safe in the first place.
+  #
+  # Docker's DEFAULT seccomp profile, NOT ./seccomp.json. The strict profile is
+  # an allowlist tuned for the agent image and is unmeasured against Ollama's
+  # GPU runner — `creat`/`io_uring` are plausible casualties, and a syscall
+  # denied by omission surfaces as an unexplained runtime failure, not as a
+  # policy message. Tightening it is a follow-up after measurement, never a
+  # silent widening here.
+  ollama:
+    # Pinned by index digest (ollama/ollama:latest = Ollama 0.33.3 as of
+    # 2026-09-03). Multi-arch, so the digest comes from the index, not
+    # RepoDigests. To refresh:
+    #   docker buildx imagetools inspect ollama/ollama:latest
+    image: ollama/ollama:latest@sha256:32931b46719f673c05fdbaa81ccb26da18ea4a1c57590a754874ab28ba269eb2
+    container_name: ollama-${PROFILE}
+    hostname: ollama
+    profiles: ["ollama"]
+    read_only: true
+    tmpfs:
+      # Ollama generates an id_ed25519 key pair under $HOME/.ollama on first
+      # start and refuses to boot if it cannot write it. Ephemeral by design —
+      # the key identifies a pushing client, which this container never is.
+      - /root/.ollama:size=16m
+      - /tmp:size=512m
+    volumes:
+      # Shared across profiles (multi-GB blobs), read-only to the runtime.
+      # Written only by the host-side `ollama pull|create|rm` helper.
+      - ${HOME}/.ai-sandbox/models/ollama:/models:ro
+    environment:
+      - OLLAMA_HOST=0.0.0.0:11434
+      # Store root, so manifests/ and blobs/ sit directly under the shared dir
+      # (Ollama's own default would nest them under $HOME/.ollama/models).
+      - OLLAMA_MODELS=/models
+      # Makes the no-phone-home explicit rather than incidental: at start the
+      # server otherwise reaches for ollama.com (cloud cache hydration and model
+      # recommendations). On sandbox-internal that already dies with "network is
+      # unreachable" — correct, but by accident. This states the intent.
+      - OLLAMA_NO_CLOUD=true
+      # Default context window for every loaded model. Ollama's server default
+      # is 4096, and a Claude Code request carries a system prompt well past
+      # that — the server would silently truncate the head of every turn.
+      # Ollama's own Claude Code guidance says at least 32K. Costs KV-cache
+      # VRAM proportionally; a model can still override it per request.
+      - OLLAMA_CONTEXT_LENGTH=32768
+      # No OLLAMA_KEEP_ALIVE override: the 5-minute default is correct here.
+      # One card is shared by every profile, so an idle profile must release
+      # its VRAM rather than sit on it.
+      # No HTTP_PROXY/HTTPS_PROXY either — this container has no outbound path
+      # and must not be given one.
+    networks:
+      sandbox-internal:
+        ipv4_address: 172.30.${SANDBOX_OCTET:-0}.40
+    # Uncomment to reach it from host tools (a browser, `ollama` on the WSL
+    # host). Loopback-only — do not bind 0.0.0.0.
+    # ports:
+    #   - "127.0.0.1:11434:11434"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 512
+    mem_limit: 16g
+    cpus: 4
+    restart: "no"
+
+  # ---------------------------------------------------------------------------
   # Egress proxy — domain-allowlisted outbound traffic
   # ---------------------------------------------------------------------------
   egress-proxy:
@@ -289,7 +399,7 @@ networks:
   sandbox-internal:
     driver: bridge
     internal: true
-    # Static subnet so we can pin egress-proxy/postgres/mongo to known IPs
+    # Static subnet so we can pin egress-proxy/postgres/mongo/ollama to known IPs
     # and feed them to the agent via extra_hosts. Required to make the
     # dns: [127.0.0.1] sinkhole workable — without static IPs we'd have no
     # reliable way to pre-populate /etc/hosts.
@@ -299,7 +409,7 @@ networks:
     # ~/.ai-sandbox/profiles/<profile>/subnet-octet, so concurrent profiles
     # land on distinct /24s instead of all fighting over 172.30.0.0/24 (the
     # "Pool overlaps with other one on this address space" error). The same
-    # variable drives the subnet AND the .10/.20/.30 pins above, so the two
+    # variable drives the subnet AND the .10/.20/.30/.40 pins above, so the two
     # can never drift. Default 0 keeps the legacy subnet for the global
     # `build` (PROFILE=_build, never creates a network) and the
     # network-neutral `restart`/`ps` paths.

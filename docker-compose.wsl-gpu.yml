@@ -17,3 +17,16 @@ services:
       - /usr/lib/wsl:/usr/lib/wsl:ro
     environment:
       - LD_LIBRARY_PATH=/usr/lib/wsl/lib
+
+  # The Ollama sibling gets the same three lines — its CUDA runner needs the
+  # Windows-driver userland to find libcuda.so.1, exactly as the agent's does.
+  # Compose only merges this into a service the base file already declares, and
+  # `ollama` sits behind profiles: ["ollama"], so this block is inert until the
+  # profile opts in. Bare Linux never loads this file and runs Ollama CPU-only.
+  ollama:
+    devices:
+      - /dev/dxg
+    volumes:
+      - /usr/lib/wsl:/usr/lib/wsl:ro
+    environment:
+      - LD_LIBRARY_PATH=/usr/lib/wsl/lib

@@ -395,5 +395,53 @@ check "$(sha256sum "$TPL/claude/claude-settings.json" | awk '{print $1}')" \
       "$(printf '{ "permissions": {\n  "allow": ["Bash(myclickup status:*)", "Bash(myclickup lists:*)"],\n  "ask":   ["Bash(myclickup create:*)"],\n  "deny":  ["Bash(myclickup delete:*)"] } }\n' | sha256sum | awk '{print $1}')" \
   "--permissions NEVER edits claude-settings.json"
 
+# --- 13. pinned-dependency stamps (work/0026) --------------------------------
+# An artifact with runtime dependencies carries a generated constraints file,
+# because `uv tool install` re-resolves from PyPI and never reads the producer's
+# lock. That file is derived from an upstream payload by a route nothing else
+# here watches, so its staleness is invisible to every other check: the wheel
+# hash still matches, the content diff still matches, and the image installs the
+# NEW wheel against the OLD resolution. These lock the gap shut.
+reset_templates
+run_vt "$CHAN" >/dev/null
+PINDIR="$TPL/wheels-host"; mkdir -p "$PINDIR"
+SC="$(awk -F'"' '/^source_commit = /{print $2; exit}' "$CHAN/manifest.toml")"
+
+# Absent is ordinary — most artifacts have no dependencies — but it is COUNTED
+# and said aloud, because "nothing to check" and "checked nothing" must not
+# print the same line. Same rule as content_check's HASH-ONLY tally.
+check "$(run_vt "$CHAN" --check)" 0 "an artifact with no pin set is not a failure"
+check "$(grep -cF 'with no pin set' "$ROOT/out")" 1 \
+  "unpinned artifacts are COUNTED, not silently passed"
+
+printf '# source_commit: %s\nfoo==1.0\n' "$SC" > "$PINDIR/myclickup-constraints.txt"
+check "$(run_vt "$CHAN" --check)" 0 "a pin set stamped at the published commit passes"
+check "$(grep -cF 'pins: 1 artifact(s) pinned and current' "$ROOT/out")" 1 \
+  "a current pin set is counted as pinned"
+
+# THE LOCK: every hash and the content diff are green in this state. Only the
+# stamp can see it, which is the whole argument for keeping it.
+printf '# source_commit: %s\nfoo==1.0\n' 0000000000000000000000000000000000000000 \
+  > "$PINDIR/myclickup-constraints.txt"
+check "$(run_vt "$CHAN" --check)" 1 \
+  "a STALE pin set FAILS even though every hash matches  <-- LOCK"
+check "$(grep -cF 'STALE PIN SET' "$ROOT/err")" 1 "staleness is named, not merely counted"
+check "$(grep -cF '9a12cd76' "$ROOT/err")" 0 "the message quotes the fixture's commits, not a hardcoded one"
+
+# An unstamped file cannot be checked, so it FAILS rather than passing quietly —
+# the same posture as an unknown artifact kind.
+printf 'foo==1.0\n' > "$PINDIR/myclickup-constraints.txt"
+check "$(run_vt "$CHAN" --check)" 1 "a pin set with no stamp FAILS rather than being skipped"
+check "$(grep -cF 'carries no `# source_commit:` stamp' "$ROOT/err")" 1 "the missing stamp is named"
+
+# Vendoring is when a pin set GOES stale, so it warns there — but it does not
+# fail: the vendor succeeded and reverting it would be the wrong repair.
+printf '# source_commit: %s\nfoo==1.0\n' 0000000000000000000000000000000000000000 \
+  > "$PINDIR/myclickup-constraints.txt"
+check "$(run_vt "$CHAN")" 0 "a stale pin set does NOT fail the vendor itself"
+check "$(grep -c 'STALE' "$ROOT/out" "$ROOT/err" | awk -F: '{s+=$2} END{print (s>0)?"y":"n"}')" y \
+  "...but the vendor says so loudly, at the moment it becomes stale"
+rm -rf "$PINDIR"
+
 printf '\n  %d passed, %d failed\n\n' "$pass" "$fail"
 [[ "$fail" -eq 0 ]]

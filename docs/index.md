@@ -82,6 +82,7 @@ this one proposal home; its five files are kept, unrenumbered, in `docs/_archive
 - [ARCHITECTURE.md](../ARCHITECTURE.md) (Substrate-specific notes) — NVIDIA Container Toolkit 1.18+ breakage on rootless Docker; why we pin 1.17.8-1; wsl-gpu overlay
 - [sandbox-design-notes.md](sandbox-design-notes.md) — why container runs as root under rootless Docker (UID 0 = host UID 1000)
 - [docker-bench-security-report.md](../reports/docker-bench-security-report.md) — Docker Bench for Security v1.6.0 results
+- [Profile lifecycle → Local inference (Ollama sibling)](../.agents/skills/profile-lifecycle.md#local-inference-ollama-sibling) — per-profile, air-gapped Ollama on sandbox-internal; shared read-only model store; Claude Code's own backend switch
 
 ## Host Setup
 

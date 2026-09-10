@@ -46,7 +46,7 @@ tracker pointer a pull adds joins the same block.
 ```markdown
 # Proposal: <title>
 
-- Status: Draft | In review | Accepted → ADR-NNNN | Rejected
+- Status: Draft | In review | Accepted → ADR-NNNN | Rejected | Deferred — <reason>
 - Author: <name / agent>
 
 ## Summary
