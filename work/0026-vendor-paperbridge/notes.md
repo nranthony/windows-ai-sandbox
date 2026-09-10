@@ -291,6 +291,34 @@ prints `None` for `zotero_user_id` / `zotero_group_id` where the secret-bearing
 fields print `unset` — a raw Python repr reaching user-facing output. Not a
 leak (an id is not a secret), just inconsistent with the line above it.
 
+## Expected, not a fault: `check_pins` will go RED on the next paperbridge bump
+
+Recorded 2026-09-10 so nobody burns an afternoon on it. paperbridge has queued
+the §7 re-lock (`bibtexparser<2` + `feedparser>=6.0.14`) and confirmed it cannot
+be done in-container — `no-build` is a resolver setting, so re-resolving under
+the wheels-only gate cannot select `bibtexparser<2` at all, and an attempt on
+2026-09-09 downgraded pyzotero 1.11.0 -> 1.6.11. It needs a host with registries
+open, so it lands on their side, then republishes.
+
+**When it does, `tools-check` fails here with STALE PIN SET.** That is the
+mechanism working — the wheel moves, the stamped `source_commit` in
+`wheels-host/paperbridge-constraints.txt` no longer matches, and the check says
+so before the image can install a new wheel against an old resolution. Clear it
+by re-vendoring and regenerating the pins (the constraints header carries the
+command), never by editing the stamp.
+
+Two things to check after that regeneration, because they are the payoff:
+
+- `sgmllib3k` should be **gone** from the pin set. feedparser 6.0.14 requires
+  `feedparser-sgmllib<3,>=2`, which ships a wheel — verified against PyPI
+  2026-09-10, not taken from the handoff. That drops `wheels-host/` from two
+  host-built wheels to one, permanently, and `SHA256SUMS` loses its second entry.
+- `pyzotero` must still be **>= 1.11.0**, and `whenever` present in the pins is
+  the quick tell. Their re-lock note names both.
+
+Their `config` None/unset fix rides the same release rather than taking its own
+version bump, so expect one bump, not two.
+
 ## A proposal for the channel
 
 The constraints file is generated **here** from a member checkout, which means
