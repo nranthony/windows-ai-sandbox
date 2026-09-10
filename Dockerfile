@@ -705,6 +705,18 @@ RUN uv python install 3.12 3.13 \
 # because 2.x removed the v1 API the code uses. A green build is the failure
 # mode, which is why `-c` is not optional and why the post-install assertions
 # below check the GRAPH and not just the exit code.
+#
+#   THOSE ASSERTIONS READ THEIR VERSIONS FROM THE CONSTRAINTS FILE rather than
+#   naming them here, and that is a fix rather than a flourish: they were
+#   hardcoded as `bibtexparser-1.4.4 pyzotero-1.11.0 sgmllib3k-1.0.0`, and when
+#   paperbridge 0.3.0 legitimately dropped sgmllib3k the build FAILED on an
+#   expectation that had gone stale — the gate refusing a correct image. Deriving
+#   the versions means a bump updates them by regenerating the pins, which is the
+#   same "generated, never transcribed" rule the channel runs on. The two packages
+#   are the two that matter: bibtexparser is the green-build-broken-runtime hazard,
+#   pyzotero is the one a bad resolve walks BACKWARDS (1.11.0 -> 1.6.11, measured
+#   upstream). Both are asserted at whatever the pin set says, so neither needs
+#   touching again.
 # `sandbox_templates/wheels-host/paperbridge-constraints.txt` is generated from
 # the member's uv.lock at the PUBLISHED source_commit; `vendor-tools.sh --check`
 # fails if it goes stale against VENDORED.lock.
@@ -754,9 +766,12 @@ RUN set -eu; \
       uv tool install -c "$c" -f /tmp/wheels-host \
         "paperbridge[docs,bibtex,zotero] @ file://$whl"; \
       paperbridge --version; \
-      for pin in bibtexparser-1.4.4 pyzotero-1.11.0 sgmllib3k-1.0.0; do \
-        [ -n "$(find /opt/uv/tools/paperbridge -type d -name "$pin.dist-info" -print -quit)" ] \
-          || { echo "paperbridge: expected $pin in the installed graph and it is not there — the constraints file did not take (work/0026)" >&2; exit 1; }; \
+      for p in bibtexparser pyzotero; do \
+        want="$(awk -F'==' -v n="$p" '$1==n {gsub(/[[:space:]\r]/,"",$2); print $2; exit}' "$c")"; \
+        [ -n "$want" ] || { echo "paperbridge: $p is not pinned in $c — refusing, the constraints file is not the one this build expects (work/0026)" >&2; exit 1; }; \
+        d="$(printf '%s' "$p" | tr '-' '_')"; \
+        [ -n "$(find /opt/uv/tools/paperbridge -type d -name "$d-$want.dist-info" -print -quit)" ] \
+          || { echo "paperbridge: constraints pin $p==$want but it is not in the installed graph — the constraints file did not take (work/0026)" >&2; exit 1; }; \
       done; \
     else \
       echo "paperbridge: no vendored wheel — skipping (run: just vendor-tools)"; \

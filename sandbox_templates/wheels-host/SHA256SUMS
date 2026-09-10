@@ -53,8 +53,13 @@ sdist_url    = https://files.pythonhosted.org/packages/44/1c/577d3ce406e88f370e8
 wheel        = bibtexparser-1.4.4-py3-none-any.whl
 wheel_sha256 = 1c0f37b713983fac4a50a24b6e4cb62a308226269bed2e3f521252ae8471f46f
 
-[sgmllib3k 1.0.0]
-sdist_sha256 = 7868fb1c8bfa764c1ac563d3cf369c381d1325d36124933a726f29fcdaa812e9
-sdist_url    = https://files.pythonhosted.org/packages/9e/bd/3704a8c3e0942d711c1299ebf7b9091930adae6675d7c8f476a7ce48653c/sgmllib3k-1.0.0.tar.gz
-wheel        = sgmllib3k-1.0.0-py3-none-any.whl
-wheel_sha256 = 69bb0cadb4fbd1a0a089c4d7be7b3041defcc1feee478ffb8a0cbba8c0c87864
+# sgmllib3k 1.0.0 — REMOVED 2026-09-10, and worth knowing why rather than just
+# that. It was never a paperbridge dependency: it arrived via
+# pyzotero -> feedparser <= 6.0.13, and it has never shipped a wheel, so under
+# Gate 3 it had to be built here. feedparser 6.0.14 replaced it with
+# `feedparser-sgmllib`, which DOES ship a wheel, and pyzotero asks only for
+# feedparser>=6.0.12 — so paperbridge's 0.3.0 re-lock raised the floor and the
+# package left the graph entirely. Found by myclickup's agent, verified against
+# PyPI before acting on it. This directory is down to ONE host-built wheel,
+# permanently. If a future lock reintroduces an sdist-only package, add it here
+# with both hashes and the same rebuild recipe.
