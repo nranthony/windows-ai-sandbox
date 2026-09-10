@@ -95,7 +95,7 @@ allowance the agent will not find.
 The "Databases aren't on `localhost`" bullet names postgres and mongo only, and
 nothing says the agent's own backend may be a local model
 (`profile.sh <p> backend ollama|openrouter|anthropic`). This is
-[0023](../0023-ollama-sibling-container/spec.md) on an unmerged branch, so the
+[0023](../../docs/_archive/0023-ollama-sibling-container-spec.md) on an unmerged branch, so the
 notice is not wrong yet — it becomes wrong on merge.
 
 ## 3. How it got here

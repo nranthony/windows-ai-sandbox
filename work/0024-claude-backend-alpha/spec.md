@@ -1,7 +1,7 @@
 # 0024 — Alpha test: Claude Code on the Ollama sibling and on OpenRouter
 
 **Status: Draft** — opened 2026-09-04 as the follow-on to
-[0023](../0023-ollama-sibling-container/spec.md). 0023 shipped the
+[0023](../../docs/_archive/0023-ollama-sibling-container-spec.md). 0023 shipped the
 *mechanism* (sibling, shared read-only store, `profile.sh <p> backend …`);
 this item is the *use* of it: does Claude Code actually do useful work on a
 non-Anthropic endpoint inside this sandbox, and what does the switch cost in
@@ -13,7 +13,7 @@ practice. Nothing here changes the boundary; everything here is measurement.
 
 ## 1. What is already proven (do not re-measure)
 
-From [0023 notes.md](../0023-ollama-sibling-container/notes.md), 2026-09-03:
+From [0023 notes.md](../../docs/_archive/0023-ollama-sibling-container-notes.md), 2026-09-03:
 
 | Claim | Evidence |
 |---|---|
