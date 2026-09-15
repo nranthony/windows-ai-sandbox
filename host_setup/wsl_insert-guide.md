@@ -45,7 +45,7 @@ Reverts at the next `wsl --shutdown`.
 ```ini
 [automount]
 enabled = false
-mountFsTab = false
+mountFsTab = true
 
 [network]
 generateHosts = true
@@ -56,9 +56,18 @@ enabled = false
 appendWindowsPath = false
 ```
 
+plus one entry in `/etc/fstab`, written by `wsl_conf_update.sh`:
+
+```
+# windows-ai-sandbox: vscode extensions (isolated mode)
+C:\Users\<you>\.vscode\extensions /mnt/c/Users/<you>/.vscode/extensions drvfs ro,uid=1000,gid=1000,umask=22,fmask=11 0 0
+```
+
 | Key | Purpose |
 |-----|---------|
-| `automount enabled = false` | No `/mnt/<drive>` at all. Linux cannot read C:, not even as root. |
+| `automount enabled = false` | No automatic `/mnt/<drive>`. C: is invisible except for the fstab entry below. |
+| `mountFsTab = true` | WSL runs `mount -a` at boot, which brings in the extensions folder. |
+| fstab entry | Read-only mount of the VS Code extensions folder only. Remote WSL runs `scripts/wslServer.sh` from there and WSL path translation needs a drvfs mount to resolve it. |
 | `interop enabled = false` | The kernel `binfmt_misc` handler for `.exe` is not registered. Linux cannot ask Windows to run anything. |
 | `appendWindowsPath = false` | No Windows directories on `$PATH`. Also speeds up shell startup and command lookup. |
 
@@ -72,20 +81,23 @@ that point at a Windows `.exe`. Install Linux equivalents where needed.
 
 ---
 
-## Why VS Code does not need interop or `/mnt/c`
+## What VS Code actually needs from Windows
 
 The Remote WSL extension runs its server inside the Linux filesystem at `~/.vscode-server`.
-The Windows client starts it with `wsl.exe -d <distro>` and talks to it over a pipe. Server
-updates are downloaded from inside WSL. Nothing in that path crosses `/mnt/c`, and interop is
-only needed for the reverse direction, Linux launching Windows programs.
+The Windows client starts it with `wsl.exe -d <distro>` and talks to it over a pipe. But the
+bootstrap step runs `$VSCODE_WSL_EXT_LOCATION/scripts/wslServer.sh`, and that variable is the
+extension folder on C: translated to a `/mnt/c/...` path. With no drvfs mount covering it,
+the translation fails and the server never starts. A read-only mount of just
+`C:\Users\<you>\.vscode\extensions` is sufficient (verified 2026-09-15). Interop is not
+involved: it only matters for the reverse direction, Linux launching Windows programs.
 
 ---
 
 ## Which mode?
 
 `ro` is the balance for day-to-day use: Windows files readable, nothing writable.
-`isolated` is for when you want a container escape to see no Windows filesystem at all
-and be unable to start a Windows process. It is the stronger boundary, at the cost of the
+`isolated` is for when you want a container escape to see nothing of the Windows filesystem
+beyond the VS Code extensions folder, and be unable to start a Windows process. It is the stronger boundary, at the cost of the
 conveniences listed above. Switching is one `wsl_conf_update.sh --mode …` run plus
 `wsl --shutdown`.
 
