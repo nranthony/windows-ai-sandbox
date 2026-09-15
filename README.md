@@ -153,13 +153,13 @@ old network. `docker rm -f postgres-<profile>`, then `just up <profile>`.
 ```bash
 cd host_setup
 ./setup-rootless-docker-wsl.sh     # rootless Docker (sudo used internally — read first!)
-sudo ./wsl_conf_update.sh          # /etc/wsl.conf
+sudo ./wsl_conf_update.sh          # /etc/wsl.conf: C: read-only (default). Add --mode isolated for no /mnt/c and no Windows interop
 ./ohmyzsh-host-setup.sh            # optional: host-side oh-my-zsh
 exit                               # then `wsl --shutdown` in Powershell, wait 8s, reopen
 ```
 
 ### VS Code host settings (important — audit Findings A + B)
-In Windows VS Code: `Ctrl+Shift+P` → **"Preferences: Open User Settings (JSON)"** (or edit `%APPDATA%\Code\User\settings.json` directly — from WSL that's `/mnt/c/Users/<user>/AppData/Roaming/Code/User/settings.json`). Add:
+In Windows VS Code: `Ctrl+Shift+P` → **"Preferences: Open User Settings (JSON)"** (or edit `%APPDATA%\Code\User\settings.json` directly on the Windows side; it is not reachable from WSL in `isolated` mode). Add:
 ```jsonc
 {
   "remote.SSH.enableAgentForwarding": false,

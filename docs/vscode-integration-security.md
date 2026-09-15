@@ -142,7 +142,7 @@ from **either** of two places, and **not** from workspace/folder settings:
 
 | Tier | File | Role |
 |---|---|---|
-| User (desktop) | Windows `%APPDATA%\Code\User\settings.json` (`/mnt/c/Users/<you>/AppData/Roaming/Code/User/settings.json`) | fallback |
+| User (desktop) | Windows `%APPDATA%\Code\User\settings.json` (edit from Windows; only visible from WSL as `/mnt/c/Users/<you>/AppData/Roaming/Code/User/settings.json` in wsl.conf mode `ro`) | fallback |
 | Remote/Machine | WSL `~/.vscode-server/data/Machine/settings.json` | **overrides** User when present |
 
 Effective value = WSL Machine setting if set, else Windows User setting, else the
