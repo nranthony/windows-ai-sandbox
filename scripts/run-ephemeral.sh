@@ -30,7 +30,7 @@ PROFILES_ROOT="${WIN_AI_PROFILES_ROOT:-$HOME/.ai-sandbox/profiles}"
 
 PROFILE="${1:-}"
 [[ -n "$PROFILE" ]] || { echo "Usage: $0 <profile> [command...]" >&2; exit 1; }
-[[ "$PROFILE" =~ ^[a-zA-Z0-9_-]+$ ]] || { echo "profile name must match [a-zA-Z0-9_-]+" >&2; exit 1; }
+[[ "$PROFILE" =~ ^[a-zA-Z0-9][a-zA-Z0-9_-]*$ ]] || { echo "profile name must match [a-zA-Z0-9][a-zA-Z0-9_-]*" >&2; exit 1; }
 shift
 
 REPO_PATH="$REPO_ROOT/$PROFILE"

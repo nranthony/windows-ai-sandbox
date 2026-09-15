@@ -13,8 +13,8 @@ set -euo pipefail
 [[ $# -eq 1 ]] || { echo "usage: $0 <profile>" >&2; exit 1; }
 PROFILE="$1"
 
-[[ "$PROFILE" =~ ^[a-zA-Z0-9_-]+$ ]] \
-  || { echo "profile name must match [a-zA-Z0-9_-]+" >&2; exit 1; }
+[[ "$PROFILE" =~ ^[a-zA-Z0-9][a-zA-Z0-9_-]*$ ]] \
+  || { echo "profile name must match [a-zA-Z0-9][a-zA-Z0-9_-]*" >&2; exit 1; }
 
 BASE="${HOME}/.ai-sandbox/profiles/$PROFILE"
 

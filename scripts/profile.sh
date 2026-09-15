@@ -1599,8 +1599,11 @@ PROFILE="$1"
 CMD="$2"
 shift 2
 
-[[ "$PROFILE" =~ ^[a-zA-Z0-9_-]+$ ]] \
-  || fail "Profile name must match [a-zA-Z0-9_-]+ (got: $PROFILE)"
+# Leading char must be alphanumeric: `-` alone in the class let a flag typed in
+# the profile slot (`profile.sh --list`) pass as a name and seed a `--list` state
+# dir. Same pattern in init-profile-state.sh, run-ephemeral.sh, setup.sh.
+[[ "$PROFILE" =~ ^[a-zA-Z0-9][a-zA-Z0-9_-]*$ ]] \
+  || fail "Profile name must match [a-zA-Z0-9][a-zA-Z0-9_-]* (got: $PROFILE)"
 
 export PROFILE
 export COMPOSE_PROJECT_NAME="ai-sandbox-$PROFILE"

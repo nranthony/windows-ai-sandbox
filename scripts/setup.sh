@@ -31,7 +31,7 @@ usage() {
 [[ "$1" == "-h" || "$1" == "--help" ]] && usage
 
 PROFILE="$1"; shift
-[[ "$PROFILE" =~ ^[a-zA-Z0-9_-]+$ ]] || fail "Profile name must match [a-zA-Z0-9_-]+"
+[[ "$PROFILE" =~ ^[a-zA-Z0-9][a-zA-Z0-9_-]*$ ]] || fail "Profile name must match [a-zA-Z0-9][a-zA-Z0-9_-]*"
 
 GIT_NAME=""
 GIT_EMAIL=""
