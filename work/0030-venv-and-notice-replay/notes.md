@@ -124,3 +124,26 @@ and `handoff-my-next-gen-emory.md` beside this file, delivered to
 | `--fail-on HARDCODED-VENV-LINUX,OS-VENV-SELECT` (0008) | 1 — job_search_agent, my-next-gen-emory: the two handoffs above |
 
 Left for later waves, per macolima's plan: `DOC-VENV-LINUX` in jeremy_dahl_analytics, core, pipeline (docs mentions, `uv run` when next edited); `VENV-PATH-IN-CODE` in jeremy_dahl_analytics, numerai, project_zenbu; `LEGACY-VENV-SLOT` ×3 and `SANDBOX-VENV-IN-HOST-SLOT` ×13 are R5.
+
+## 2026-09-15 — handbacks from the nranthony container
+
+**job_search_agent:** commit `5cf5744` (ADR-0006 there; ADR-0002 marked
+superseded). Step 4 needed no egress: cache plus the open proxy covered it.
+Step 5: `uv run pytest -q` → 170 passed, 1 skipped, CPython 3.12.14 in
+`.venv-sandbox`. **But the sync itself was permission-denied** and happened as
+uv's implicit sync under `uv run`.
+
+**my-next-gen-emory:** handoff edits applied and uncommitted (justfile, README,
+skill, `.gitignore`, ADR-0021 amendment, new ADR-0025, `.python-version` 3.12;
+no venv reference left in the edited files). `uv sync` blocked by the same
+denial, so no `.venv-sandbox` yet; plain-interpreter tests pass. Waiting on the
+owner's sync, then the commit. The `research/jobs/*` modifications are a poll
+in progress and stay out of that commit.
+
+**Correction to both handoffs, and to the plan's R4c line:** `Bash(uv sync:*)`
+is on this sandbox's static deny list (`claude-settings.json`), so an agent
+cannot run step 4 as written. Two routes exist: the owner runs the sync
+through `with-egress.sh` (audit line, age gate), or the agent runs any
+`uv run …`, which syncs implicitly with no audit line — the exact hole
+work/0025 describes, now observed. The handoffs should have said so; future
+ones name the owner's route.
