@@ -212,12 +212,15 @@ converges like any other on the next `up`, but the wheel half only exists in a
 freshly built image, and a converged skill in front of a missing CLI is exactly
 the failure the vendoring couples them to avoid.
 
-If the source repo is also bind-mounted into a profile, its `.venv` was likely
-created in-container and its console scripts carry `#!/workspace/...` shebangs.
-Host-side that surfaces as `Failed to spawn: pytest`, which reads as a missing
-dev dependency. The vendor script sidesteps it with its own
-`UV_PROJECT_ENVIRONMENT` outside the checkout — don't "fix" it by rebuilding the
-shared `.venv`, which just breaks the container's copy instead.
+If the source repo is also bind-mounted into a profile, it has two venvs and
+no shared one ([ADR-0013](../../docs/adr/0013-the-environment-names-the-venv.md)):
+the host's `.venv` and the container's `.venv-sandbox`. A `.venv` whose console
+scripts carry `#!/workspace/...` shebangs is a pre-rule leftover built
+in-container — host-side it surfaces as `Failed to spawn: pytest`, which reads
+as a missing dev dependency — and is retired (human deletion after a soak),
+never rebuilt in place. The vendor script sidesteps all of it with its own
+absolute `UV_PROJECT_ENVIRONMENT` outside the checkout; an explicit value there
+wins over the environment's, so don't "fix" it.
 
 ## Databases (opt-in siblings)
 

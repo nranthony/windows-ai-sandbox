@@ -15,3 +15,6 @@ scripts/
 proxy/
 seccomp.json
 docker-compose.yml
+# machine-local files, both shapes (.gitignore explains them)
+**/*.local
+**/*.local.*

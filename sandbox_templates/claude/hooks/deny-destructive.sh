@@ -690,9 +690,17 @@ fi
 #     this hook's own comments say what that produces: trained evasion. So a
 #     call whose targets are ALL disposable passes silently. "Disposable" is
 #     not invented here — it is AGENTS.md's own container-state table: /tmp and
-#     /root/.cache are disposable by design, .venv and node_modules rebuild
-#     from a manifest, __pycache__ and the *_cache dirs are caches, build/dist
-#     are outputs.
+#     /root/.cache are disposable by design, .venv-sandbox and node_modules
+#     rebuild from a manifest, __pycache__ and the *_cache dirs are caches,
+#     build/dist are outputs.
+#
+#     .venv-sandbox, NOT .venv (ADR-0013). This container's uv builds its venvs
+#     at .venv-sandbox (compose UV_PROJECT_ENVIRONMENT). A repo's plain .venv is
+#     the HOST's venv, bind-mounted in — deleting inside it from here destroys a
+#     working environment on the host, which is exactly what ADR-0013 exists to
+#     stop. So a .venv target now reaches the prompt like any other file. The
+#     name is matched exactly: a */.venv*/* glob would also pass a FILE named
+#     .venvrc, because every target is wrapped in slashes before matching.
 #
 #     Two properties make the carve-out safe, and both are locked by the suite:
 #       * ANY non-carved target makes the WHOLE call ask. Otherwise one /tmp
@@ -721,7 +729,7 @@ if match '(^|[;&|(])[[:space:]]*rm[[:space:]]'; then
         /tmp/*|/var/tmp/*|/root/.cache/*|*.pyc|*.pyo) continue ;;
       esac
       case "/$_t/" in
-        */.venv/*|*/node_modules/*|*/__pycache__/*|*/.pytest_cache/*|*/.mypy_cache/*|*/.ruff_cache/*|*/scratchpad/*|*/build/*|*/dist/*) continue ;;
+        */.venv-sandbox/*|*/node_modules/*|*/__pycache__/*|*/.pytest_cache/*|*/.mypy_cache/*|*/.ruff_cache/*|*/scratchpad/*|*/build/*|*/dist/*) continue ;;
       esac
       _rm_ask=1
     done
@@ -729,7 +737,7 @@ if match '(^|[;&|(])[[:space:]]*rm[[:space:]]'; then
 $_rm_segs
 RM_SEGMENTS
   if [ "$_rm_ask" = 1 ]; then
-    emit_ask "rm-file" "deleting a file is a human step here, single files included and even when an approved plan names them. List the exact paths and wait for confirmation. Disposable targets (under /tmp, /root/.cache, .venv, node_modules, __pycache__, the *_cache dirs, build/dist, *.pyc) do not reach this prompt — if you are cleaning those up, say so and use those paths."
+    emit_ask "rm-file" "deleting a file is a human step here, single files included and even when an approved plan names them. List the exact paths and wait for confirmation. Disposable targets (under /tmp, /root/.cache, .venv-sandbox, node_modules, __pycache__, the *_cache dirs, build/dist, *.pyc) do not reach this prompt — if you are cleaning those up, say so and use those paths."
   fi
 fi
 

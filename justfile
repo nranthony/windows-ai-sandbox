@@ -135,6 +135,10 @@ audit profile *args:
 deps profile *args:
     {{profile_sh}} {{profile}} deps {{args}}
 
+# every repo in every profile vs the ADR-0013/0015 conventions (host-side, read-only). The report names every repo: `--out` must be a *.local* path
+workspace-scan *args:
+    python3 {{justfile_directory()}}/scripts/workspace-scan.py {{args}}
+
 # offline test suites — no docker, no network, no profile. Run before committing
 # a change to any file they gate (see AGENTS.md).
 test-offline:
@@ -145,6 +149,8 @@ test-offline:
     bash {{justfile_directory()}}/scripts/profile-skills.test.sh
     bash {{justfile_directory()}}/scripts/vendor-tools.test.sh
     bash {{justfile_directory()}}/scripts/agent-notice.test.sh
+    bash {{justfile_directory()}}/scripts/sync-agent-notice.test.sh
+    bash {{justfile_directory()}}/scripts/workspace-scan.test.sh
     bash {{justfile_directory()}}/scripts/agent-policy.test.sh
     bash {{justfile_directory()}}/scripts/webfetch.test.sh
     bash {{justfile_directory()}}/scripts/private-names-check.sh

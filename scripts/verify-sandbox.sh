@@ -665,6 +665,77 @@ if command -v uv >/dev/null 2>&1; then
   fi
 fi
 
+# ADR-0013: the environment names the venv. Compose sets
+# UV_PROJECT_ENVIRONMENT=.venv-sandbox so this container's uv builds and uses
+# <repo>/.venv-sandbox and never touches <repo>/.venv — the HOST's venv. On this
+# substrate the host and the image are both Ubuntu 24.04, so a shared .venv can
+# LOOK healthy from both sides until one of them switches interpreter and uv
+# silently rebuilds it for the other. Exact value, and RELATIVE: unset is the
+# destructive state; an absolute path would put every repo in one shared venv;
+# any other name is a venv slot the hosts, the hook's disposable carve-out and
+# the scan don't know about. A per-command override by the agent is possible
+# and not visible from here — this proves the container-wide default, which is
+# what compose owns.
+case "${UV_PROJECT_ENVIRONMENT:-}" in
+  .venv-sandbox) pass "UV_PROJECT_ENVIRONMENT=.venv-sandbox (uv here never touches the host's .venv)" ;;
+  "")            fail "UV_PROJECT_ENVIRONMENT is unset — uv here would target each repo's .venv, the HOST's venv, and recreate it (ADR-0013; set in docker-compose.yml, needs a recreate)" ;;
+  /*)            fail "UV_PROJECT_ENVIRONMENT is absolute ($UV_PROJECT_ENVIRONMENT) — every repo would share one venv; it must be the relative .venv-sandbox (ADR-0013)" ;;
+  *)             fail "UV_PROJECT_ENVIRONMENT=$UV_PROJECT_ENVIRONMENT, expected .venv-sandbox — hosts, the deletion hook and workspace-scan all key on that name (ADR-0013)" ;;
+esac
+
+# ADR-0015: the sandbox notice is written into BOTH agents' GLOBAL homes —
+# never into a repo — from one template, on every up/recreate/rebuild/converge:
+#   ~/.claude/CLAUDE.md                        Claude Code, auto-loaded every
+#                                              session from any cwd;
+#   ~/.gemini/config/rules/sandbox-notice.md   agy's global customization root.
+# Three ways this goes wrong, all checked here:
+#   missing        — converge never ran for this profile, so the agent is gated
+#                    but not briefed;
+#   legacy marker  — the BEGIN line still names a sandbox ("managed by macolima"
+#                    / "managed by windows-ai-sandbox"). Two sandboxes writing
+#                    two different markers is what made one sync APPEND a second
+#                    block instead of replacing the first;
+#   stale content  — the markers are right but the text between them is behind
+#                    the template.
+# This script cannot see the repo, so the template's sha256 is handed in by
+# profile.sh's verify arm as NOTICE_SHA. sync-agent-notice.sh writes the region
+# between the markers byte-for-byte from that template, so the digest of the
+# lines strictly between BEGIN and END must equal it. Run by hand (no
+# profile.sh), NOTICE_SHA is empty and the markers are still checked.
+NOTICE_BEGIN='<!-- BEGIN sandbox-notice (managed by the sandbox — do not edit here) -->'
+NOTICE_END='<!-- END sandbox-notice -->'
+for _nf in "$HOME/.claude/CLAUDE.md" "$HOME/.gemini/config/rules/sandbox-notice.md"; do
+  if [[ ! -f "$_nf" ]]; then
+    fail "sandbox-notice missing: $_nf — the agent is gated but not briefed; run \`converge\`"
+    continue
+  fi
+  if grep -qE '^<!-- BEGIN sandbox-notice.*managed by (macolima|windows-ai-sandbox)' "$_nf"; then
+    fail "sandbox-notice in $_nf carries a legacy marker; run \`converge\`"
+    continue
+  fi
+  if ! grep -qF "$NOTICE_BEGIN" "$_nf" || ! grep -qF "$NOTICE_END" "$_nf"; then
+    fail "sandbox-notice markers missing/incomplete in $_nf; run \`converge\`"
+    continue
+  fi
+  if [[ -z "${NOTICE_SHA:-}" ]]; then
+    warn "sandbox-notice present with current markers: $_nf (NOTICE_SHA not provided — marker checks only)"
+    continue
+  fi
+  # awk prints each in-region line with its newline, so the stream is exactly
+  # the template's bytes (content + trailing newline).
+  _nsha=$(awk -v beg="$NOTICE_BEGIN" -v end="$NOTICE_END" '
+    index($0, end) == 1 { inb = 0 }
+    inb { print }
+    index($0, beg) == 1 { inb = 1 }
+  ' "$_nf" | sha256sum | awk '{print $1}')
+  if [[ "$_nsha" == "$NOTICE_SHA" ]]; then
+    pass "sandbox-notice current in $_nf"
+  else
+    fail "sandbox-notice in $_nf is stale vs the template; run \`converge\`"
+  fi
+done
+unset _nf _nsha
+
 if [[ -f /etc/pip.conf ]]; then
   if grep -qE '^[[:space:]]*only-binary[[:space:]]*=[[:space:]]*:all:' /etc/pip.conf; then
     # An exemption is legitimate but must be visible — same discipline as npm's

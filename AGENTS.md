@@ -258,9 +258,15 @@ would hide the injection from the reader rather than from the model.
 Edits to `sandbox_templates/common/agent-notice.md` require
 `bash scripts/agent-notice.test.sh` (13/13, offline). The notice is the one file
 here whose text is read from filesystems where this repo does not exist —
-`sync-agent-notice.sh` deploys it into every consumer repo's `AGENTS.md` and
-every profile's `claude-home/CLAUDE.md` — so two defects are invisible from
-inside this repo, where every path resolves. It locks both: **no repo-relative
+`profile.sh` writes it into every profile's two agent homes,
+`claude-home/CLAUDE.md` and `gemini-home/config/rules/sandbox-notice.md`, on
+every `up`/`recreate`/`rebuild`/`converge`, and **never into a repo**
+([ADR-0015](docs/adr/0015-the-sandbox-briefs-agents-from-their-homes.md)) —
+so two defects are invisible from inside this repo, where every path resolves.
+The text is **shared verbatim with macolima** and sandbox-neutral (`~`, never
+`/root`); edit it in one repo and ferry it, and keep the neutral marker: the
+sync script still recognises the two old sandbox-named markers so a migration
+replaces rather than stacks (`sync-agent-notice.test.sh`, 72/72). It locks both: **no repo-relative
 path** (`scripts/with-egress.sh` shipped in it for months and resolved to
 nothing inside `/workspace/<repo>/AGENTS.md`), and **no host-side mechanism**
 (that same reference was worse than a dead path — the notice exists to say
@@ -279,7 +285,16 @@ Edits to the scanned surfaces in the public-repo check below require
 when `.private-names.local` is unconfigured, so a green run there is not
 proof of coverage — see "Public-repo constraints".
 
-`just test-offline` runs all ten suites, then `just check-upstreams`. Verify
+Edits to `docker-compose.yml`'s `UV_PROJECT_ENVIRONMENT` line, to the hook's
+disposable carve-out, or to `scripts/workspace-scan.py` touch
+[ADR-0013](docs/adr/0013-the-environment-names-the-venv.md): the container's
+uv builds `<repo>/.venv-sandbox`; a repo's plain `.venv` is the **host's** venv
+and is no longer disposable to the hook. Keep the value relative, never add
+`UV_PYTHON`, and run `bash scripts/workspace-scan.test.sh` (49/49, offline).
+`just workspace-scan` is the host-side check over every profile's repos; its
+report names every repo, so write it only to a `*.local.*` path.
+
+`just test-offline` runs all twelve suites, then `just check-upstreams`. Verify
 additionally asserts no `*.bak*` sits beside the seeded skills: `converge_skills`
 prunes only `*.bak.*`, so the unstamped form survives it.
 
@@ -363,7 +378,7 @@ Where a piece of state lives decides whether it survives `docker rm`. The rule:
 | State | Home | Survives `docker rm` |
 |---|---|---|
 | Source code | host bind mount, in git | yes |
-| Python env | `.venv` inside the workspace | yes |
+| Python env | `.venv-sandbox` inside the workspace (the repo's `.venv` is the host's — [ADR-0013](docs/adr/0013-the-environment-names-the-venv.md)) | yes |
 | Models / large data (Ollama store: shared `~/.ai-sandbox/models/ollama`, mounted read-only — the runtime never writes weights) | host dir, gitignored | yes |
 | DB data | named volume | yes |
 | pip / apt / HF caches | writable layer — disposable by design | no |
