@@ -510,8 +510,18 @@ assert "rm under /root/.cache passes silently" \
   '{"tool_name":"Bash","tool_input":{"command":"rm /root/.cache/uv/x.json"}}' pass
 assert "rm in the harness scratchpad passes silently" \
   '{"tool_name":"Bash","tool_input":{"command":"rm /tmp/claude-0/-workspace-p/abc/scratchpad/out1.txt"}}' pass
-assert "rm inside .venv passes silently" \
-  '{"tool_name":"Bash","tool_input":{"command":"rm /workspace/p/.venv/lib/x.so"}}' pass
+assert "rm inside .venv-sandbox passes silently" \
+  '{"tool_name":"Bash","tool_input":{"command":"rm /workspace/p/.venv-sandbox/lib/x.so"}}' pass
+# ADR-0013: a repo's plain .venv is the HOST's venv, bind-mounted in. It used to
+# be carved out as disposable; deleting inside it from the container now asks.
+assert "rm inside .venv (the host's venv) ASKS  <-- LOCK" \
+  '{"tool_name":"Bash","tool_input":{"command":"rm /workspace/p/.venv/lib/x.so"}}' ask "rm-file"
+# The name is matched exactly: every target is wrapped in slashes before the
+# match, so a */.venv*/* glob would have passed these two FILES.
+assert "a file named .venvrc is NOT carved out  <-- LOCK" \
+  '{"tool_name":"Bash","tool_input":{"command":"rm /workspace/p/.venvrc"}}' ask "rm-file"
+assert "a file named .venv-sandbox-notes.md is NOT carved out  <-- LOCK" \
+  '{"tool_name":"Bash","tool_input":{"command":"rm /workspace/p/.venv-sandbox-notes.md"}}' ask "rm-file"
 assert "rm inside node_modules passes silently" \
   '{"tool_name":"Bash","tool_input":{"command":"rm node_modules/.bin/tsc"}}' pass
 assert "rm inside __pycache__ passes silently" \

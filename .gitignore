@@ -36,6 +36,17 @@ AGENTS.local.md
 **/AGENTS.local.md
 **/*.local.json
 .claude/settings.local.json
+# `.local` means machine-local and never committed, whatever the file is. Two
+# shapes: pointer files END in it (`.depot-dir.local`, below), documents keep
+# their real extension after it (`AGENTS.local.md`, work/0030's
+# `scan.local.md`, which names every repo in every profile). The named entries
+# above and below stay for the reader; these two rules are what enforces it.
+# The negation keeps a committed EXAMPLE of a local file visible. Note the
+# older `.local*` rule near the top is a different thing — names STARTING with
+# `.local` — and covers neither shape. Shared with macolima (ADR-0013 rollout).
+*.local
+*.local.*
+!*.local.example*
 # where agentic-conventions is checked out on THIS machine — the only
 # machine-specific fact in the CONTENT half of vendor-tools.sh --check
 .conventions-dir.local
@@ -93,3 +104,4 @@ work/plans/
 .Trashes
 ehthumbs.db
 Thumbs.db
+scratch-prompt.md

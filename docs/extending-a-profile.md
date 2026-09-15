@@ -53,9 +53,9 @@ setting is written host-side by `ensure_state`, not baked into the image.
 | An agent skill | per-profile | `sandbox_templates/skills/<name>/` → seeded to `claude-home/skills/` | yes |
 | A Claude Code plugin / marketplace | per-profile | `claude-home/plugins/` (see below) | yes |
 | Agent tool policy (allow/deny/hooks) | per-profile | `sandbox_templates/claude/` → `claude-home/settings.json` | yes |
-| Standing instructions for every repo in a profile | per-profile | `claude-home/CLAUDE.md` via `scripts/sync-agent-notice.sh` | yes |
+| Standing instructions for every repo in a profile | per-profile | the sandbox notice, written by `profile.sh` into `claude-home/CLAUDE.md` and `gemini-home/config/rules/sandbox-notice.md` on every `up`/`converge` — never into a repo ([ADR-0015](adr/0015-the-sandbox-briefs-agents-from-their-homes.md)) | yes |
 | Standing instructions for one repo | workspace | that repo's `AGENTS.md` / `.claude/` | yes |
-| A Python dependency of a project | workspace | the project's `.venv` + manifest, installed in a `with-egress.sh` window | yes (`.venv` is in the bind mount) |
+| A Python dependency of a project | workspace | the project's manifest + lock, synced into its `.venv-sandbox` in a `with-egress.sh` window; the repo's `.venv` is the host's and the container never touches it ([ADR-0013](adr/0013-the-environment-names-the-venv.md)) | yes (both venvs are in the bind mount) |
 | A Python lib that isn't on PyPI | workspace | `~/repo/<p>/dist/*.whl` — [local-wheels.md](local-wheels.md) | yes |
 | An API key | per-profile | `~/.ai-sandbox/profiles/<p>/secrets.env` | yes, but read at container **create** only |
 | Reachability of a new host | egress | `proxy/allowed_domains.txt` block, tagged `[name]` | yes (repo-level, all profiles) |
@@ -205,12 +205,16 @@ and each is a trap if skipped:
 
 Two things bite in practice. Zero runtime dependencies is an invariant, not a
 starting point — the agent cannot repair a broken dependency, since every
-installer is denied to it. And if the tool's source repo is bind-mounted into a
-profile, its `.venv` may have been created in-container, where console scripts
-carry an absolute `#!/workspace/...` shebang; a host-side build then fails with
+installer is denied to it. And a venv is not portable: since
+[ADR-0013](adr/0013-the-environment-names-the-venv.md) a bind-mounted source
+repo has two — the host's `.venv` and the container's `.venv-sandbox` — and
+nothing shared. Before that rule, a `.venv` created in-container carried
+`#!/workspace/...` console-script shebangs, and a host-side build failed with
 "Failed to spawn: pytest", which reads like a missing dev dependency rather than
-a path mismatch. Point `UV_PROJECT_ENVIRONMENT` outside the checkout rather than
-rebuilding a `.venv` that the container also uses.
+a path mismatch; a venv in that state is a leftover to retire, never to
+rebuild in place. The vendor script keeps its own **absolute**
+`UV_PROJECT_ENVIRONMENT` outside the checkout, and an explicit value there wins
+over anything the environment sets — that is deliberate, so do not "fix" it.
 
 **A tool the whole fleet needs.** Prototype in an attached shell inside a
 `with-egress.sh` window, confirm the install prefix is exec-capable and

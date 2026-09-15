@@ -134,7 +134,7 @@ For `tool_name == "Bash"`, normalise the command (lowercase, strip leading
 | 19 | `git-stash-drop` — `git stash drop` / `clear` | **ask** |
 | 20 | `git-branch-delete` — `git branch -d` / `-D` / `--delete` | **ask** |
 | 21 | `unlink` | **ask** |
-| 22 | `rm-file` — plain non-recursive `rm`, unless EVERY target is disposable (`/tmp`, `/var/tmp`, `/root/.cache`, `.venv`, `node_modules`, `__pycache__`, `.pytest_cache`/`.mypy_cache`/`.ruff_cache`, `scratchpad`, `build`, `dist`, `*.pyc`) | **ask** |
+| 22 | `rm-file` — plain non-recursive `rm`, unless EVERY target is disposable (`/tmp`, `/var/tmp`, `/root/.cache`, `.venv-sandbox` — not `.venv`, the host's, since ADR-0013 — `node_modules`, `__pycache__`, `.pytest_cache`/`.mypy_cache`/`.ruff_cache`, `scratchpad`, `build`, `dist`, `*.pyc`) | **ask** |
 | 13 | `manifest-dep-add` (Edit/Write/MultiEdit) — a dependency **name not already in** `package.json` / `pyproject.toml` / `requirements*.txt` / `Pipfile` | block |
 | 14 | `docs-install-cmd` (Edit/Write/MultiEdit) — an install command naming a package, written into `AGENTS.md`, `CLAUDE.md`, `SKILL.md`, `README.md`, `CONTRIBUTING.md`, `agent-notice.md`, `.cursorrules`, `*.mdc` | **warn** |
 | 15 | `quarantine-tamper` (Edit/Write/MultiEdit, **by path**) — any write to the sandbox's own package-manager config: `/root/.config/pnpm/rc`, `/root/.npmrc`, `/usr/etc/npmrc` | block |

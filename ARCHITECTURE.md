@@ -188,8 +188,9 @@ Deliberately NOT installed in the image: `bubblewrap`, `socat`,
   `sandbox_templates/common/agent-notice.md`.
 - Three CUDA versions coexist and are NOT expected to match: the driver/UMD from
   the Windows host (`/usr/lib/wsl/lib/libcuda.so.1`), the image's `libcudart`
-  (`CUDA_VERSION`, `-base` — no `nvcc`/cuDNN/cuBLAS), and each project's `.venv`
-  runtime from its torch wheel index. Only driver ≥ runtime must hold. Retarget
+  (`CUDA_VERSION`, `-base` — no `nvcc`/cuDNN/cuBLAS), and each project's venv
+  runtime from its torch wheel index (`.venv-sandbox` in the container,
+  [ADR-0013](docs/adr/0013-the-environment-names-the-venv.md)). Only driver ≥ runtime must hold. Retarget
   CUDA per project via its `pyproject.toml` wheel index, not via the image.
   `LD_LIBRARY_PATH=/usr/lib/wsl/lib` (set in the overlay) is what makes the host
   driver win over the image's `cuda-compat-*` shim — do not reorder it.

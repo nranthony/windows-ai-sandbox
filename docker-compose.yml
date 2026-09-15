@@ -83,6 +83,23 @@ services:
     environment:
       - GIT_CONFIG_GLOBAL=/root/.config/git/config
       - SANDBOX_PROFILE=${PROFILE}
+      # UV_PROJECT_ENVIRONMENT=.venv-sandbox: THE ENVIRONMENT NAMES THE VENV
+      # (ADR-0013). /workspace is the host's checkout, so every repo's plain
+      # `.venv` is the HOST's venv. uv, finding a project env it cannot use,
+      # DELETES AND RECREATES it — and on this substrate the failure is QUIET:
+      # host and image are both Ubuntu 24.04 with /usr/bin/python3 at the same
+      # path, so a venv often runs on both sides until one of them switches
+      # interpreter (the image's /opt/uv 3.13, say) and uv silently rebuilds it
+      # for the other. With this set, the container's uv builds and uses
+      # <repo>/.venv-sandbox and never looks at .venv. RELATIVE on purpose: it
+      # resolves against each project root (absolute would put every repo in
+      # one venv). Hosts leave it unset. Not UV_PYTHON, which is `--python` and
+      # would override every repo's .python-version. Compose, not Dockerfile
+      # ENV, for the same recreate-not-rebuild reason UV_LINK_MODE is the
+      # exception: that one is build-relevant, this one only matters where the
+      # bind mounts are. verify-sandbox.sh asserts the exact value; the deletion
+      # hook's disposable carve-out and scripts/workspace-scan.py key on it.
+      - UV_PROJECT_ENVIRONMENT=.venv-sandbox
       # Substrate metadata, NOT GPU wiring (which lives only in the wsl-gpu
       # overlay): profile.sh exports 1 when the host has /dev/dxg, so
       # verify-sandbox.sh can flag a WSL host whose overlay failed to layer

@@ -9,9 +9,10 @@ Convention: `~/repo/<profile>/dist/` holds local `.whl` files (and other build a
 cd ~/repo/<other-repo> && uv build
 cp dist/<lib>-*.whl ~/repo/<profile>/dist/
 
-# container: install into the project venv
-cd /workspace/<project> && source .venv/bin/activate
-uv pip install /workspace/dist/<lib>-*.whl
+# container: install into the project's sandbox venv (ADR-0013). `uv pip`
+# ignores UV_PROJECT_ENVIRONMENT, so name the target; never the host's .venv.
+cd /workspace/<project>
+uv pip install --python .venv-sandbox /workspace/dist/<lib>-*.whl
 ```
 
 The directory is per-profile and lives on the WSL ext4 filesystem — survives container recreate. `dist/` matches the standard Python `.gitignore` entry, so wheels won't get committed by accident if a workspace is itself a git repo.
