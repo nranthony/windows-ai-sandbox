@@ -4,9 +4,10 @@
 - **Deciders:** nranthony + agent
 - **Work item:** `work/0030-venv-and-notice-replay/` (replaying `macolima@work/0011`)
 - **Shared number:** macolima's ADR-0015 is the same decision.
+- **Amended 2026-09-16:** the agy target is dropped — see Consequences.
 - **Affects:** `sandbox_templates/common/agent-notice.md` (now the shared
   neutral text), `scripts/sync-agent-notice.sh` (neutral marker, legacy
-  recognition, `--strip`), `scripts/profile.sh` (two targets on every
+  recognition, `--strip`), `scripts/profile.sh` (the target on every
   `up`/`recreate`/`rebuild`/`converge`; `NOTICE_SHA` into `verify`),
   `scripts/verify-sandbox.sh`, `scripts/workspace-scan.py` (`NOTICE-IN-REPO`).
 
@@ -86,9 +87,18 @@ every `up`, `recreate`, `rebuild` and `converge`, and never into a repo.**
 
 ## Consequences
 
-- The "gated but not briefed" gap closes for agy, subject to the measurement
-  above. If agy does not load the global rules file, the second target is
-  dropped and the gap is re-recorded with the measurement beside it.
+- ~~The "gated but not briefed" gap closes for agy, subject to the measurement
+  above.~~ **Measured 2026-09-16, negative, twice** (agy 1.2.3, nranthony
+  profile, cwd `/workspace/my-next-gen-emory`): a probe word written to
+  `~/.gemini/config/rules/probe.md` was not known to `agy -p "What is the
+  probe word?"`, nor to the same question in interactive `agy`, which instead
+  searched the workspace and read `~/.claude/CLAUDE.md` by tool call before
+  answering "no defined probe word". The documented global root is not
+  loaded in practice. **So the second target is dropped:** `profile.sh` and
+  `verify-sandbox.sh` handle `claude-home/CLAUDE.md` only, and "gated but not
+  briefed" stays the recorded gap for agy. The `gemini-home/config/rules/
+  sandbox-notice.md` files written on 2026-09-15 are stale but harmless; the
+  owner may delete them. Everything else in this decision stands.
 - A repo's `AGENTS.md` is the repo's own text, top to bottom. This repo's
   documentation of a per-repo sync (`AGENTS.md`, `docs/index.md`, the sync
   script's own directory-glob example) is retired with this ADR; the

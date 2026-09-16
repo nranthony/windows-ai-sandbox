@@ -195,3 +195,25 @@ the archive to `docs/_archive/` once the report-back lands on the Mac.
   container venv from here on; live files still pointing at `.venv-linux` or
   a `.venv/bin/…` path inside the workspaces are fixed; host venvs are dealt
   with as and when needed.
+
+## 2026-09-16 — D2 closed negative; agy target dropped
+
+Interactive `agy` 1.2.3 (nranthony, cwd `/workspace/my-next-gen-emory`) asked
+"What is the probe word?" with `~/.gemini/config/rules/probe.md` present: it
+ran Search/Find/Read over the workspace, read `~/.claude/CLAUDE.md` by tool
+call, and answered that no probe word is defined. Same as `-p`. The
+documented global root is not loaded. Per ADR-0015's consequence the gemini
+target is dropped from `profile.sh` (both sites) and `verify-sandbox.sh`;
+the ADR, `sync-agent-notice.sh` header, AGENTS.md, docs/index.md and
+extending-a-profile.md say so. The three profiles' `gemini-home/config/rules/
+sandbox-notice.md` files stay on disk, unchecked and harmless; the owner may
+delete them. Suites green.
+
+Owner also fixed project_zenbu's allow rules (VENV-PATH-ALLOW gone). Still
+flagged: ikigai's and citation_tools' ask fences miss the `python3` / `uv run`
+spellings (ASK-GAP) — policy files, the repo owners' to widen.
+
+**Retirement (R5): the owner deletes each `.venv` / `.venv-linux` as the repo
+comes into use**; the classified list with sizes is in this file above and
+the scan. agentic_admin_research_ga's `.venv` is owner-unknown (no console
+script, `/usr/bin` home) — read it before deciding.

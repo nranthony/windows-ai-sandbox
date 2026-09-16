@@ -683,11 +683,12 @@ case "${UV_PROJECT_ENVIRONMENT:-}" in
   *)             fail "UV_PROJECT_ENVIRONMENT=$UV_PROJECT_ENVIRONMENT, expected .venv-sandbox — hosts, the deletion hook and workspace-scan all key on that name (ADR-0013)" ;;
 esac
 
-# ADR-0015: the sandbox notice is written into BOTH agents' GLOBAL homes —
+# ADR-0015: the sandbox notice is written into Claude Code's GLOBAL home —
 # never into a repo — from one template, on every up/recreate/rebuild/converge:
-#   ~/.claude/CLAUDE.md                        Claude Code, auto-loaded every
-#                                              session from any cwd;
-#   ~/.gemini/config/rules/sandbox-notice.md   agy's global customization root.
+#   ~/.claude/CLAUDE.md   auto-loaded every session from any cwd.
+# (agy's documented global rules root was measured NOT loaded, 2026-09-16, so
+# there is no agy copy to check; a stale ~/.gemini/config/rules/sandbox-notice.md
+# left from before the measurement is harmless and unchecked.)
 # Three ways this goes wrong, all checked here:
 #   missing        — converge never ran for this profile, so the agent is gated
 #                    but not briefed;
@@ -704,7 +705,7 @@ esac
 # profile.sh), NOTICE_SHA is empty and the markers are still checked.
 NOTICE_BEGIN='<!-- BEGIN sandbox-notice (managed by the sandbox — do not edit here) -->'
 NOTICE_END='<!-- END sandbox-notice -->'
-for _nf in "$HOME/.claude/CLAUDE.md" "$HOME/.gemini/config/rules/sandbox-notice.md"; do
+for _nf in "$HOME/.claude/CLAUDE.md"; do
   if [[ ! -f "$_nf" ]]; then
     fail "sandbox-notice missing: $_nf — the agent is gated but not briefed; run \`converge\`"
     continue

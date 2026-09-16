@@ -10,11 +10,10 @@
 # never drifts from the canonical block.
 #
 # WHERE IT IS WRITTEN. Each agent is briefed from its own GLOBAL HOME, never
-# from a repo. Per profile there are exactly two targets, both written by
-# profile.sh on `up`, `recreate`, `rebuild` and `converge`:
+# from a repo. Per profile there is exactly one target, written by profile.sh
+# on `up`, `recreate`, `rebuild` and `converge`:
 #     <profile>/claude-home/CLAUDE.md                  (~/.claude/CLAUDE.md)
-#     <profile>/gemini-home/config/rules/sandbox-notice.md
-#                                      (~/.gemini/config/rules/sandbox-notice.md)
+# (agy's global rules root was measured not loaded — ADR-0015, amended.)
 # A REPO NEVER CARRIES THE BLOCK. A repo's agents may not edit inside the
 # markers, so a block placed in an AGENTS.md is unfixable from inside the repo
 # and goes stale the moment the template moves; and a repo checked out under two
@@ -28,7 +27,6 @@
 #
 # Examples:
 #   scripts/sync-agent-notice.sh ~/.ai-sandbox/profiles/alpha/claude-home/CLAUDE.md
-#   scripts/sync-agent-notice.sh ~/.ai-sandbox/profiles/alpha/gemini-home/config/rules/sandbox-notice.md
 #   scripts/sync-agent-notice.sh --strip ~/repo/alpha      # → ~/repo/alpha/AGENTS.md
 #
 # ONE BEGIN MARKER IS WRITTEN; ANY BEGIN MARKER IS RECOGNISED. The BEGIN line

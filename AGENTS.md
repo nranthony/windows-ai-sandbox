@@ -258,9 +258,9 @@ would hide the injection from the reader rather than from the model.
 Edits to `sandbox_templates/common/agent-notice.md` require
 `bash scripts/agent-notice.test.sh` (13/13, offline). The notice is the one file
 here whose text is read from filesystems where this repo does not exist —
-`profile.sh` writes it into every profile's two agent homes,
-`claude-home/CLAUDE.md` and `gemini-home/config/rules/sandbox-notice.md`, on
-every `up`/`recreate`/`rebuild`/`converge`, and **never into a repo**
+`profile.sh` writes it into every profile's `claude-home/CLAUDE.md` on
+every `up`/`recreate`/`rebuild`/`converge` (agy's documented global rules
+root was measured not loaded, so it gets no copy), and **never into a repo**
 ([ADR-0015](docs/adr/0015-the-sandbox-briefs-agents-from-their-homes.md)) —
 so two defects are invisible from inside this repo, where every path resolves.
 The text is **shared verbatim with macolima** and sandbox-neutral (`~`, never

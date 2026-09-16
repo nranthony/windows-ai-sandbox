@@ -53,7 +53,7 @@ setting is written host-side by `ensure_state`, not baked into the image.
 | An agent skill | per-profile | `sandbox_templates/skills/<name>/` → seeded to `claude-home/skills/` | yes |
 | A Claude Code plugin / marketplace | per-profile | `claude-home/plugins/` (see below) | yes |
 | Agent tool policy (allow/deny/hooks) | per-profile | `sandbox_templates/claude/` → `claude-home/settings.json` | yes |
-| Standing instructions for every repo in a profile | per-profile | the sandbox notice, written by `profile.sh` into `claude-home/CLAUDE.md` and `gemini-home/config/rules/sandbox-notice.md` on every `up`/`converge` — never into a repo ([ADR-0015](adr/0015-the-sandbox-briefs-agents-from-their-homes.md)) | yes |
+| Standing instructions for every repo in a profile | per-profile | the sandbox notice, written by `profile.sh` into `claude-home/CLAUDE.md` on every `up`/`converge` — never into a repo, and not into agy's home (measured not loaded) ([ADR-0015](adr/0015-the-sandbox-briefs-agents-from-their-homes.md)) | yes |
 | Standing instructions for one repo | workspace | that repo's `AGENTS.md` / `.claude/` | yes |
 | A Python dependency of a project | workspace | the project's manifest + lock, synced into its `.venv-sandbox` in a `with-egress.sh` window; the repo's `.venv` is the host's and the container never touches it ([ADR-0013](adr/0013-the-environment-names-the-venv.md)) | yes (both venvs are in the bind mount) |
 | A Python lib that isn't on PyPI | workspace | `~/repo/<p>/dist/*.whl` — [local-wheels.md](local-wheels.md) | yes |

@@ -953,26 +953,20 @@ ensure_state() {
   # silently lagged its template. File-scoped, and per-agent overwrite/merge —
   # see the descriptor table.
   converge_agent_policies
-  # Refresh the managed sandbox-notice in BOTH agents' GLOBAL homes, from the
-  # one template, so agents see the capabilities and prohibitions in any repo —
-  # and so the notice never has to live inside a repo, where it goes stale and
-  # no repo agent may edit it (ADR-0015):
-  #   - ~/.claude/CLAUDE.md            — Claude Code's global memory, auto-loaded
-  #                                      every session, any cwd;
-  #   - ~/.gemini/config/rules/sandbox-notice.md
-  #                                    — agy's global customization root; per its
-  #                                      embedded docs, rules under `rules/` of
-  #                                      any root "apply to all projects and
-  #                                      workspaces" (measured status recorded in
-  #                                      work/0030).
-  # Rewrites only the marked block, idempotently; sync_one mkdir -p's the
-  # rules/ leaf. Update and strip write INTO the target, so the mode survives.
+  # Refresh the managed sandbox-notice in Claude Code's GLOBAL home
+  # (~/.claude/CLAUDE.md, auto-loaded every session from any cwd), from the one
+  # template, so agents see the capabilities and prohibitions in any repo — and
+  # so the notice never has to live inside a repo, where it goes stale and no
+  # repo agent may edit it (ADR-0015). agy gets NO copy: its documented global
+  # rules root (~/.gemini/config/rules/) was measured twice on 2026-09-16 —
+  # `agy -p` and interactive `agy` 1.2.3, a probe word in rules/probe.md — and
+  # never loaded; it went looking with Search/Read instead. "Gated but not
+  # briefed" stays the recorded gap for agy (work/0030 notes).
+  # Rewrites only the marked block, idempotently. Update and strip write INTO
+  # the target, so the mode survives.
   if [[ -f "$SCRIPT_DIR/scripts/sync-agent-notice.sh" ]]; then
     bash "$SCRIPT_DIR/scripts/sync-agent-notice.sh" "$p/claude-home/CLAUDE.md" >/dev/null \
       || warn "could not sync sandbox-notice into $p/claude-home/CLAUDE.md"
-    bash "$SCRIPT_DIR/scripts/sync-agent-notice.sh" \
-      "$p/gemini-home/config/rules/sandbox-notice.md" >/dev/null \
-      || warn "could not sync sandbox-notice into $p/gemini-home/config/rules/"
   fi
   if [[ -f "$p/config/git/config" ]] && \
      grep -qE 'helper\s*=.*(vscode-server|vscode-remote-containers|git-credential-manager)' \
@@ -2104,16 +2098,14 @@ PY
     # the live values, capturing what it replaced to settings.discarded.json.
     converge_agent_policies "$@"
     converge_skills
-    # The sandbox-notice goes into BOTH agents' GLOBAL homes, from the one
-    # template, and never into a repo (ADR-0015) — the same two targets
-    # `ensure_state` writes on up/recreate/rebuild.
+    # The sandbox-notice goes into Claude Code's GLOBAL home, from the one
+    # template, and never into a repo (ADR-0015) — the same target
+    # `ensure_state` writes on up/recreate/rebuild. (No agy copy: measured not
+    # loaded, see ensure_state.)
     if [[ -f "$SCRIPT_DIR/scripts/sync-agent-notice.sh" ]]; then
       bash "$SCRIPT_DIR/scripts/sync-agent-notice.sh" \
         "$PROFILES_ROOT/$PROFILE/claude-home/CLAUDE.md" >/dev/null \
         || warn "could not sync sandbox-notice into claude-home/CLAUDE.md"
-      bash "$SCRIPT_DIR/scripts/sync-agent-notice.sh" \
-        "$PROFILES_ROOT/$PROFILE/gemini-home/config/rules/sandbox-notice.md" >/dev/null \
-        || warn "could not sync sandbox-notice into gemini-home/config/rules/"
     fi
     case " $* " in
       *" --defaults "*) ok "policy + skills converged for '$PROFILE' from sandbox_templates/ (preferences RESET to template defaults)" ;;
