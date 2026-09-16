@@ -170,3 +170,28 @@ its working tree, uncommitted until the owner's sync). Left for later waves:
 **Still open:** owner's sync + commit in my-next-gen-emory; D1 (VS Code), D2
 (agy measurement); R5 retirements after a soak; R6 global CLAUDE.md line;
 the archive to `docs/_archive/` once the report-back lands on the Mac.
+
+## 2026-09-16 — D1, D2, emory closed, retirements decided
+
+- **my-next-gen-emory** committed `4924714` after the owner's sync: `just
+  stats` and `just test` (207 passed) on `.venv-sandbox` in the container.
+- **D1 (VS Code):** attached windows default to
+  `${workspaceFolder}/.venv-sandbox/bin/python`. README §3 updated; the
+  Windows user `settings.json` is the owner's to change, plus a one-time
+  re-pick per workspace that already chose an interpreter.
+- **D2 (agy global rules): NEGATIVE as measured.** A probe file in
+  `~/.gemini/config/rules/probe.md` ("The probe word is ZEBRAFISH") was not
+  reflected by `agy -p "What is the probe word?"` (it answered with the
+  generic meaning of "probe word"), run from `/workspace/my-next-gen-emory`
+  in the nranthony container. Caveat before acting on it: `-p` is the
+  non-interactive mode, and whether it loads rules files at all is not
+  established; the one-line interactive check (`agy`, same question) is the
+  cheap way to rule that out. Until then the second target stays; if the
+  interactive probe is also negative, ADR-0015's consequence applies: drop
+  the gemini target from `profile.sh` (both sites) and `verify-sandbox.sh`,
+  and re-record the "gated but not briefed" gap with the measurement.
+- **Owner decision on R5:** no soak. Every container-built venv sitting in a
+  `.venv` slot and every `.venv-linux` goes now; `.venv-sandbox` is the only
+  container venv from here on; live files still pointing at `.venv-linux` or
+  a `.venv/bin/…` path inside the workspaces are fixed; host venvs are dealt
+  with as and when needed.

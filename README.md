@@ -240,7 +240,7 @@ identically if you'd rather skip `just`; onboarding lives in
 ### Inside the container
 - `claude`, `gh`, `glab`, `uv`, `python3`, `node` pre-installed.
 - `/workspace` = `~/repo/<profile>/` (many repos).
-- `/root/.venv` (Python 3.12) — VS Code's default interpreter for smoke tests.
+- `/root/.venv` (Python 3.12) — the image's baseline interpreter for smoke tests in a repo with no venv. VS Code's default interpreter is each repo's `.venv-sandbox` (ADR-0013); a workspace that already picked an interpreter needs a one-time re-pick (*Python: Select Interpreter*).
 - Claude's `Bash` tool is restricted by `sandbox_templates/claude/claude-settings.json` (pip/uv/git push/curl/ssh denied). The interactive zsh is NOT restricted — install deps yourself during planning, then hand off to the agent.
 
 ---
@@ -292,7 +292,7 @@ keyed by image. Configure these once:
   "forwardPorts": [8080, 8501, 8188],
   "settings": {
     "remote.autoForwardPorts": false,
-    "python.defaultInterpreterPath": "/root/.venv/bin/python",
+    "python.defaultInterpreterPath": "${workspaceFolder}/.venv-sandbox/bin/python",
     "terminal.integrated.defaultProfile.linux": "zsh"
   }
 }
