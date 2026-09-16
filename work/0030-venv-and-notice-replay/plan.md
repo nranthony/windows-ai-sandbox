@@ -19,7 +19,7 @@ host `.venv` is itself the destructive command — quietly, on this substrate.
 | D2 | agy global-rules measurement (spec §4) | owner (needs sign-in) | open |
 | R5 | Retire: the 13 `SANDBOX-VENV-IN-HOST-SLOT` venvs, the 3 `.venv-linux` slots — classified by shebang, deleted by name, after a soak | owner | open |
 | R6 | Hosts: no `UV_PROJECT_ENVIRONMENT` export anywhere (checked clean 2026-09-15); global `~/.claude/CLAUDE.md` venv line per macolima plan D2 | owner | open |
-| report | Into macolima `work/0008/notes.md` and `work/0011/notes.md` (spec §5 of each replay) | agent | open |
+| report | Into macolima `work/0008/notes.md` and `work/0011/notes.md` (spec §5 of each replay) | agent | **done 2026-09-16** (in the macolima checkout here; the Mac pulls it) |
 
 **Rollback** until R5: remove the compose line and recreate. Old venvs are
 still on disk; a stray `.venv-sandbox` is harmless.

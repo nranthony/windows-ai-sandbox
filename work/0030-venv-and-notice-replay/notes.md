@@ -147,3 +147,26 @@ through `with-egress.sh` (audit line, age gate), or the agent runs any
 `uv run …`, which syncs implicitly with no audit line — the exact hole
 work/0025 describes, now observed. The handoffs should have said so; future
 ones name the owner's route.
+
+## 2026-09-16 — drafts committed, re-scan green, myconv re-vendored
+
+**The five untracked AGENTS.md drafts, one commit each:** pfm-sfi `d32fa4c`,
+therapod/core `1d4623d`, wearable_publications `d3ed141` (pure renames of the
+committed CLAUDE.md); job_hunt_rag `6c6c32a` (new guidance where none was
+committed); my-agentic-tools `885a817` — the 822-line CLAUDE.md becomes a
+109-line AGENTS.md and its per-client walkthroughs are kept verbatim as
+`docs/implementation/CLIENT_USAGE_REFERENCE.md`, linked from the index.
+
+**Re-scan (52 repos): both done-checks exit 0.** `NOTICE-IN-REPO` 0;
+`HARDCODED-VENV-LINUX,OS-VENV-SELECT` 0 (my-next-gen-emory's edits are in
+its working tree, uncommitted until the owner's sync). Left for later waves:
+`DOC-VENV-LINUX` 3, `VENV-PATH-IN-CODE` 4, `LEGACY-VENV-SLOT` 3 and
+`SANDBOX-VENV-IN-HOST-SLOT` 13 (R5), the ignore/pin hygiene counts.
+
+**myconv re-vendored 0.8.0 → 0.9.0** (`just vendor-tools`, `tools-check` OK,
+`test-offline` green). Skill tree only, so it reaches a profile on its next
+`up`/`converge`; no rebuild. Its scaffold no longer plants a notice block.
+
+**Still open:** owner's sync + commit in my-next-gen-emory; D1 (VS Code), D2
+(agy measurement); R5 retirements after a soak; R6 global CLAUDE.md line;
+the archive to `docs/_archive/` once the report-back lands on the Mac.
