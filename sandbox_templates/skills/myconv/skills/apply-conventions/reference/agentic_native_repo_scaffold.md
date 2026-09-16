@@ -1,6 +1,6 @@
 # Agent-Native Repo Scaffold (generic)
 
-A portable starting layout for any repository, on any system or container, that you want agents to operate in well. This intentionally ignores language, build, and runtime specifics (those belong in per-package files) and focuses on the **administrative layer**: instructions, provenance, decisions, documentation, and the bookkeeping that lets an agent orient itself and know how to move forward.
+A portable starting layout for any repository, on any system or container, that you want agents to operate in well. This intentionally ignores language, build, and runtime specifics (those belong in per-package files) and focuses on the **administrative layer**: instructions, provenance, decisions, documentation, and the bookkeeping that lets an agent orient itself and know how to move forward. The one stated exception is **machine-local state**: what a checkout must keep out of the tree when more than one environment sees it. It is covered in "Machine-local state" below, because it concerns the checkout, not the language.
 
 Two ideas carry the whole thing:
 
@@ -53,7 +53,7 @@ Two ideas carry the whole thing:
     └── <corpus>/              #   expected.json (hand-edited, enforced) + measured.json/.md (regenerated)
 ```
 
-Per-language / per-package directories (each with its own `AGENTS.md` + generated `CLAUDE.md`) hang off this as needed; they hold the build/test/env specifics and are deliberately out of scope here.
+Per-language / per-package directories (each with its own `AGENTS.md` + generated `CLAUDE.md`) hang off this as needed; they hold the build/test/env specifics and are deliberately out of scope here. The one exception is keeping machine-local state, project venvs included, out of a checkout that several environments share. It is covered in "Machine-local state" below.
 
 ---
 
@@ -229,6 +229,79 @@ same commit. If you ever want a check, prefer a read-only CI assertion that *fai
   enforcement with an environment notice in `AGENTS.md` (next section).
 
 State the intent in `AGENTS.md` ("why"); enforce it in hooks/CI ("can't"). Don't conflate "the agent was told" with "the control exists."
+
+---
+
+## Machine-local state (the one runtime exception)
+
+Everything else here leaves runtime specifics to per-package files. This section is the
+exception because it concerns the **checkout**, not the language. When more than one
+environment sees one working tree, for example a host and a sandbox container that
+bind-mounts it, something one environment builds in the tree can be unusable, or
+destructive, in the other. The decision record is ADR-0017 in the conventions repo
+(`docs/adr/0017-the-environment-names-the-venv.md`).
+
+**`.local` means machine-local, never committed, for any file in every repo.** By
+convention the suffix sits in one of two positions (`foo.local`, `foo.local.json`), so
+the ignore rule is a pair. A third line re-includes committed examples, which document
+the local file for every clone:
+
+```gitignore
+*.local
+*.local.*
+!*.local.example*
+```
+
+Ignoring a file does not untrack it. Before adding the pair to an existing repo, list
+what it would match (`git ls-files | grep -E '\.local($|\.)'`) and treat any hit as a
+decision. Any other legitimate collision gets a per-repo `!` line.
+
+**Project virtualenvs: the environment names the venv, never the repo.** A venv is
+bound to the interpreter that built it: `pyvenv.cfg`'s `home` names it, and every
+console script carries an absolute shebang. uv deletes and recreates a project env whose
+interpreter it can't use. So two environments that both default to `.venv` in one
+checkout destroy each other's venv on every `uv run`.
+
+- **Who sets the name.** A sandbox container exports
+  `UV_PROJECT_ENVIRONMENT=.venv-sandbox`, and a host leaves it unset and gets `.venv`.
+  The sandbox tool sets it, not the repo. A relative value resolves against the project
+  root, so one value serves every repo. Only two *hosts* sharing one checkout (a synced
+  folder, or Windows-native and WSL on the same files) need names of their own, and only
+  for that pair.
+- **Never hard-code a venv path.** Run things through `uv run`. Where a path is
+  unavoidable (a justfile variable, a shell script), derive it as
+  `${UV_PROJECT_ENVIRONMENT:-.venv}`. Never choose a venv by OS: a Linux host and a
+  Linux container are both "linux".
+- **Ignore every name:** `.venv*/`. uv drops a `*` `.gitignore` into each venv it builds,
+  but `python -m venv` before 3.13 does not.
+- **Pin the interpreter** in a tracked `.python-version`, to a version every environment
+  the repo runs in actually has. A closed-egress container can't download one, and
+  unpinned, each environment picks its own newest.
+- **Touch only your own environment's venv.** `pyvenv.cfg`'s `home` line says whose it
+  is. Rebuild a venv; never rename or move one.
+
+**Permission rules around interpreters.** Rules match literal command text and can't
+read environment variables, so `python3 x.py` doesn't match a `python x.py` rule. The two
+kinds of rule therefore get opposite treatment:
+
+- **Allow** rules grant permission, so fewer spellings is safer. Use the `uv run …` form
+  only, and never put a venv path in an allow rule.
+- **Ask** and **deny** rules fence a command with side effects, so every spelling must
+  be caught. A spelling the fence misses falls through to whatever broader allow exists,
+  and under an auto-approving mode that means no person ever sees it. For a script `X`:
+
+  ```
+  Bash(python*X*)
+  Bash(uv run *X*)
+  Bash(.venv*/bin/python*X*)
+  Bash(./.venv*/bin/python*X*)
+  ```
+
+  Add `Bash(X*)` and `Bash(./X*)` if `X` is executable, and `Bash(python* -m <module>*)`
+  if it can be imported as a module. An explicit list of spellings is fine too, as long
+  as it's complete; the usual miss is `python3`. An absolute-path spelling can't be
+  fenced reliably, so a command with irreversible effects should also do a dry run
+  unless given an explicit flag.
 
 ---
 
@@ -428,7 +501,7 @@ deleted. Archived items are historical records, never current intent.
 1. Add `AGENTS.md` (use the template), `ARCHITECTURE.md`, `README.md`, `CHANGELOG.md`, `CONTRIBUTING.md`, `CODEOWNERS`.
 2. Create `docs/adr/` with the template and a first ADR — `0001-record-architecture-decisions.md` — so the practice is self-documenting.
 3. Add `.github/pull_request_template.md` and a CI workflow.
-4. Add `.claude/settings.json` (permissions + hooks) and the PR template; gitignore `AGENTS.local.md`, `**/AGENTS.local.md`, `.claude/settings.local.json`.
+4. Add `.claude/settings.json` (permissions + hooks) and the PR template. Gitignore machine-local state: the `.local` pair (which covers `AGENTS.local.md` at any depth and `.claude/settings.local.json`) and `.venv*/`. For a Python project, also add a tracked `.python-version`. See "Machine-local state".
 5. Write the thin `CLAUDE.md` (`@AGENTS.md`) next to each `AGENTS.md` by hand — no generator (see "Entrypoint wiring").
 6. Keep `AGENTS.md` short. The moment it sprawls, move detail into a skill, an ADR, or a nested `AGENTS.md`.
 
@@ -460,8 +533,9 @@ Run it as five phases:
    `IN_TRANSIT` doc) and stop. Human review is mandatory before any edit that changes
    enforcement (`CODEOWNERS`, CI, branch protection) or touches security-sensitive files.
 5. **Apply in safe order, small commits.** Additive/mechanical first (split into
-   `AGENTS.md`, add `ARCHITECTURE.md`, nested entry points, gitignore) as one reviewable
-   commit; structural/risky changes (renames, path rewrites, CI) as separate *tested*
+   `AGENTS.md`, add `ARCHITECTURE.md`, nested entry points, gitignore — including the
+   machine-local lines from "Machine-local state", after listing any tracked file they
+   would match) as one reviewable commit; structural/risky changes (renames, path rewrites, CI) as separate *tested*
    commits. Clean tree, review `git diff`, no push without approval. Optionally record the
    adoption as a first ADR so the change documents itself.
 

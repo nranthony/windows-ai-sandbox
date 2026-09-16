@@ -78,6 +78,24 @@ and treat installing it as the fix, rather than pasting copies.
    to be evidence of. If the repo skips `work/`, drop `plansDirectory` from the settings
    template (and the matching `work/plans/` line from `.gitignore`) — it points at a
    directory that won't exist.
+
+   **Check machine-local state in every repo; it is not a tier.** See the blueprint's
+   "Machine-local state" section, and decision record ADR-0017
+   (`docs/adr/0017-the-environment-names-the-venv.md` in the conventions repo). Report
+   each of these as a gap:
+   - A `.gitignore` missing either `.local` shape (`*.local`, `*.local.*`).
+   - Before proposing the pair, run `git ls-files | grep -E '\.local($|\.)'`. Ignoring a
+     file does not untrack it, so any hit is a decision to raise, not a silent change.
+
+   Where the repo has a Python project environment, also check for:
+   - A `.gitignore` that does not cover `.venv-sandbox/`.
+   - No tracked `.python-version`.
+   - A hard-coded `.venv/bin/` or `.venv-*/bin/` in any tracked file.
+   - A venv chosen by OS (`os()`, `platform`, `uname`).
+   - A venv path in a permission **allow** rule.
+   - For each script named in an **ask** or **deny** rule, any spelling from the
+     blueprint's fence that no rule matches. Generate the spellings and test each one:
+     the common miss, `python3`, is invisible to someone just reading the rules.
 4. **Settle the tracker link — ask, don't assume.** A repo is *linked* when a committed
    pins file (`.myclickup.toml`) exists with its workspace ID filled in; see the
    blueprint's external-tracker bullet for the three states. Resolve it now rather than
