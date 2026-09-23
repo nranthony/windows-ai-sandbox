@@ -108,7 +108,8 @@ it is the public text — and your own repo sparingly.
 
 ## What happens to your report
 
-So expectations are set: a triage agent works `feedback/` in batch — collates, groups
+So expectations are set: a triage agent works `feedback/` in batch, with
+`/myconv:triage-skill-feedback` — collates, groups
 repeats by slug, verifies each claim against the current text, and assesses
 viability. Mechanical fixes are applied directly, with your report named in the
 commit. Direction-setting proposals are presented to a human for discussion and

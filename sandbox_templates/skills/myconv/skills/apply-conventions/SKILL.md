@@ -59,10 +59,13 @@ and treat installing it as the fix, rather than pasting copies.
    whether `docs/adr/` or `work/` already exist, whether the repo is solo or reviewed, whether
    CI exists, and what the repo's own conventions already look like. Do this before reading
    the blueprint, so you assess the blueprint against reality rather than the reverse.
-   Resolve every relative path and named script an existing `AGENTS.md` cites — including
-   inside managed sandbox-notice markers, which are verified read-only: a dead reference
-   there is still a dead instruction. Report it (the fix belongs upstream, to the sandbox
-   tool); never edit inside the markers.
+   Resolve every relative path and named script an existing `AGENTS.md` cites. A managed
+   sandbox-notice block (`<!-- BEGIN sandbox-notice … -->`) is a finding in its own right:
+   the sandbox briefs its agents from each agent's global home now, so a block sitting in
+   a repo is stale by definition. Report it for removal by whoever owns the sandbox, and
+   report any dead reference you find inside it — reading inside the markers is fine,
+   editing inside them is not, and never add a block to a repo. See the blueprint's
+   "Environment notice" section.
 2. **Read the blueprint** — `reference/agentic_native_repo_scaffold.md`, at minimum its layout
    and "Not everything at once — lean core vs. opt-in" sections.
 3. **Choose the tier, and say why.** Default to the lean core: `AGENTS.md` + thin `CLAUDE.md` +

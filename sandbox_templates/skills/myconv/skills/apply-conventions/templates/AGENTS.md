@@ -10,9 +10,10 @@
     Opt-in pieces (work/, runbooks, CHANGELOG) live in the commented block —
     move a line out of the comment only when the repo actually adopts the piece.
 
-  Optional: tooling (e.g. <your-sandbox-tool>) may inject a managed notice block
-  here describing shell restrictions. Leave a BEGIN/END marker pair if you use it;
-  do not hand-edit managed blocks.
+  No sandbox notice belongs here. A sandbox briefs its agents from each agent's
+  global home, not from a repo. If you meet a managed BEGIN/END sandbox-notice
+  block in an existing repo, it is stale: report it for removal by whoever owns
+  the sandbox, never edit inside the markers, and never add one.
 
   Optional: cite where these conventions came from, if that helps this repo's
   contributors — e.g. a "Conventions: <url>" line below. Skip it when an external

@@ -71,9 +71,11 @@ add the rest only when a concrete need appears. Adopt in this order:
   `CONTRIBUTING.md`, the PR template, CI gate checks. Solo, these are overhead — and
   `CODEOWNERS` with the wrong owner actively changes approval requirements, so don't add
   it reflexively.
-- **Opt-in — sandboxed execution (add only if agents edit this repo inside a restricted
-  sandbox):** a machine-managed environment notice at the top of `AGENTS.md` — see
-  "Environment notice" below.
+- **Sandboxed execution — nothing to add.** A repo edited by agents inside a restricted
+  sandbox carries nothing on the sandbox's behalf: the sandbox briefs its agents from
+  each agent's global home, before any repo is opened, so `AGENTS.md` is the repo's own
+  text top to bottom. See "Environment notice" below for the block you may still *meet*
+  in a repo written before that.
 - **Opt-in — heavier provenance (add for long-lived or high-autonomy repos):**
   `docs/design/` and `work/` — one numbered folder per unit of in-flight work,
   **proposals included**: an item starts as `work/NNNN-slug/proposal.md`
@@ -225,8 +227,9 @@ same commit. If you ever want a check, prefer a read-only CI assertion that *fai
 - **`.claude/settings.json`** — permission rules that set sensitive paths to `ask`/`deny`, and `PreToolUse` hooks that block edits to protected files. Commit this so it's shared.
 - **`CODEOWNERS` + branch protection** — force human review on high-risk paths.
 - **CI gate checks** — run the required verification whenever a protected path changes.
-- **Sandbox deny-lists** — when agents run inside a restricted sandbox, pair the
-  enforcement with an environment notice in `AGENTS.md` (next section).
+- **Sandbox deny-lists** — when agents run inside a restricted sandbox, the deny-list is
+  the enforcement and the sandbox supplies the matching advice itself, in each agent's
+  global home. The repo writes nothing for it (next section).
 
 State the intent in `AGENTS.md` ("why"); enforce it in hooks/CI ("can't"). Don't conflate "the agent was told" with "the control exists."
 
@@ -305,23 +308,29 @@ kinds of rule therefore get opposite treatment:
 
 ---
 
-## Environment notice (opt-in: sandboxed repos)
+## Environment notice (it lives in the agent's home, never in a repo)
 
 When agents edit a repo from inside a restricted sandbox (denied network, blocked
 installs, no remote git, …), the sandbox's deny-list is the enforcement — but an agent
 that only discovers a restriction by hitting permission-denied will waste turns
 retrying, hunting for bypasses, or silently giving up. The fix is an **environment
-notice**: a block at the **very top** of the root `AGENTS.md`, before anything else,
-because it changes what every instruction below it means.
-
-This is the "advice" half of the previous section's advice-vs-enforcement split: the
+notice**, the "advice" half of the previous section's advice-vs-enforcement split: the
 sandbox blocks the action; the notice tells the agent *not to fight the block*.
 
-Shape:
+**The notice is not a repo's file.** The sandbox writes it into each agent's global home
+on every `up`/`converge` — `~/.claude/CLAUDE.md` for Claude Code,
+`~/.gemini/config/rules/sandbox-notice.md` for agy — so it is in context before any repo
+is opened, and one refresh reaches every checkout on the machine at once. Never place a
+block in a repo, and never instruct a repo to carry one; `AGENTS.md` is the repo's own
+text, top to bottom.
+
+The section stays here because a repo written before that rule may still carry a block,
+and because the content rules below are what make any notice work, wherever it is
+generated. Recognise the block by its markers:
 
 ```markdown
-<!-- BEGIN sandbox-notice (managed by <sandbox-tool> — do not edit here) -->
-## ⚠️ This repo may be edited by an agent inside `<sandbox-tool>`
+<!-- BEGIN sandbox-notice (managed by the sandbox — do not edit here) -->
+## ⚠️ Repos here may be edited by an agent inside a sandbox
 
 The agent's shell is restricted. The following **fail with permission-denied** —
 do not attempt them, retry them, or hunt for a workaround; treat them as a human step:
@@ -334,8 +343,13 @@ do not attempt them, retry them, or hunt for a workaround; treat them as a human
 <!-- END sandbox-notice -->
 ```
 
-Three content rules make the notice effective; the exact denied-command list matters
-less than these:
+Two legacy marker spellings exist — `managed by macolima …` and
+`managed by windows-ai-sandbox …`. The sandboxes' sync scripts recognise them for
+migration only; read them as the same block.
+
+Four content rules make a notice effective — they are for whoever generates one, which
+is the sandbox tool and not this repo. The exact denied-command list matters less than
+these:
 
 1. **State what fails, framed as "don't retry."** Name the denied commands so the
    agent recognizes the denial as policy, not a transient error — and doesn't reach
@@ -348,32 +362,33 @@ less than these:
 4. **Name the ask, not the host-side mechanism.** A human step is discharged outside
    the sandbox, so the notice says *that* a human does it and who to ask — never *how*
    they do it on the host. Host-side scripts, wrapper commands, and paths that live in
-   the sandbox tool's own repo are meaningless in the repo the notice ships in: the
-   path resolves against the wrong tree, and it drifts the moment the host tooling is
-   renamed. The test is frame of reference, not repo-relativity — everything a notice
-   names must resolve in the environment where the reading agent stands. Absolute
-   in-sandbox paths, service hostnames on the sandbox's network, and the repo's own
-   files all pass; a `scripts/…` helper that exists only in the sandbox tool's
-   checkout does not.
+   the sandbox tool's own repo are meaningless where the notice is read: the path
+   resolves against the wrong tree, and it drifts the moment the host tooling is
+   renamed. The test is frame of reference — everything a notice names must resolve in
+   the environment where the reading agent stands. Absolute in-sandbox paths and service
+   hostnames on the sandbox's network pass; a `scripts/…` helper that exists only in the
+   sandbox tool's checkout does not. Written into an agent's home the notice has no repo
+   around it at all, so a repo-relative path never resolves and must not appear.
 
-Ownership rules:
+What to do with a block you find in a repo:
 
-- **The sandbox tool owns the block.** The `BEGIN/END … (managed by <tool>)` markers
-  mean the tool regenerates it when the sandbox config changes; humans and agents
-  never edit inside the markers. This is why the block's *content* is deliberately
-  not templated in this repo — a copied deny-list drifts from the real sandbox config
-  the first time the sandbox is tweaked, and a stale notice is worse than none.
+- **Treat it as stale, on sight.** It predates the move to the agent homes and nothing
+  refreshes it, so it describes a sandbox config that has since moved on. This is
+  measured, not cautious: on one machine eight repos carried a block, none had been
+  refreshed, and all of them contradicted the repo around them.
+- **Report it; the owner removes it.** The `BEGIN/END … (managed by …)` markers mean the
+  sandbox tool owns the text, so the fix is removal by that owner's own tooling — it
+  scans for a block left in a repo and strips it. Say where the block is and stop there.
+- **Never edit inside the markers** — including to "fix" a stale one. That is the rule
+  the per-repo route died of: a repo agent may not edit inside the markers, so a block
+  that had gone stale was unfixable from inside the repo it sat in.
 - **Never editing inside the markers is not never looking inside them.** Read-only
-  verification of the block is both safe and necessary: resolve every path and named
-  script the notice cites, exactly as for the rest of `AGENTS.md`. A dead reference
-  there is still a dead instruction to whoever reads it next. Report it as a defect
-  in the sandbox tool's config — the fix belongs upstream, in the block's generator —
-  and don't edit inside the markers.
-- **The notice is per-repo, per-environment.** Repos not edited in a sandbox get no
-  block at all; don't add an empty or speculative one.
-- If the sandbox has no managing tool (a hand-maintained setup), the block can be
-  hand-written — keep the markers anyway, name the config it mirrors, and update it
-  in the same commit as any sandbox-config change.
+  verification is safe and still worth doing: resolve every path and named script the
+  block cites, exactly as for the rest of `AGENTS.md`, and report any dead reference
+  along with the block itself.
+- **Never add a block to a repo**, in any form — not empty, not speculative, not
+  hand-written for a sandbox that has no managing tool. A repo edited in a sandbox and a
+  repo that never sees one carry the same thing: nothing.
 
 ---
 
@@ -522,9 +537,10 @@ Run it as five phases:
 2. **Gap map (read-only).** For each scaffold piece, record `present (where) / partial /
    absent` → `keep as-is / adopt / adapt / skip`, filtered through the lean-core tiers.
    Reconcile names here: if the repo already has `docs/decisions/`, align to it — don't add
-   a parallel `docs/adr/`. Resolve every relative path and named script `AGENTS.md` cites —
-   including inside managed sandbox-notice markers, which are verified read-only: a dead
-   reference there is reported upstream to the sandbox tool, never edited in place.
+   a parallel `docs/adr/`. Resolve every relative path and named script `AGENTS.md` cites.
+   A managed sandbox-notice block is itself a finding — stale by definition, reported for
+   removal by the sandbox's owner (see "Environment notice"). Read inside its markers to
+   check what it cites, never edit inside them, and never add one.
 3. **Reconcile the entry point.** If a *substantive* `CLAUDE.md` exists, **promote its
    content to `AGENTS.md` and leave `CLAUDE.md` as the two-line stub** — a move, never a
    flatten. If both exist, merge deliberately. Keep the root lean; push detail into nested
